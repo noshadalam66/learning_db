@@ -1,0 +1,52 @@
+name: schema
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  migrate-and-verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: learning
+          POSTGRES_USER: learning
+          POSTGRES_PASSWORD: learning
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U learning -d learning"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: learning
+      PGUSER: learning
+      PGPASSWORD: learning
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply migrations
+        run: ./scripts/migrate.sh
+
+      - name: Migrations are idempotent
+        run: ./scripts/migrate.sh | grep -q 'Done. 0 migration(s) applied.'
+
+      - name: Load seed data
+        run: ./scripts/seed.sh
+
+      - name: Seeds are idempotent
+        run: ./scripts/seed.sh
+
+      - name: Verify
+        run: ./scripts/verify.sh

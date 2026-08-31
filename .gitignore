@@ -1,0 +1,18 @@
+# Environment
+.env
+.env.local
+*.local
+
+# Dumps & backups
+*.dump
+*.sql.gz
+backups/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
