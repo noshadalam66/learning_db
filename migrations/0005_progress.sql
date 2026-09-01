@@ -1,144 +1,165 @@
 -- ===========================================================================
--- 0005 : progress schema  --  owned by the Progress Service
+-- 0005 : progress  --  owned by the Progress Service
 -- Enrolments, per-lesson progress and resume points.
 -- ===========================================================================
 
-BEGIN;
-
 CREATE TABLE progress.enrolments (
-  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id           uuid NOT NULL,
-  course_id         uuid NOT NULL,
-  state             public.enrolment_state NOT NULL DEFAULT 'active',
-  progress_percent  numeric(5,2) NOT NULL DEFAULT 0,
-  lessons_completed integer NOT NULL DEFAULT 0,
-  lessons_total     integer NOT NULL DEFAULT 0,
-  last_lesson_id    uuid,                        -- "continue where you left off"
-  enrolled_at       timestamptz NOT NULL DEFAULT now(),
-  last_activity_at  timestamptz NOT NULL DEFAULT now(),
-  completed_at      timestamptz,
-  expires_at        timestamptz,
+  id                CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
+  -- identity.users.id and catalog.courses.id - deliberately not foreign keys.
+  user_id           CHAR(36) CHARACTER SET ascii NOT NULL,
+  course_id         CHAR(36) CHARACTER SET ascii NOT NULL,
+  state             ENUM('active','completed','expired','cancelled') NOT NULL DEFAULT 'active',
+  -- Denormalised; refreshed by progress.refresh_enrolment_rollup().
+  progress_percent  DECIMAL(5,2) NOT NULL DEFAULT 0,
+  lessons_completed INT NOT NULL DEFAULT 0,
+  lessons_total     INT NOT NULL DEFAULT 0,
+  -- "Continue where you left off".
+  last_lesson_id    CHAR(36) CHARACTER SET ascii NULL,
+  enrolled_at       DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+  last_activity_at  DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+  completed_at      DATETIME(3) NULL,
+  expires_at        DATETIME(3) NULL,
 
-  CONSTRAINT enrolments_one_per_course UNIQUE (user_id, course_id),
-  CONSTRAINT enrolments_percent_range  CHECK (progress_percent BETWEEN 0 AND 100),
-  CONSTRAINT enrolments_completed_has_date
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_enrolment_one_per_course (user_id, course_id),
+  KEY ix_enrolments_user (user_id, last_activity_at DESC),
+  KEY ix_enrolments_course (course_id),
+  KEY ix_enrolments_state (state),
+
+  CONSTRAINT ck_enrolment_percent_range CHECK (progress_percent BETWEEN 0 AND 100),
+  CONSTRAINT ck_enrolment_completed_has_date
     CHECK (state <> 'completed' OR completed_at IS NOT NULL)
-);
-
-COMMENT ON TABLE progress.enrolments IS 'A learner''s registration in a course plus the rolled-up completion figures.';
-
-CREATE INDEX enrolments_user_idx     ON progress.enrolments (user_id, last_activity_at DESC);
-CREATE INDEX enrolments_course_idx   ON progress.enrolments (course_id);
-CREATE INDEX enrolments_state_idx    ON progress.enrolments (state);
+) ENGINE=InnoDB
+  COMMENT='A learner registration in a course plus the rolled-up completion figures.';
 
 -- ---------------------------------------------------------------------------
--- Per-lesson progress. last_position_seconds is what lets the video player
--- resume mid-lesson.
+-- Per-lesson progress.
+--
+-- seconds_watched and last_position_seconds are different numbers on purpose:
+-- the first accumulates, the second is the resume point and moves backwards
+-- when someone rewinds.
 -- ---------------------------------------------------------------------------
 CREATE TABLE progress.lesson_progress (
-  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  enrolment_id           uuid NOT NULL REFERENCES progress.enrolments (id) ON DELETE CASCADE,
-  user_id                uuid NOT NULL,
-  course_id              uuid NOT NULL,
-  lesson_id              uuid NOT NULL,
-  state                  public.progress_state NOT NULL DEFAULT 'not_started',
-  seconds_watched        integer NOT NULL DEFAULT 0,
-  last_position_seconds  integer NOT NULL DEFAULT 0,
-  view_count             integer NOT NULL DEFAULT 0,
-  first_viewed_at        timestamptz,
-  last_viewed_at         timestamptz,
-  completed_at           timestamptz,
+  id                    CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
+  enrolment_id          CHAR(36) CHARACTER SET ascii NOT NULL,
+  user_id               CHAR(36) CHARACTER SET ascii NOT NULL,
+  course_id             CHAR(36) CHARACTER SET ascii NOT NULL,
+  -- catalog.lessons.id - deliberately not a foreign key.
+  lesson_id             CHAR(36) CHARACTER SET ascii NOT NULL,
+  state                 ENUM('not_started','in_progress','completed') NOT NULL DEFAULT 'not_started',
+  seconds_watched       INT NOT NULL DEFAULT 0,
+  last_position_seconds INT NOT NULL DEFAULT 0,
+  view_count            INT NOT NULL DEFAULT 0,
+  first_viewed_at       DATETIME(3) NULL,
+  last_viewed_at        DATETIME(3) NULL,
+  completed_at          DATETIME(3) NULL,
 
-  CONSTRAINT lesson_progress_one_per_lesson UNIQUE (user_id, lesson_id),
-  CONSTRAINT lesson_progress_seconds_positive CHECK (seconds_watched >= 0),
-  CONSTRAINT lesson_progress_position_positive CHECK (last_position_seconds >= 0),
-  CONSTRAINT lesson_progress_completed_has_date
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_progress_one_per_lesson (user_id, lesson_id),
+  KEY ix_progress_enrolment (enrolment_id),
+  KEY ix_progress_user_course (user_id, course_id),
+  KEY ix_progress_completed (course_id, state, completed_at),
+
+  CONSTRAINT fk_progress_enrolment FOREIGN KEY (enrolment_id)
+    REFERENCES progress.enrolments (id) ON DELETE CASCADE,
+  CONSTRAINT ck_progress_seconds_positive CHECK (seconds_watched >= 0),
+  CONSTRAINT ck_progress_position_positive CHECK (last_position_seconds >= 0),
+  CONSTRAINT ck_progress_completed_has_date
     CHECK (state <> 'completed' OR completed_at IS NOT NULL)
-);
+) ENGINE=InnoDB;
 
-CREATE INDEX lesson_progress_enrolment_idx ON progress.lesson_progress (enrolment_id);
-CREATE INDEX lesson_progress_user_course_idx ON progress.lesson_progress (user_id, course_id);
-CREATE INDEX lesson_progress_completed_idx ON progress.lesson_progress (course_id, completed_at)
-  WHERE state = 'completed';
-
--- ---------------------------------------------------------------------------
--- Bookmarks and notes a learner leaves on a lesson, optionally pinned to a
--- timestamp inside the video.
--- ---------------------------------------------------------------------------
 CREATE TABLE progress.lesson_notes (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         uuid NOT NULL,
-  lesson_id       uuid NOT NULL,
-  course_id       uuid NOT NULL,
-  body            text NOT NULL,
-  at_seconds      integer,
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  updated_at      timestamptz NOT NULL DEFAULT now(),
+  id         CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
+  user_id    CHAR(36) CHARACTER SET ascii NOT NULL,
+  lesson_id  CHAR(36) CHARACTER SET ascii NOT NULL,
+  course_id  CHAR(36) CHARACTER SET ascii NOT NULL,
+  body       TEXT NOT NULL,
+  -- Pins the note to a moment inside the video.
+  at_seconds INT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+  updated_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
 
-  CONSTRAINT lesson_notes_body_not_blank CHECK (btrim(body) <> '')
-);
+  PRIMARY KEY (id),
+  KEY ix_notes_user_lesson (user_id, lesson_id, at_seconds),
 
-CREATE INDEX lesson_notes_user_lesson_idx ON progress.lesson_notes (user_id, lesson_id, at_seconds);
+  CONSTRAINT ck_notes_body_not_blank CHECK (TRIM(body) <> '')
+) ENGINE=InnoDB;
 
-CREATE TRIGGER lesson_notes_touch
-  BEFORE UPDATE ON progress.lesson_notes
-  FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
-
--- ---------------------------------------------------------------------------
--- Certificates issued when an enrolment reaches 100%.
--- ---------------------------------------------------------------------------
 CREATE TABLE progress.certificates (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  enrolment_id  uuid NOT NULL UNIQUE REFERENCES progress.enrolments (id) ON DELETE CASCADE,
-  user_id       uuid NOT NULL,
-  course_id     uuid NOT NULL,
-  serial        text NOT NULL UNIQUE,
-  issued_at     timestamptz NOT NULL DEFAULT now(),
-  certificate_url text
-);
+  id              CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
+  enrolment_id    CHAR(36) CHARACTER SET ascii NOT NULL,
+  user_id         CHAR(36) CHARACTER SET ascii NOT NULL,
+  course_id       CHAR(36) CHARACTER SET ascii NOT NULL,
+  -- Random, not sequential: a sequential serial leaks how many certificates
+  -- the platform has issued and lets anyone guess another one.
+  serial          VARCHAR(64) CHARACTER SET ascii NOT NULL,
+  issued_at       DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
+  certificate_url VARCHAR(2000) NULL,
 
-CREATE INDEX certificates_user_idx ON progress.certificates (user_id, issued_at DESC);
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_certificate_enrolment (enrolment_id),
+  UNIQUE KEY uq_certificate_serial (serial),
+  KEY ix_certificates_user (user_id, issued_at DESC),
+
+  CONSTRAINT fk_certificate_enrolment FOREIGN KEY (enrolment_id)
+    REFERENCES progress.enrolments (id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+DELIMITER $$
+
+CREATE TRIGGER progress.trg_notes_touch
+  BEFORE UPDATE ON progress.lesson_notes FOR EACH ROW
+BEGIN SET NEW.updated_at = UTC_TIMESTAMP(3); END$$
 
 -- ---------------------------------------------------------------------------
--- Recomputes an enrolment's rolled-up numbers from its lesson rows. The
--- Progress Service calls this after every progress write; keeping it in SQL
--- means the totals can never drift from the detail rows.
+-- Recomputes an enrolment's rolled-up numbers from its lesson rows.
+--
+-- The Progress Service calls this after every progress write. Keeping the
+-- arithmetic in SQL means the totals cannot drift from the detail rows no
+-- matter which code path did the write - and tests/verify.sql checks they
+-- have not.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION progress.refresh_enrolment_rollup(p_enrolment_id uuid)
-RETURNS void
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  done  integer;
-  total integer;
+CREATE PROCEDURE progress.refresh_enrolment_rollup(IN p_enrolment_id CHAR(36))
+MODIFIES SQL DATA
 BEGIN
-  SELECT count(*) FILTER (WHERE state = 'completed'), count(*)
-    INTO done, total
+  DECLARE v_done  INT DEFAULT 0;
+  DECLARE v_rows  INT DEFAULT 0;
+  DECLARE v_total INT DEFAULT 0;
+
+  SELECT
+    SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END),
+    COUNT(*)
+    INTO v_done, v_rows
     FROM progress.lesson_progress
    WHERE enrolment_id = p_enrolment_id;
 
-  UPDATE progress.enrolments e
-     SET lessons_completed = done,
-         lessons_total     = GREATEST(total, e.lessons_total),
-         progress_percent  = CASE
-                               WHEN GREATEST(total, e.lessons_total) = 0 THEN 0
-                               ELSE round(done::numeric * 100 / GREATEST(total, e.lessons_total), 2)
-                             END,
-         state             = CASE
-                               WHEN GREATEST(total, e.lessons_total) > 0
-                                AND done >= GREATEST(total, e.lessons_total) THEN 'completed'::public.enrolment_state
-                               WHEN e.state = 'completed' THEN 'active'::public.enrolment_state
-                               ELSE e.state
-                             END,
-         completed_at      = CASE
-                               WHEN GREATEST(total, e.lessons_total) > 0
-                                AND done >= GREATEST(total, e.lessons_total)
-                               THEN COALESCE(e.completed_at, now())
-                               ELSE NULL
-                             END,
-         last_activity_at  = now()
-   WHERE e.id = p_enrolment_id;
-END;
-$$;
+  SET v_done = IFNULL(v_done, 0);
 
-COMMIT;
+  -- lessons_total is supplied by the Course Service at enrolment time and is
+  -- the denominator; never let it fall below the number of rows we actually
+  -- have, or the percentage could exceed 100.
+  SELECT GREATEST(lessons_total, v_rows) INTO v_total
+    FROM progress.enrolments WHERE id = p_enrolment_id;
+
+  UPDATE progress.enrolments
+     SET lessons_completed = v_done,
+         lessons_total     = v_total,
+         progress_percent  = CASE WHEN v_total = 0 THEN 0
+                                  ELSE ROUND(v_done * 100.0 / v_total, 2) END,
+         state = CASE
+                   WHEN v_total > 0 AND v_done >= v_total THEN 'completed'
+                   -- Un-completing is possible: a course can gain a lesson
+                   -- after someone finished it.
+                   WHEN state = 'completed' THEN 'active'
+                   ELSE state
+                 END,
+         completed_at = CASE
+                          WHEN v_total > 0 AND v_done >= v_total
+                            THEN IFNULL(completed_at, UTC_TIMESTAMP(3))
+                          ELSE NULL
+                        END,
+         last_activity_at = UTC_TIMESTAMP(3)
+   WHERE id = p_enrolment_id;
+END$$
+
+DELIMITER ;

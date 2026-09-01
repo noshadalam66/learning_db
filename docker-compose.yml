@@ -1,36 +1,60 @@
 # ---------------------------------------------------------------------------
-# Local PostgreSQL for the learning platform.
+# Local MySQL for the learning platform.
 #
 #   docker compose up -d
-#   ./scripts/migrate.sh && ./scripts/seed.sh
+#   ./scripts/migrate.sh && ./scripts/seed.sh && ./scripts/verify.sh
 #
-# Everything in migrations/ is also mounted into the image's init directory, so
-# a container starting against an empty volume brings itself up migrated. The
-# scripts are still the supported path - the mount is a convenience.
+# The migrations create the eight databases themselves, so the container only
+# needs to exist - there is no single database to point MYSQL_DATABASE at.
 # ---------------------------------------------------------------------------
 services:
-  postgres:
-    image: postgres:16-alpine
+  mysql:
+    image: mysql:8.0
     container_name: learning_db
     restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # Every connection reads and writes UTC. The schema defaults to
+      # UTC_TIMESTAMP regardless, so this is belt and braces rather than the
+      # only thing keeping timestamps honest.
+      - --default-time-zone=+00:00
+      # Words shorter than this are not indexed by FULLTEXT at all. Three is
+      # the MySQL default and the search.synonyms table works around it;
+      # lowering it here would require rebuilding every FULLTEXT index.
+      - --innodb-ft-min-token-size=3
     environment:
-      POSTGRES_DB: ${PGDATABASE:-learning}
-      POSTGRES_USER: ${PGUSER:-learning}
-      POSTGRES_PASSWORD: ${PGPASSWORD:-learning}
-      # Deterministic collation so ORDER BY does not shift between machines.
-      POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=en-US --encoding=UTF8"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ADMIN_PASSWORD:-root}
+      MYSQL_USER: ${MYSQL_USER:-learning}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-learning}
+      # A throwaway database, purely so the entrypoint grants MYSQL_USER
+      # something. The real databases are created by migration 0001.
+      MYSQL_DATABASE: bootstrap
     ports:
-      - "${PGPORT:-5432}:5432"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - mysqldata:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-learning} -d ${PGDATABASE:-learning}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ADMIN_PASSWORD:-root}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
-  # Optional web client on http://localhost:8081 - `docker compose --profile tools up`
+  # The migrations create databases, so the app account needs server-wide
+  # rights in development. In production, create the databases once by hand and
+  # grant per-database, as migration 0009 does for the service accounts.
+  grant:
+    image: mysql:8.0
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >
+      mysql -hmysql -uroot -p${MYSQL_ADMIN_PASSWORD:-root} -e
+      "GRANT ALL PRIVILEGES ON *.* TO '${MYSQL_USER:-learning}'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+    restart: on-failure
+
+  # Optional web client on http://localhost:8081
+  #   docker compose --profile tools up
   adminer:
     image: adminer:4
     container_name: learning_db_adminer
@@ -39,8 +63,8 @@ services:
     ports:
       - "8081:8080"
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
 
 volumes:
-  pgdata:
+  mysqldata:

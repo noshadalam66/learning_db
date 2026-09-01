@@ -10,37 +10,60 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      postgres:
-        image: postgres:16
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_DB: learning
-          POSTGRES_USER: learning
-          POSTGRES_PASSWORD: learning
-        ports: ["5432:5432"]
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bootstrap
+        ports: ["3306:3306"]
         options: >-
-          --health-cmd "pg_isready -U learning -d learning"
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 20
 
     env:
-      PGHOST: localhost
-      PGPORT: 5432
-      PGDATABASE: learning
-      PGUSER: learning
-      PGPASSWORD: learning
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install psql
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install the MySQL client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+
+      - name: Confirm CHECK constraints are enforced
+        # MySQL parsed and silently ignored CHECK before 8.0.16, which is worse
+        # than not supporting it. Fail loudly rather than pass a suite whose
+        # constraint tests are all no-ops.
+        run: |
+          version=$(mysql -h127.0.0.1 -uroot -proot -N -B -e "SELECT VERSION()")
+          echo "MySQL $version"
+          mysql -h127.0.0.1 -uroot -proot -e "
+            CREATE DATABASE probe;
+            CREATE TABLE probe.t (n INT CHECK (n > 0));"
+          if mysql -h127.0.0.1 -uroot -proot -e "INSERT INTO probe.t VALUES (-1)" 2>/dev/null; then
+            echo "CHECK constraints are NOT enforced - MySQL 8.0.16+ is required" >&2
+            exit 1
+          fi
+          mysql -h127.0.0.1 -uroot -proot -e "DROP DATABASE probe"
 
       - name: Apply migrations
         run: ./scripts/migrate.sh
 
       - name: Migrations are idempotent
         run: ./scripts/migrate.sh | grep -q 'Done. 0 migration(s) applied.'
+
+      - name: An edited migration is refused
+        run: |
+          echo "-- tamper" >> migrations/0002_identity.sql
+          if ./scripts/migrate.sh; then
+            echo "the runner accepted a changed migration" >&2
+            exit 1
+          fi
+          git checkout migrations/0002_identity.sql
 
       - name: Load seed data
         run: ./scripts/seed.sh

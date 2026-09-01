@@ -1,0 +1,1135 @@
+<title>Seven Databases, One Spine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+
+<style>
+/* ---------------------------------------------------------------------------
+   Palette. One hue per owning service - that is information, not decoration:
+   the same colour identifies a database in the diagrams, the nav and the
+   entity cards, so ownership can be traced without reading a label.
+   --------------------------------------------------------------------------- */
+:root {
+  --paper:      #f4f5f8;
+  --surface:    #ffffff;
+  --surface-2:  #eceef3;
+  --rule:       #dcdfe8;
+  --rule-soft:  #e8eaf0;
+  --ink:        #141823;
+  --ink-muted:  #565d70;
+  --ink-faint:  #838a9c;
+
+  --identity:   #4b52c9;
+  --catalog:    #0c6f6a;
+  --content:    #7c3fae;
+  --progress:   #2a6f3b;
+  --assessment: #8a5510;
+  --search:     #17608f;
+  --analytics:  #a03350;
+
+  --identity-bg:   #eaebfb;
+  --catalog-bg:    #e0f2f0;
+  --content-bg:    #f2eafa;
+  --progress-bg:   #e4f2e7;
+  --assessment-bg: #f8eedd;
+  --search-bg:     #e3eff9;
+  --analytics-bg:  #fbe9ee;
+
+  --accent: var(--catalog);
+
+  --sans:  "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --mono:  "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --measure: 68ch;
+  --page: 1180px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:     #0e1016;
+    --surface:   #161922;
+    --surface-2: #1e222c;
+    --rule:      #2a2f3c;
+    --rule-soft: #232833;
+    --ink:       #e6e9f0;
+    --ink-muted: #a0a7ba;
+    --ink-faint: #79808f;
+
+    --identity:   #8f95ef;
+    --catalog:    #45c0b6;
+    --content:    #b98ae2;
+    --progress:   #64bd77;
+    --assessment: #d29f45;
+    --search:     #62aae2;
+    --analytics:  #dd8398;
+
+    --identity-bg:   #1b1d38;
+    --catalog-bg:    #0e2c2b;
+    --content-bg:    #271a35;
+    --progress-bg:   #15291a;
+    --assessment-bg: #2c2211;
+    --search-bg:     #12222f;
+    --analytics-bg:  #2e1620;
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper:     #0e1016;
+  --surface:   #161922;
+  --surface-2: #1e222c;
+  --rule:      #2a2f3c;
+  --rule-soft: #232833;
+  --ink:       #e6e9f0;
+  --ink-muted: #a0a7ba;
+  --ink-faint: #79808f;
+
+  --identity:   #8f95ef;
+  --catalog:    #45c0b6;
+  --content:    #b98ae2;
+  --progress:   #64bd77;
+  --assessment: #d29f45;
+  --search:     #62aae2;
+  --analytics:  #dd8398;
+
+  --identity-bg:   #1b1d38;
+  --catalog-bg:    #0e2c2b;
+  --content-bg:    #271a35;
+  --progress-bg:   #15291a;
+  --assessment-bg: #2c2211;
+  --search-bg:     #12222f;
+  --analytics-bg:  #2e1620;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.015em; }
+p { margin: 0; }
+a { color: var(--accent); }
+
+code, .mono { font-family: var(--mono); font-size: 0.9em; font-variant-ligatures: none; }
+
+.page {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 0 24px 96px;
+}
+
+/* --- Masthead ------------------------------------------------------------ */
+.masthead {
+  padding: 72px 0 40px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 48px;
+}
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 20px;
+}
+.masthead h1 {
+  font-size: clamp(2.2rem, 5.5vw, 3.4rem);
+  line-height: 1.05;
+  margin-bottom: 20px;
+}
+.lede {
+  font-family: var(--serif);
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
+  line-height: 1.65;
+  color: var(--ink-muted);
+  max-width: var(--measure);
+}
+.lede strong { color: var(--ink); font-weight: 500; }
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px;
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 1px solid var(--rule-soft);
+}
+.count-value {
+  font-family: var(--mono);
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.count-label { font-size: 13px; color: var(--ink-faint); margin-top: 6px; }
+
+/* --- Sections ------------------------------------------------------------ */
+section { margin-bottom: 72px; scroll-margin-top: 24px; }
+
+.section-head { margin-bottom: 28px; }
+.section-num {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+  letter-spacing: 0.1em;
+  display: block;
+  margin-bottom: 8px;
+}
+.section-head h2 { font-size: clamp(1.4rem, 3vw, 1.85rem); margin-bottom: 12px; }
+.section-head p { color: var(--ink-muted); max-width: var(--measure); font-family: var(--serif); }
+
+.prose { font-family: var(--serif); color: var(--ink-muted); max-width: var(--measure); }
+.prose p + p { margin-top: 1em; }
+.prose strong { color: var(--ink); font-weight: 500; }
+.prose code { color: var(--ink); background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 3px; }
+
+/* --- Figures ------------------------------------------------------------- */
+figure { margin: 0 0 32px; }
+.figure-frame {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 24px;
+  overflow-x: auto;
+}
+.figure-frame svg { display: block; min-width: 620px; width: 100%; height: auto; }
+figcaption {
+  font-size: 13.5px;
+  color: var(--ink-faint);
+  margin-top: 14px;
+  max-width: var(--measure);
+  line-height: 1.55;
+}
+
+/* SVG primitives, themed through tokens. */
+.n-box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.5; }
+.n-label { font-family: var(--mono); font-size: 13px; font-weight: 600; fill: var(--ink); }
+.n-sub { font-family: var(--sans); font-size: 11px; fill: var(--ink-faint); }
+.n-edge { stroke: var(--ink-faint); stroke-width: 1.5; fill: none; }
+.n-edge-dash { stroke: var(--ink-faint); stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
+.n-edge-label { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-faint); }
+.n-card { font-family: var(--mono); font-size: 11px; fill: var(--ink-muted); }
+
+/* --- Legend -------------------------------------------------------------- */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.legend-item { display: flex; align-items: center; gap: 9px; }
+.legend-line { width: 30px; height: 0; border-top: 2px solid var(--ink-faint); }
+.legend-line.dashed { border-top-style: dashed; }
+
+/* --- Callout ------------------------------------------------------------- */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  padding: 18px 22px;
+  border-radius: 0 8px 8px 0;
+  margin: 28px 0;
+  max-width: var(--measure);
+}
+.callout h4 { font-size: 14px; margin-bottom: 8px; }
+.callout p { font-family: var(--serif); font-size: 15px; color: var(--ink-muted); }
+
+/* --- Database cards ------------------------------------------------------ */
+.db-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+
+.db {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  overflow: hidden;
+  border-top: 3px solid var(--db, var(--accent));
+}
+.db-head { padding: 16px 20px 14px; border-bottom: 1px solid var(--rule-soft); }
+.db-name {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--db, var(--accent));
+}
+.db-owner { font-size: 12.5px; color: var(--ink-faint); margin-top: 3px; }
+.db-body { padding: 6px 20px 18px; }
+
+.tbl { padding: 12px 0; border-bottom: 1px solid var(--rule-soft); }
+.tbl:last-child { border-bottom: 0; }
+.tbl-name { font-family: var(--mono); font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.cols { display: flex; flex-wrap: wrap; gap: 5px; }
+.col {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.col.pk { background: var(--db-bg, var(--surface-2)); color: var(--db, var(--ink)); font-weight: 600; }
+.col.fk { border: 1px solid var(--db, var(--rule)); color: var(--db, var(--ink-muted)); background: transparent; }
+.col.soft { border: 1px dashed var(--ink-faint); background: transparent; }
+.tbl-note { font-size: 12.5px; color: var(--ink-faint); margin-top: 8px; line-height: 1.5; }
+
+.key-legend {
+  display: flex; flex-wrap: wrap; gap: 10px 22px;
+  margin-bottom: 24px; font-size: 13px; color: var(--ink-muted);
+  align-items: center;
+}
+
+/* --- Flow steps ---------------------------------------------------------- */
+.steps { display: grid; gap: 2px; counter-reset: step; }
+.step {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 18px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  padding: 16px 20px;
+  align-items: start;
+}
+.step:first-child { border-radius: 10px 10px 0 0; }
+.step:last-child { border-radius: 0 0 10px 10px; }
+.step + .step { border-top: 0; }
+.step-num {
+  counter-increment: step;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  padding-top: 2px;
+}
+.step-num::before { content: counter(step, decimal-leading-zero); }
+.step-title { font-size: 14.5px; font-weight: 600; margin-bottom: 4px; }
+.step-title .mono { color: var(--step-color, var(--accent)); font-weight: 500; }
+.step-body { font-family: var(--serif); font-size: 14.5px; color: var(--ink-muted); }
+
+/* --- Translation table --------------------------------------------------- */
+.table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 14px; }
+th, td { text-align: left; padding: 13px 18px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+th {
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-faint); font-weight: 600; background: var(--surface-2);
+  position: sticky; top: 0;
+}
+tbody tr:last-child td { border-bottom: 0; }
+td:first-child, td:nth-child(2) { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+td:nth-child(3) { color: var(--ink-muted); font-family: var(--serif); }
+
+/* --- Footer -------------------------------------------------------------- */
+.footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 28px;
+  font-size: 13.5px;
+  color: var(--ink-faint);
+  max-width: var(--measure);
+}
+
+@media (max-width: 720px) {
+  .masthead { padding-top: 48px; }
+  .counts { gap: 28px; }
+  .step { grid-template-columns: 26px 1fr; gap: 12px; padding: 14px 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+
+<div class="page">
+
+<header class="masthead">
+  <p class="eyebrow">learning_db · MySQL 8</p>
+  <h1>Seven databases,<br>one spine</h1>
+  <p class="lede">
+    Thirty-one tables look like a lot until you notice that almost all of them
+    hang off a single chain: <strong>a course holds modules, a module holds
+    lessons, and a lesson has exactly one body.</strong> Everything else is
+    either a learner's relationship to that chain, or a derived copy of it.
+  </p>
+
+  <div class="counts">
+    <div>
+      <div class="count-value">31</div>
+      <div class="count-label">tables</div>
+    </div>
+    <div>
+      <div class="count-value">8</div>
+      <div class="count-label">databases (7 services + shared views)</div>
+    </div>
+    <div>
+      <div class="count-value">21</div>
+      <div class="count-label">foreign keys — all inside one database</div>
+    </div>
+    <div>
+      <div class="count-value">0</div>
+      <div class="count-label">foreign keys across a service boundary</div>
+    </div>
+  </div>
+</header>
+
+<!-- ==================================================================== -->
+<section id="spine">
+  <div class="section-head">
+    <span class="section-num">01 — start here</span>
+    <h2>The spine</h2>
+    <p>
+      If you remember one picture, make it this one. Every other table in the
+      schema attaches somewhere along this chain.
+    </p>
+  </div>
+
+  <figure>
+    <div class="figure-frame">
+      <svg viewBox="0 0 900 400" role="img"
+           aria-label="A course contains ordered modules; a module contains ordered lessons; each lesson has exactly one body, which is either a video row, an article row, or a quiz row.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <!-- Chain -->
+        <g color="var(--ink-faint)">
+          <line class="n-edge" x1="180" y1="190" x2="242" y2="190" marker-end="url(#arrow)"/>
+          <line class="n-edge" x1="400" y1="190" x2="462" y2="190" marker-end="url(#arrow)"/>
+          <path class="n-edge" d="M 620 190 L 650 190 L 650 80 L 692 80" marker-end="url(#arrow)"/>
+          <line class="n-edge" x1="620" y1="190" x2="692" y2="190" marker-end="url(#arrow)"/>
+          <path class="n-edge" d="M 620 190 L 650 190 L 650 300 L 692 300" marker-end="url(#arrow)"/>
+        </g>
+
+        <text class="n-edge-label" x="211" y="180" text-anchor="middle">1 : n</text>
+        <text class="n-edge-label" x="431" y="180" text-anchor="middle">1 : n</text>
+        <text class="n-edge-label" x="692" y="40">0..1</text>
+        <text class="n-edge-label" x="692" y="150">0..1</text>
+        <text class="n-edge-label" x="692" y="260">0..1</text>
+
+        <!-- courses -->
+        <rect class="n-box" x="20" y="158" width="160" height="64" rx="7"
+              style="fill: var(--catalog-bg); stroke: var(--catalog);"/>
+        <text class="n-label" x="100" y="184" text-anchor="middle" style="fill: var(--catalog);">courses</text>
+        <text class="n-sub" x="100" y="202" text-anchor="middle">catalog</text>
+
+        <!-- modules -->
+        <rect class="n-box" x="242" y="158" width="158" height="64" rx="7"
+              style="fill: var(--catalog-bg); stroke: var(--catalog);"/>
+        <text class="n-label" x="321" y="184" text-anchor="middle" style="fill: var(--catalog);">modules</text>
+        <text class="n-sub" x="321" y="202" text-anchor="middle">ordered by position</text>
+
+        <!-- lessons -->
+        <rect class="n-box" x="462" y="150" width="158" height="80" rx="7"
+              style="fill: var(--catalog-bg); stroke: var(--catalog); stroke-width: 2.5;"/>
+        <text class="n-label" x="541" y="178" text-anchor="middle" style="fill: var(--catalog);">lessons</text>
+        <text class="n-sub" x="541" y="196" text-anchor="middle">ordered by position</text>
+        <text class="n-sub" x="541" y="212" text-anchor="middle" style="fill: var(--catalog);">kind names the body →</text>
+
+        <!-- bodies -->
+        <rect class="n-box" x="692" y="48" width="186" height="64" rx="7"
+              style="fill: var(--content-bg); stroke: var(--content);"/>
+        <text class="n-label" x="785" y="74" text-anchor="middle" style="fill: var(--content);">lesson_videos</text>
+        <text class="n-sub" x="785" y="92" text-anchor="middle">content · a URL, not a file</text>
+
+        <rect class="n-box" x="692" y="158" width="186" height="64" rx="7"
+              style="fill: var(--content-bg); stroke: var(--content);"/>
+        <text class="n-label" x="785" y="184" text-anchor="middle" style="fill: var(--content);">articles</text>
+        <text class="n-sub" x="785" y="202" text-anchor="middle">content · markdown or html</text>
+
+        <rect class="n-box" x="692" y="268" width="186" height="64" rx="7"
+              style="fill: var(--assessment-bg); stroke: var(--assessment);"/>
+        <text class="n-label" x="785" y="294" text-anchor="middle" style="fill: var(--assessment);">quizzes</text>
+        <text class="n-sub" x="785" y="312" text-anchor="middle">assessment</text>
+
+        <!-- kind labels -->
+        <text class="n-card" x="700" y="126" style="fill: var(--content);">kind = 'video'</text>
+        <text class="n-card" x="700" y="236" style="fill: var(--content);">kind = 'article'</text>
+        <text class="n-card" x="700" y="346" style="fill: var(--assessment);">kind = 'quiz'</text>
+
+        <text class="n-sub" x="20" y="380">
+          Boxes are tinted by the database that owns them.
+        </text>
+      </svg>
+    </div>
+    <figcaption>
+      A lesson row carries no body of its own. <code>lessons.kind</code> names
+      which of the three tables to look in, and the three are mutually
+      exclusive — a lesson has one body or none, hence
+      <span class="mono">0..1</span> on each branch.
+    </figcaption>
+  </figure>
+
+  <div class="callout">
+    <h4>Why <code>lessons</code> stores <code>course_id</code> as well as <code>module_id</code></h4>
+    <p>
+      It is redundant — you could always reach the course through the module.
+      It is carried anyway because "every lesson of this course, in order" is
+      the most-run query on the platform, and a trigger refuses any row where
+      the two columns disagree. Denormalisation with a guard, not a shortcut.
+    </p>
+  </div>
+</section>
+
+<!-- ==================================================================== -->
+<section id="owners">
+  <div class="section-head">
+    <span class="section-num">02 — the thing that trips people up</span>
+    <h2>Where the foreign keys stop</h2>
+    <p>
+      In MySQL a schema <em>is</em> a database, so the per-service split is
+      seven databases on one server. Every real foreign key lives inside one of
+      them; every arrow that crosses a boundary is just a column holding an id.
+    </p>
+  </div>
+
+  <figure>
+    <div class="figure-frame">
+      <svg viewBox="0 0 900 430" role="img"
+           aria-label="Seven service databases. Arrows crossing between databases are dashed, meaning the reference is an id column with no foreign key behind it. Each database shows how many real foreign keys it contains internally.">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <g color="var(--ink-faint)">
+          <!-- catalog -> identity -->
+          <line class="n-edge-dash" x1="246" y1="72" x2="196" y2="72" marker-end="url(#arrow2)"/>
+          <!-- content -> catalog -->
+          <line class="n-edge-dash" x1="476" y1="72" x2="426" y2="72" marker-end="url(#arrow2)"/>
+          <!-- progress -> catalog (routed under row 1) -->
+          <path class="n-edge-dash" d="M 795 136 L 795 168 L 335 168 L 335 140" marker-end="url(#arrow2)"/>
+          <!-- assessment -> catalog -->
+          <path class="n-edge-dash" d="M 220 250 L 220 210 L 300 210 L 300 140" marker-end="url(#arrow2)"/>
+          <!-- search -> content -->
+          <path class="n-edge-dash" d="M 450 250 L 450 200 L 560 200 L 560 140" marker-end="url(#arrow2)"/>
+          <!-- analytics -> assessment -->
+          <line class="n-edge-dash" x1="595" y1="295" x2="310" y2="295" marker-end="url(#arrow2)"/>
+        </g>
+
+
+        <!-- Row 1 -->
+        <rect class="n-box" x="20" y="36" width="176" height="104" rx="8"
+              style="fill: var(--identity-bg); stroke: var(--identity);"/>
+        <text class="n-label" x="36" y="62" style="fill: var(--identity);">identity</text>
+        <text class="n-sub" x="36" y="80">User Service</text>
+        <text class="n-card" x="36" y="102">5 tables</text>
+        <text class="n-card" x="36" y="120" style="fill: var(--identity);">4 FKs inside</text>
+
+        <rect class="n-box" x="250" y="36" width="176" height="104" rx="8"
+              style="fill: var(--catalog-bg); stroke: var(--catalog); stroke-width: 2.5;"/>
+        <text class="n-label" x="266" y="62" style="fill: var(--catalog);">catalog</text>
+        <text class="n-sub" x="266" y="80">Course Service</text>
+        <text class="n-card" x="266" y="102">7 tables</text>
+        <text class="n-card" x="266" y="120" style="fill: var(--catalog);">7 FKs inside</text>
+
+        <rect class="n-box" x="480" y="36" width="176" height="104" rx="8"
+              style="fill: var(--content-bg); stroke: var(--content);"/>
+        <text class="n-label" x="496" y="62" style="fill: var(--content);">content</text>
+        <text class="n-sub" x="496" y="80">Content Service</text>
+        <text class="n-card" x="496" y="102">4 tables</text>
+        <text class="n-card" x="496" y="120" style="fill: var(--content);">1 FK inside</text>
+
+        <rect class="n-box" x="710" y="36" width="176" height="104" rx="8"
+              style="fill: var(--progress-bg); stroke: var(--progress);"/>
+        <text class="n-label" x="726" y="62" style="fill: var(--progress);">progress</text>
+        <text class="n-sub" x="726" y="80">Progress Service</text>
+        <text class="n-card" x="726" y="102">4 tables</text>
+        <text class="n-card" x="726" y="120" style="fill: var(--progress);">2 FKs inside</text>
+
+        <!-- Row 2 -->
+        <rect class="n-box" x="134" y="250" width="176" height="104" rx="8"
+              style="fill: var(--assessment-bg); stroke: var(--assessment);"/>
+        <text class="n-label" x="150" y="276" style="fill: var(--assessment);">assessment</text>
+        <text class="n-sub" x="150" y="294">Quiz Service</text>
+        <text class="n-card" x="150" y="316">5 tables</text>
+        <text class="n-card" x="150" y="334" style="fill: var(--assessment);">5 FKs inside</text>
+
+        <rect class="n-box" x="364" y="250" width="176" height="104" rx="8"
+              style="fill: var(--search-bg); stroke: var(--search);"/>
+        <text class="n-label" x="380" y="276" style="fill: var(--search);">search</text>
+        <text class="n-sub" x="380" y="294">Search Service</text>
+        <text class="n-card" x="380" y="316">3 tables</text>
+        <text class="n-card" x="380" y="334">0 FKs — derived</text>
+
+        <rect class="n-box" x="594" y="250" width="176" height="104" rx="8"
+              style="fill: var(--analytics-bg); stroke: var(--analytics);"/>
+        <text class="n-label" x="610" y="276" style="fill: var(--analytics);">analytics</text>
+        <text class="n-sub" x="610" y="294">Analytics Service</text>
+        <text class="n-card" x="610" y="316">3 tables</text>
+        <text class="n-card" x="610" y="334">0 FKs — derived</text>
+
+        <text class="n-sub" x="20" y="400">
+          platform — a ninth database holding only the shared read views and the migration ledger.
+        </text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-line"></span> foreign key, enforced by InnoDB (never crosses a box)</span>
+      <span class="legend-item"><span class="legend-line dashed"></span> an id column with no constraint behind it</span>
+    </div>
+    <figcaption>
+      The arrows are deliberately unlabelled: which column points where is in
+      the reference below, and the claim worth seeing here is the shape — every
+      solid relationship stays inside a box, and nothing that leaves one is
+      enforced. Not all cross-boundary references are even drawn;
+      <code>assessment</code> and <code>progress</code> also hold
+      <code>user_id</code> columns pointing at <code>identity</code>.
+    </figcaption>
+  </figure>
+
+  <div class="callout">
+    <h4>MySQL would enforce these. We chose not to.</h4>
+    <p>
+      InnoDB supports foreign keys across databases on the same server — this
+      is not a limitation we ran into. A foreign key across a service boundary
+      means those two services can never be moved onto separate servers, which
+      is the whole point of splitting them. The price is that
+      "does this instructor exist?" is now an application check, and
+      applications forget. <code>tests/verify.sql</code> re-checks the
+      integrity that constraints no longer can.
+    </p>
+  </div>
+</section>
+
+<!-- ==================================================================== -->
+<section id="reference">
+  <div class="section-head">
+    <span class="section-num">03 — reference</span>
+    <h2>Every table, by owner</h2>
+    <p>
+      Key columns only. Colour marks the owning database, matching the diagrams
+      above.
+    </p>
+  </div>
+
+  <div class="key-legend">
+    <span class="legend-item"><span class="col pk" style="--db:var(--ink); --db-bg:var(--surface-2)">bold</span> primary key</span>
+    <span class="legend-item"><span class="col fk" style="--db:var(--ink-muted)">outlined</span> foreign key</span>
+    <span class="legend-item"><span class="col soft">dashed</span> id with no constraint</span>
+    <span class="legend-item"><span class="col">plain</span> everything else</span>
+  </div>
+
+  <div class="db-grid">
+
+    <div class="db" style="--db: var(--identity); --db-bg: var(--identity-bg);">
+      <div class="db-head">
+        <div class="db-name">identity</div>
+        <div class="db-owner">User Service — login, profile, roles</div>
+      </div>
+      <div class="db-body">
+        <div class="tbl">
+          <div class="tbl-name">users</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col">email UK</span>
+            <span class="col">password_hash</span><span class="col">full_name</span>
+            <span class="col">status</span><span class="col">email_verified_at</span>
+            <span class="col">last_login_at</span>
+          </div>
+          <p class="tbl-note">
+            No <code>citext</code> needed — the default collation is already
+            case-insensitive, so two spellings of an address collide on the
+            unique index.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">roles · user_roles</div>
+          <div class="cols">
+            <span class="col pk">user_id</span><span class="col pk">role_id</span>
+            <span class="col fk">granted_by</span><span class="col">granted_at</span>
+          </div>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">refresh_tokens</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">user_id</span>
+            <span class="col">token_hash UK</span><span class="col">ip_address</span>
+            <span class="col">expires_at</span><span class="col">revoked_at</span>
+          </div>
+          <p class="tbl-note">
+            Only the SHA-256 digest is stored, so a database leak hands nobody a
+            usable session.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">verification_tokens</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">user_id</span>
+            <span class="col">purpose</span><span class="col">token_hash UK</span>
+            <span class="col">consumed_at</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="db" style="--db: var(--catalog); --db-bg: var(--catalog-bg);">
+      <div class="db-head">
+        <div class="db-name">catalog</div>
+        <div class="db-owner">Course Service — the spine</div>
+      </div>
+      <div class="db-body">
+        <div class="tbl">
+          <div class="tbl-name">courses</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col">slug UK</span>
+            <span class="col fk">category_id</span><span class="col soft">instructor_id</span>
+            <span class="col">level</span><span class="col">status</span>
+            <span class="col">learning_outcomes JSON</span><span class="col">requirements JSON</span>
+            <span class="col">lesson_count*</span><span class="col">duration_minutes*</span>
+            <span class="col">rating_average*</span><span class="col">rating_count*</span>
+          </div>
+          <p class="tbl-note">
+            * cached. Each has exactly one procedure that recomputes it, and the
+            verify suite fails if it drifts. JSON stands in for an array type
+            MySQL does not have.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">modules</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">course_id</span>
+            <span class="col">title</span><span class="col">position UK</span>
+          </div>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">lessons</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">module_id</span>
+            <span class="col fk">course_id</span><span class="col">slug UK</span>
+            <span class="col">kind</span><span class="col">position UK</span>
+            <span class="col">duration_seconds</span><span class="col">is_free_preview</span>
+          </div>
+          <p class="tbl-note">
+            <code>kind</code> names which body table to look in.
+            <code>(module_id, position)</code> is unique, which is why
+            reordering needs <code>catalog.reorder_lessons()</code>.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">categories · tags · course_tags · course_reviews</div>
+          <div class="cols">
+            <span class="col fk">parent_id</span><span class="col">slug UK</span>
+            <span class="col pk">course_id</span><span class="col pk">tag_id</span>
+            <span class="col soft">user_id</span><span class="col">rating</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="db" style="--db: var(--content); --db-bg: var(--content-bg);">
+      <div class="db-head">
+        <div class="db-name">content</div>
+        <div class="db-owner">Content Service — the bodies</div>
+      </div>
+      <div class="db-body">
+        <div class="tbl">
+          <div class="tbl-name">lesson_videos</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col soft">lesson_id UK</span>
+            <span class="col">provider</span><span class="col">video_url</span>
+            <span class="col">hls_url</span><span class="col">captions_url</span>
+            <span class="col">transcript</span><span class="col">duration_seconds</span>
+          </div>
+          <p class="tbl-note">
+            Every URL column has a <code>CHECK</code> requiring
+            <code>^https?://</code>. No binary column exists anywhere in this
+            database, and the verify suite fails the build if one appears.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">articles</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col soft">lesson_id UK</span>
+            <span class="col">format</span><span class="col">body</span>
+            <span class="col">body_html</span><span class="col">revision</span>
+            <span class="col">external_source</span><span class="col">status</span>
+          </div>
+          <p class="tbl-note">
+            <code>body</code> is the source (Markdown or HTML);
+            <code>body_html</code> is a render cache that may be NULL.
+            <code>external_source</code> marks a row synced from a headless CMS,
+            which makes "database or CMS" a per-article setting rather than a
+            fork of the schema.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">article_revisions</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">article_id</span>
+            <span class="col">revision UK</span><span class="col">body</span>
+          </div>
+          <p class="tbl-note">
+            Written by a <code>BEFORE UPDATE</code> trigger, so history is
+            append-only and a rollback is an ordinary write.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">lesson_attachments</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col soft">lesson_id</span>
+            <span class="col">file_url</span><span class="col">size_bytes</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="db" style="--db: var(--progress); --db-bg: var(--progress-bg);">
+      <div class="db-head">
+        <div class="db-name">progress</div>
+        <div class="db-owner">Progress Service — the learner's side</div>
+      </div>
+      <div class="db-body">
+        <div class="tbl">
+          <div class="tbl-name">enrolments</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col soft">user_id</span>
+            <span class="col soft">course_id</span><span class="col">state</span>
+            <span class="col">progress_percent*</span><span class="col">lessons_completed*</span>
+            <span class="col">lessons_total</span><span class="col soft">last_lesson_id</span>
+          </div>
+          <p class="tbl-note">
+            <code>(user_id, course_id)</code> is unique — one enrolment per
+            learner per course. <code>lessons_total</code> is the denominator,
+            supplied by the Course Service at enrolment time.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">lesson_progress</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">enrolment_id</span>
+            <span class="col soft">lesson_id</span><span class="col">state</span>
+            <span class="col">seconds_watched</span><span class="col">last_position_seconds</span>
+            <span class="col">view_count</span>
+          </div>
+          <p class="tbl-note">
+            Two different numbers on purpose: <code>seconds_watched</code>
+            accumulates across rewatches, <code>last_position_seconds</code> is
+            the resume point and moves backwards when someone rewinds.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">certificates · lesson_notes</div>
+          <div class="cols">
+            <span class="col fk">enrolment_id UK</span><span class="col">serial UK</span>
+            <span class="col soft">lesson_id</span><span class="col">body</span>
+            <span class="col">at_seconds</span>
+          </div>
+          <p class="tbl-note">
+            Certificate serials are random, not sequential — a sequential one
+            leaks how many the platform has issued and lets anyone guess
+            another.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="db" style="--db: var(--assessment); --db-bg: var(--assessment-bg);">
+      <div class="db-head">
+        <div class="db-name">assessment</div>
+        <div class="db-owner">Quiz Service — evaluation</div>
+      </div>
+      <div class="db-body">
+        <div class="tbl">
+          <div class="tbl-name">quizzes</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col soft">course_id</span>
+            <span class="col soft">lesson_id UK</span><span class="col">pass_percent</span>
+            <span class="col">time_limit_seconds</span><span class="col">max_attempts</span>
+            <span class="col">show_answers</span>
+          </div>
+          <p class="tbl-note">
+            A NULL <code>lesson_id</code> means a course-level exam. MySQL
+            unique indexes allow duplicate NULLs, so many exams coexist while a
+            lesson still gets at most one quiz.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">questions · question_options</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">quiz_id</span>
+            <span class="col">kind</span><span class="col">points</span>
+            <span class="col">position UK</span><span class="col">correct_text</span>
+            <span class="col">is_correct</span>
+          </div>
+          <p class="tbl-note">
+            <code>is_correct</code> and <code>explanation</code> are read by a
+            separate query from the one that serves a learner, so answers cannot
+            leak into an open attempt by omission.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">quiz_attempts</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">quiz_id</span>
+            <span class="col soft">user_id</span><span class="col">attempt_no UK</span>
+            <span class="col">state</span><span class="col">score_percent</span>
+            <span class="col">passed</span><span class="col">open_attempt_key UK</span>
+          </div>
+          <p class="tbl-note">
+            <code>open_attempt_key</code> is a generated column that is NULL
+            unless the attempt is open — MySQL's stand-in for a partial unique
+            index. Many graded attempts coexist; a second open one collides.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">attempt_answers</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col fk">attempt_id</span>
+            <span class="col fk">question_id</span><span class="col">selected_option_ids JSON</span>
+            <span class="col">is_correct</span><span class="col">points_awarded</span>
+          </div>
+          <p class="tbl-note">
+            Marked by <code>assessment.grade_attempt()</code>, in the database,
+            so correct answers never travel to the browser to be compared.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="db" style="--db: var(--search); --db-bg: var(--search-bg);">
+      <div class="db-head">
+        <div class="db-name">search</div>
+        <div class="db-owner">Search Service — a derived copy</div>
+      </div>
+      <div class="db-body">
+        <div class="tbl">
+          <div class="tbl-name">documents</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col">entity_type</span>
+            <span class="col soft">entity_id UK</span><span class="col">title ×4</span>
+            <span class="col">subtitle ×2</span><span class="col">body ×1</span>
+            <span class="col">tags_text ×1</span><span class="col">url_path</span>
+            <span class="col">popularity</span>
+          </div>
+          <p class="tbl-note">
+            One flattened row per course, lesson and article, rebuilt by
+            <code>search.reindex_all()</code>. The ×N are FULLTEXT weights —
+            MySQL cannot weight inside an index, so each field gets its own and
+            the score is summed at query time.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">query_log · synonyms</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col">query_text</span>
+            <span class="col">result_count</span><span class="col soft">clicked_entity_id</span>
+            <span class="col">term UK</span><span class="col">expands_to JSON</span>
+          </div>
+          <p class="tbl-note">
+            Rows with <code>result_count = 0</code> are the most direct signal
+            of a content gap. Synonyms also rescue two-letter terms, which
+            FULLTEXT refuses to index at all.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="db" style="--db: var(--analytics); --db-bg: var(--analytics-bg);">
+      <div class="db-head">
+        <div class="db-name">analytics</div>
+        <div class="db-owner">Analytics Service — best-effort by design</div>
+      </div>
+      <div class="db-body">
+        <div class="tbl">
+          <div class="tbl-name">events</div>
+          <div class="cols">
+            <span class="col pk">id</span><span class="col pk">occurred_at</span>
+            <span class="col soft">user_id</span><span class="col">event_name</span>
+            <span class="col soft">course_id</span><span class="col soft">lesson_id</span>
+            <span class="col">properties JSON</span><span class="col">ip_hash</span>
+          </div>
+          <p class="tbl-note">
+            The only table using <code>BIGINT AUTO_INCREMENT</code> rather than
+            a uuid — random uuids scatter inserts across the B-tree, the wrong
+            trade for an append-only log. Partitioned monthly, which is why
+            <code>occurred_at</code> is in the primary key: MySQL requires the
+            partition column in every unique key. Client IPs are stored only as
+            a salted hash.
+          </p>
+        </div>
+        <div class="tbl">
+          <div class="tbl-name">daily_course_stats · daily_platform_stats</div>
+          <div class="cols">
+            <span class="col pk">day</span><span class="col pk">course_id</span>
+            <span class="col">views</span><span class="col">unique_learners</span>
+            <span class="col">watch_seconds</span><span class="col">quiz_pass_rate</span>
+          </div>
+          <p class="tbl-note">
+            <code>quiz_pass_rate</code> is read from
+            <code>assessment</code>, not from the event stream. Events can be
+            lost, and a report built on lossy data invents cliffs that are not
+            there.
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ==================================================================== -->
+<section id="trace">
+  <div class="section-head">
+    <span class="section-num">04 — it clicks here</span>
+    <h2>Follow one action</h2>
+    <p>
+      Sam finishes lesson 5. One request through the gateway, and here is every
+      row that moves — in order.
+    </p>
+  </div>
+
+  <div class="steps">
+    <div class="step" style="--step-color: var(--progress);">
+      <div class="step-num"></div>
+      <div>
+        <div class="step-title">Upsert <span class="mono">progress.lesson_progress</span></div>
+        <div class="step-body">
+          Matched on <span class="mono">(user_id, lesson_id)</span>.
+          <span class="mono">seconds_watched</span> increases by the reported
+          delta, <span class="mono">last_position_seconds</span> is overwritten,
+          and <span class="mono">state</span> becomes
+          <span class="mono">'completed'</span>. A completed lesson is never
+          demoted just because someone rewatched part of it.
+        </div>
+      </div>
+    </div>
+    <div class="step" style="--step-color: var(--progress);">
+      <div class="step-num"></div>
+      <div>
+        <div class="step-title">Update <span class="mono">progress.enrolments.last_lesson_id</span></div>
+        <div class="step-body">
+          This is what "continue where you left off" reads on the next visit.
+        </div>
+      </div>
+    </div>
+    <div class="step" style="--step-color: var(--progress);">
+      <div class="step-num"></div>
+      <div>
+        <div class="step-title">Call <span class="mono">progress.refresh_enrolment_rollup()</span></div>
+        <div class="step-body">
+          Recounts the completed detail rows, recomputes
+          <span class="mono">progress_percent</span>, and flips
+          <span class="mono">state</span> to
+          <span class="mono">'completed'</span> if every lesson is done. Steps 1
+          to 3 run in <strong>one transaction</strong>, so no reader ever sees an
+          updated lesson row beside a stale summary.
+        </div>
+      </div>
+    </div>
+    <div class="step" style="--step-color: var(--progress);">
+      <div class="step-num"></div>
+      <div>
+        <div class="step-title">Maybe insert <span class="mono">progress.certificates</span></div>
+        <div class="step-body">
+          Only on the transition into <span class="mono">'completed'</span> —
+          on the edge, not every time a finished course is touched again.
+        </div>
+      </div>
+    </div>
+    <div class="step" style="--step-color: var(--analytics);">
+      <div class="step-num"></div>
+      <div>
+        <div class="step-title">Emit to <span class="mono">analytics.events</span> — and do not wait</div>
+        <div class="step-body">
+          Fire-and-forget. A learner finishing a lesson must not fail, or even
+          slow down, because the Analytics Service is having a bad day. The cost
+          is that events can be lost — which is exactly why nothing
+          authoritative is ever reconstructed from the event stream.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================================== -->
+<section id="mysql">
+  <div class="section-head">
+    <span class="section-num">05 — for the record</span>
+    <h2>What MySQL changed</h2>
+    <p>
+      This schema started on PostgreSQL. Five constructs had no direct
+      equivalent, and each replacement carries a different trade.
+    </p>
+  </div>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>PostgreSQL</th>
+          <th>MySQL 8</th>
+          <th>What it costs</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7 schemas in 1 database</td>
+          <td>7 databases</td>
+          <td>Nothing meaningful. A schema <em>is</em> a database here, and grants work the same way.</td>
+        </tr>
+        <tr>
+          <td>partial unique index<br><span style="color:var(--ink-faint)">WHERE state = 'in_progress'</span></td>
+          <td>generated column,<br>NULL outside the subset</td>
+          <td>Works exactly as well, because MySQL unique indexes permit duplicate NULLs. It has to be <span class="mono">VIRTUAL</span>, since MySQL refuses a cascading FK on a column a stored generated column reads.</td>
+        </tr>
+        <tr>
+          <td>DEFERRABLE constraints</td>
+          <td>stage positions<br>in the negative range</td>
+          <td>A reorder is now a stored procedure rather than a plain UPDATE. Same result, more code.</td>
+        </tr>
+        <tr>
+          <td>tsvector + setweight</td>
+          <td>one FULLTEXT index per field,<br>weighted sum at query time</td>
+          <td>Weighting is recomputed on every query instead of being baked into the index, and words under three characters are not indexed at all.</td>
+        </tr>
+        <tr>
+          <td>pg_trgm word_similarity</td>
+          <td>prefix relaxation +<br>a Levenshtein function</td>
+          <td><strong>This one is genuinely worse.</strong> A typo in the first two characters will not be caught. If fuzzy matching is a requirement rather than a nicety, this is where a real search engine earns its keep.</td>
+        </tr>
+        <tr>
+          <td>text[] arrays</td>
+          <td>JSON columns</td>
+          <td>Queryable via <span class="mono">JSON_TABLE</span>, but no GIN index on membership.</td>
+        </tr>
+        <tr>
+          <td>citext</td>
+          <td>the default collation</td>
+          <td>Nothing — <span class="mono">utf8mb4_0900_ai_ci</span> is already case-insensitive.</td>
+        </tr>
+        <tr>
+          <td>timestamptz</td>
+          <td>DATETIME(3) defaulted to<br><span class="mono">UTC_TIMESTAMP(3)</span></td>
+          <td>The application must write UTC. <span class="mono">CURRENT_TIMESTAMP</span> follows the session time zone, so it is avoided everywhere — including <span class="mono">ON UPDATE</span>, which is why <span class="mono">updated_at</span> is maintained by triggers.</td>
+        </tr>
+        <tr>
+          <td>transactional DDL</td>
+          <td>none</td>
+          <td>A migration that fails half way leaves the statements before it applied. Keep each file small enough that re-running by hand is realistic.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer class="footer">
+  <p>
+    Generated from the live schema in <span class="mono">learning_db</span> —
+    31 tables across 8 databases on MySQL 8.0. The machine-readable version,
+    with crow's-foot diagrams for every service, is in
+    <span class="mono">docs/ERD.md</span>; the reasoning behind the trade-offs
+    is in <span class="mono">docs/DECISIONS.md</span>.
+  </p>
+</footer>
+
+</div>

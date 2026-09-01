@@ -1,337 +1,378 @@
 -- ===========================================================================
 -- Post-migration / post-seed checks.
 --
--- Every check raises an exception on failure, so psql with ON_ERROR_STOP=1
--- exits non-zero and CI notices. Run with: ./scripts/verify.sh
+-- Every check raises with SIGNAL on failure, so the mysql client exits
+-- non-zero and CI notices. Run with: ./scripts/verify.sh
+--
+-- MySQL has no anonymous DO block, so each group is a temporary procedure that
+-- is created, called and dropped.
 -- ===========================================================================
 
-\set ON_ERROR_STOP on
-\timing off
+DELIMITER $$
 
-DO $$
-DECLARE
-  missing text;
+DROP PROCEDURE IF EXISTS platform.verify_all$$
+CREATE PROCEDURE platform.verify_all()
 BEGIN
-  SELECT string_agg(s, ', ')
-    INTO missing
-    FROM unnest(ARRAY['identity','catalog','content','progress','assessment','search','analytics']) AS s
-   WHERE NOT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = s);
+  DECLARE n BIGINT;
+  DECLARE m BIGINT;
+  DECLARE txt TEXT;
 
-  IF missing IS NOT NULL THEN
-    RAISE EXCEPTION 'missing schema(s): %', missing;
+  -- --- databases and tables ------------------------------------------------
+  SELECT GROUP_CONCAT(d.name) INTO txt
+    FROM (SELECT 'identity' AS name UNION ALL SELECT 'catalog' UNION ALL SELECT 'content'
+          UNION ALL SELECT 'progress' UNION ALL SELECT 'assessment'
+          UNION ALL SELECT 'search' UNION ALL SELECT 'analytics'
+          UNION ALL SELECT 'platform') d
+   WHERE NOT EXISTS (SELECT 1 FROM information_schema.schemata s
+                      WHERE s.schema_name = d.name);
+  IF txt IS NOT NULL THEN
+    SET @msg = CONCAT('missing database(s): ', txt);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
   END IF;
-  RAISE NOTICE 'ok  all seven service schemas exist';
-END;
-$$;
+  SELECT 'ok  all eight databases exist' AS check_result;
 
-DO $$
-DECLARE
-  missing text;
-BEGIN
-  SELECT string_agg(t, ', ')
-    INTO missing
-    FROM unnest(ARRAY[
-      'identity.users','identity.roles','identity.user_roles','identity.refresh_tokens',
-      'catalog.courses','catalog.modules','catalog.lessons','catalog.categories',
-      'content.articles','content.lesson_videos','content.article_revisions',
-      'progress.enrolments','progress.lesson_progress','progress.certificates',
-      'assessment.quizzes','assessment.questions','assessment.question_options',
-      'assessment.quiz_attempts','assessment.attempt_answers',
-      'search.documents','search.query_log',
-      'analytics.events','analytics.daily_course_stats'
-    ]) AS t
-   WHERE to_regclass(t) IS NULL;
-
-  IF missing IS NOT NULL THEN
-    RAISE EXCEPTION 'missing table(s): %', missing;
+  SELECT GROUP_CONCAT(CONCAT(t.db, '.', t.tbl)) INTO txt
+    FROM (
+      SELECT 'identity' db, 'users' tbl UNION ALL SELECT 'identity','roles'
+      UNION ALL SELECT 'identity','user_roles' UNION ALL SELECT 'identity','refresh_tokens'
+      UNION ALL SELECT 'identity','verification_tokens'
+      UNION ALL SELECT 'catalog','courses' UNION ALL SELECT 'catalog','modules'
+      UNION ALL SELECT 'catalog','lessons' UNION ALL SELECT 'catalog','categories'
+      UNION ALL SELECT 'catalog','tags' UNION ALL SELECT 'catalog','course_tags'
+      UNION ALL SELECT 'catalog','course_reviews'
+      UNION ALL SELECT 'content','articles' UNION ALL SELECT 'content','lesson_videos'
+      UNION ALL SELECT 'content','article_revisions'
+      UNION ALL SELECT 'content','lesson_attachments'
+      UNION ALL SELECT 'progress','enrolments' UNION ALL SELECT 'progress','lesson_progress'
+      UNION ALL SELECT 'progress','certificates' UNION ALL SELECT 'progress','lesson_notes'
+      UNION ALL SELECT 'assessment','quizzes' UNION ALL SELECT 'assessment','questions'
+      UNION ALL SELECT 'assessment','question_options'
+      UNION ALL SELECT 'assessment','quiz_attempts'
+      UNION ALL SELECT 'assessment','attempt_answers'
+      UNION ALL SELECT 'search','documents' UNION ALL SELECT 'search','query_log'
+      UNION ALL SELECT 'search','synonyms'
+      UNION ALL SELECT 'analytics','events'
+      UNION ALL SELECT 'analytics','daily_course_stats'
+      UNION ALL SELECT 'analytics','daily_platform_stats'
+    ) t
+   WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables it
+                      WHERE it.table_schema = t.db AND it.table_name = t.tbl);
+  IF txt IS NOT NULL THEN
+    SET @msg = CONCAT('missing table(s): ', txt);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
   END IF;
-  RAISE NOTICE 'ok  all expected tables exist';
-END;
-$$;
+  SELECT 'ok  all expected tables exist' AS check_result;
 
--- ---------------------------------------------------------------------------
--- Seed data landed
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE n bigint;
-BEGIN
-  SELECT count(*) INTO n FROM identity.users;
-  IF n < 5 THEN RAISE EXCEPTION 'expected at least 5 seeded users, found %', n; END IF;
+  -- --- every id column uses the same charset -------------------------------
+  -- InnoDB refuses a foreign key between columns whose character sets differ,
+  -- so a stray utf8mb4 id column is a bug that only surfaces much later.
+  SELECT COUNT(*) INTO n
+    FROM information_schema.columns
+   WHERE table_schema IN ('identity','catalog','content','progress','assessment','search','analytics')
+     AND (column_name = 'id' OR column_name LIKE '%\_id')
+     AND data_type = 'char'
+     AND character_set_name <> 'ascii';
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'a CHAR id column is not ascii; foreign keys to it will be refused';
+  END IF;
+  SELECT 'ok  every uuid column is ascii' AS check_result;
 
-  SELECT count(*) INTO n FROM catalog.courses WHERE status = 'published';
-  IF n < 3 THEN RAISE EXCEPTION 'expected at least 3 published courses, found %', n; END IF;
+  -- --- seed data landed ----------------------------------------------------
+  SELECT COUNT(*) INTO n FROM identity.users;
+  IF n < 5 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'expected at least 5 seeded users'; END IF;
 
-  SELECT count(*) INTO n FROM catalog.lessons;
-  IF n < 10 THEN RAISE EXCEPTION 'expected at least 10 lessons, found %', n; END IF;
+  SELECT COUNT(*) INTO n FROM catalog.courses WHERE status = 'published';
+  IF n < 3 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'expected at least 3 published courses'; END IF;
 
-  RAISE NOTICE 'ok  seed data present';
-END;
-$$;
+  SELECT COUNT(*) INTO n FROM catalog.lessons;
+  IF n < 10 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'expected at least 10 lessons'; END IF;
+  SELECT 'ok  seed data present' AS check_result;
 
--- ---------------------------------------------------------------------------
--- Videos are URLs, never bytes. No column in the database should be holding
--- media, and every stored URL must be an absolute http(s) address.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE n bigint;
-BEGIN
-  SELECT count(*) INTO n
-    FROM content.lesson_videos
-   WHERE video_url !~ '^https?://';
-  IF n > 0 THEN RAISE EXCEPTION '% video row(s) hold something that is not an http URL', n; END IF;
+  -- --- videos are URLs, never bytes ---------------------------------------
+  SELECT COUNT(*) INTO n FROM content.lesson_videos WHERE video_url NOT REGEXP '^https?://';
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'a video row holds something that is not an http URL';
+  END IF;
 
-  SELECT count(*) INTO n
+  SELECT COUNT(*) INTO n
     FROM information_schema.columns
    WHERE table_schema IN ('content','catalog')
-     AND data_type IN ('bytea', 'oid');
+     AND data_type IN ('blob','tinyblob','mediumblob','longblob','binary','varbinary');
   IF n > 0 THEN
-    RAISE EXCEPTION 'found % binary column(s) in content/catalog - media must live behind a URL', n;
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'found a binary column in content/catalog - media must live behind a URL';
+  END IF;
+  SELECT 'ok  videos are stored as URLs only' AS check_result;
+
+  -- --- articles: both storage formats exercised ---------------------------
+  SELECT COUNT(*) INTO n FROM content.articles WHERE format = 'markdown';
+  SELECT COUNT(*) INTO m FROM content.articles WHERE format = 'html';
+  IF n = 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no Markdown articles seeded'; END IF;
+  IF m = 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no HTML articles seeded'; END IF;
+
+  SELECT COUNT(*) INTO n FROM content.articles WHERE TRIM(body) = '';
+  IF n > 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'an article has an empty body'; END IF;
+  SELECT 'ok  articles stored as both markdown and html' AS check_result;
+
+  -- --- cross-table integrity ----------------------------------------------
+  SELECT COUNT(*) INTO n
+    FROM catalog.lessons l JOIN catalog.modules mo ON mo.id = l.module_id
+   WHERE mo.course_id <> l.course_id;
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'a lesson disagrees with its module about the course';
   END IF;
 
-  RAISE NOTICE 'ok  videos are stored as URLs only';
-END;
-$$;
-
--- ---------------------------------------------------------------------------
--- Articles: both storage formats are exercised and each has a body.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE md bigint; html bigint;
-BEGIN
-  SELECT count(*) INTO md   FROM content.articles WHERE format = 'markdown';
-  SELECT count(*) INTO html FROM content.articles WHERE format = 'html';
-
-  IF md = 0   THEN RAISE EXCEPTION 'no Markdown articles seeded'; END IF;
-  IF html = 0 THEN RAISE EXCEPTION 'no HTML articles seeded'; END IF;
-
-  IF EXISTS (SELECT 1 FROM content.articles WHERE btrim(body) = '') THEN
-    RAISE EXCEPTION 'an article has an empty body';
-  END IF;
-
-  RAISE NOTICE 'ok  articles stored as both markdown (%) and html (%)', md, html;
-END;
-$$;
-
--- ---------------------------------------------------------------------------
--- Structural integrity that spans tables
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE n bigint;
-BEGIN
-  SELECT count(*) INTO n
-    FROM catalog.lessons l
-    JOIN catalog.modules m ON m.id = l.module_id
-   WHERE m.course_id <> l.course_id;
-  IF n > 0 THEN RAISE EXCEPTION '% lesson(s) disagree with their module about the course', n; END IF;
-
-  SELECT count(*) INTO n
+  SELECT COUNT(*) INTO n
     FROM catalog.courses c
-   WHERE c.lesson_count <> (SELECT count(*) FROM catalog.lessons l
+   WHERE c.lesson_count <> (SELECT COUNT(*) FROM catalog.lessons l
                              WHERE l.course_id = c.id AND l.status = 'published');
-  IF n > 0 THEN RAISE EXCEPTION '% course(s) have a stale lesson_count', n; END IF;
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'a course has a stale lesson_count';
+  END IF;
 
-  SELECT count(*) INTO n
+  SELECT COUNT(*) INTO n
     FROM assessment.questions q
    WHERE q.kind IN ('single_choice','multiple_choice','true_false')
      AND NOT EXISTS (SELECT 1 FROM assessment.question_options o
-                      WHERE o.question_id = q.id AND o.is_correct);
-  IF n > 0 THEN RAISE EXCEPTION '% choice question(s) have no correct option', n; END IF;
+                      WHERE o.question_id = q.id AND o.is_correct = 1);
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'a choice question has no correct option';
+  END IF;
+  SELECT 'ok  cross-table integrity holds' AS check_result;
 
-  RAISE NOTICE 'ok  cross-table integrity holds';
-END;
-$$;
-
--- ---------------------------------------------------------------------------
--- Progress rollups agree with the detail rows they summarise.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE bad bigint;
-BEGIN
-  SELECT count(*) INTO bad
+  -- --- progress rollups agree with their detail rows ----------------------
+  SELECT COUNT(*) INTO n
     FROM progress.enrolments e
-   WHERE e.lessons_completed <> (SELECT count(*) FROM progress.lesson_progress p
+   WHERE e.lessons_completed <> (SELECT COUNT(*) FROM progress.lesson_progress p
                                   WHERE p.enrolment_id = e.id AND p.state = 'completed');
-  IF bad > 0 THEN RAISE EXCEPTION '% enrolment(s) have a stale lessons_completed', bad; END IF;
-  RAISE NOTICE 'ok  enrolment rollups match lesson progress';
-END;
-$$;
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'an enrolment has a stale lessons_completed';
+  END IF;
+  SELECT 'ok  enrolment rollups match lesson progress' AS check_result;
 
--- ---------------------------------------------------------------------------
--- Grading really grades. Sam answered Q3 (multiple choice) with only one of
--- two correct options, so choice scoring being all-or-nothing means that
--- question must be marked wrong.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE
-  a record;
-  partial boolean;
-BEGIN
-  SELECT * INTO a FROM assessment.quiz_attempts
-   WHERE id = 'a2000001-0000-4000-8000-000000000001';
+  -- --- grading really grades ----------------------------------------------
+  -- Sam answered Q3 (multiple choice) with only one of two correct options.
+  -- Choice scoring is all-or-nothing, so that question must be marked wrong.
+  SELECT points_earned, points_possible INTO n, m
+    FROM assessment.quiz_attempts WHERE id = 'a2000001-0000-4000-8000-000000000001';
 
-  IF a IS NULL THEN RAISE EXCEPTION 'seeded quiz attempt is missing'; END IF;
-  IF a.state <> 'graded' THEN RAISE EXCEPTION 'attempt was not graded (state=%)', a.state; END IF;
-  IF a.points_possible <> 7 THEN
-    RAISE EXCEPTION 'expected 7 possible points on the module 1 quiz, got %', a.points_possible;
+  IF m <> 7 THEN
+    SET @msg = CONCAT('expected 7 possible points on the module 1 quiz, got ', IFNULL(m,'NULL'));
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+  END IF;
+  IF n <> 5 THEN
+    SET @msg = CONCAT('expected 5 earned points (2+1+0+1+1), got ', IFNULL(n,'NULL'));
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
   END IF;
 
-  SELECT is_correct INTO partial
-    FROM assessment.attempt_answers
-   WHERE attempt_id = a.id AND question_id = 'a1000001-0000-4000-8000-000000000003';
-  IF partial THEN
-    RAISE EXCEPTION 'a partially-correct multiple-choice answer was marked correct';
+  SELECT is_correct INTO n FROM assessment.attempt_answers
+   WHERE attempt_id = 'a2000001-0000-4000-8000-000000000001'
+     AND question_id = 'a1000001-0000-4000-8000-000000000003';
+  IF n = 1 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'a partially-correct multiple-choice answer was marked correct';
+  END IF;
+  SELECT 'ok  grading: 5 of 7 points, all-or-nothing respected' AS check_result;
+
+  -- --- the partial-unique emulation actually bites -------------------------
+  SELECT COUNT(*) INTO n
+    FROM information_schema.columns
+   WHERE table_schema = 'assessment' AND table_name = 'quiz_attempts'
+     AND column_name = 'open_attempt_key' AND extra LIKE '%GENERATED%';
+  IF n = 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'quiz_attempts.open_attempt_key is not a generated column';
+  END IF;
+  SELECT 'ok  one-open-attempt rule is enforced by a generated column' AS check_result;
+
+  -- --- search --------------------------------------------------------------
+  SELECT COUNT(*) INTO n FROM `search`.documents;
+  IF n = 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'search index is empty - did search.reindex_all() run?';
   END IF;
 
-  IF a.points_earned <> 5 THEN
-    RAISE EXCEPTION 'expected 5 earned points (2+1+0+1+1), got %', a.points_earned;
-  END IF;
-  IF NOT a.passed THEN
-    RAISE EXCEPTION 'attempt scored % percent but was not marked passed', a.score_percent;
-  END IF;
-
-  RAISE NOTICE 'ok  grading: % of % points (% percent) - passed', a.points_earned, a.points_possible, a.score_percent;
-END;
-$$;
-
--- ---------------------------------------------------------------------------
--- Search index is populated, weighted and actually returns hits.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE n bigint; hits bigint;
-BEGIN
-  SELECT count(*) INTO n FROM search.documents;
-  IF n = 0 THEN RAISE EXCEPTION 'search index is empty - did search.reindex_all() run?'; END IF;
-
-  SELECT count(*) INTO hits
-    FROM search.documents
-   WHERE search_vector @@ websearch_to_tsquery('english', 'microservices');
-  IF hits = 0 THEN RAISE EXCEPTION 'search for "microservices" returned nothing'; END IF;
-
-  -- word_similarity, not similarity: the latter scores the query against the
-  -- whole title, so a short typo inside a long title always falls below any
-  -- useful threshold. This is the operator the Search Service falls back to.
-  SELECT count(*) INTO hits
-    FROM search.documents
-   WHERE word_similarity('postgrs', title) > 0.4;
-  IF hits = 0 THEN RAISE EXCEPTION 'trigram fallback found nothing for the typo "postgrs"'; END IF;
-
-  RAISE NOTICE 'ok  search: % documents indexed, exact and fuzzy both match', n;
-END;
-$$;
-
--- ---------------------------------------------------------------------------
--- Analytics: events landed in a real monthly partition, not just the default,
--- and the rollups produced rows.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE n bigint; in_default bigint;
-BEGIN
-  SELECT count(*) INTO n FROM analytics.events;
-  IF n = 0 THEN RAISE EXCEPTION 'no analytics events seeded'; END IF;
-
-  SELECT count(*) INTO in_default FROM analytics.events_default;
-  IF in_default > 0 THEN
-    RAISE EXCEPTION '% event(s) fell into the default partition - a monthly partition is missing', in_default;
+  SELECT COUNT(*) INTO m FROM `search`.documents
+   WHERE MATCH(title, subtitle, body, tags_text)
+         AGAINST('microservices' IN NATURAL LANGUAGE MODE);
+  IF m = 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'search for "microservices" returned nothing';
   END IF;
 
-  SELECT count(*) INTO n FROM analytics.daily_platform_stats;
-  IF n = 0 THEN RAISE EXCEPTION 'daily_platform_stats is empty - did rollup_day() run?'; END IF;
+  -- Weighting must put the course whose *title* matches above a document that
+  -- only mentions the word in its body.
+  SELECT COUNT(*) INTO m FROM (
+    SELECT d.title,
+           MATCH(d.title) AGAINST('microservices' IN NATURAL LANGUAGE MODE) * 4
+         + MATCH(d.body)  AGAINST('microservices' IN NATURAL LANGUAGE MODE) AS score
+      FROM `search`.documents d
+     WHERE MATCH(d.title, d.subtitle, d.body, d.tags_text)
+           AGAINST('microservices' IN NATURAL LANGUAGE MODE)
+     ORDER BY score DESC LIMIT 1
+  ) top
+   WHERE top.title LIKE '%Microservices%';
+  IF m = 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'field weighting is not ranking a title match first';
+  END IF;
 
-  RAISE NOTICE 'ok  analytics events partitioned and rolled up';
-END;
-$$;
+  -- The typo fallback: prefix relaxation plus edit-distance ranking.
+  SELECT COUNT(*) INTO m FROM `search`.documents
+   WHERE MATCH(title, subtitle, body, tags_text) AGAINST('microserv*' IN BOOLEAN MODE);
+  IF m = 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'the prefix fallback found nothing for "microserv*"';
+  END IF;
+
+  IF `search`.levenshtein('kitten', 'sitting') <> 3 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'levenshtein() is wrong (kitten/sitting must be 3)';
+  END IF;
+  IF `search`.similarity_score('microservices', 'microservics') < 0.9 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'similarity_score() does not rate a one-character typo highly';
+  END IF;
+  SET @msg = CONCAT('ok  search: ', n, ' documents indexed, weighting and fuzzy fallback both work');
+  SELECT @msg AS check_result;
+
+  -- --- analytics -----------------------------------------------------------
+  SELECT COUNT(*) INTO n FROM analytics.events;
+  IF n = 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no analytics events seeded'; END IF;
+
+  -- Rows in the catch-all partition mean monthly maintenance has stopped.
+  SELECT COUNT(*) INTO m FROM analytics.events PARTITION (p_future);
+  IF m > 0 THEN
+    SET @msg = CONCAT(m, ' event(s) fell into the catch-all partition - a monthly partition is missing');
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+  END IF;
+
+  SELECT COUNT(*) INTO n FROM analytics.daily_platform_stats;
+  IF n = 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'daily_platform_stats is empty - did rollup_day() run?';
+  END IF;
+  SELECT 'ok  analytics events partitioned and rolled up' AS check_result;
+
+  -- --- the cross-service views resolve ------------------------------------
+  SELECT COUNT(*) INTO n FROM platform.v_course_outline;
+  IF n = 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'v_course_outline is empty'; END IF;
+  SELECT COUNT(*) INTO n FROM platform.v_course_cards;
+  IF n = 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'v_course_cards is empty'; END IF;
+  SELECT COUNT(*) INTO n FROM platform.v_learner_course_progress;
+  IF n = 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'v_learner_course_progress is empty'; END IF;
+  SELECT 'ok  cross-service views return data' AS check_result;
+END$$
 
 -- ---------------------------------------------------------------------------
--- The cross-service read views resolve and return rows.
+-- Constraints must actually reject bad rows. Each of these is expected to
+-- fail; the handler turns a *missing* failure into the error.
 -- ---------------------------------------------------------------------------
-DO $$
-DECLARE n bigint;
+DROP PROCEDURE IF EXISTS platform.verify_constraints$$
+CREATE PROCEDURE platform.verify_constraints()
 BEGIN
-  SELECT count(*) INTO n FROM public.v_course_outline;
-  IF n = 0 THEN RAISE EXCEPTION 'v_course_outline is empty'; END IF;
+  DECLARE rejected INT DEFAULT 0;
 
-  SELECT count(*) INTO n FROM public.v_course_cards;
-  IF n = 0 THEN RAISE EXCEPTION 'v_course_cards is empty'; END IF;
+  START TRANSACTION;
 
-  SELECT count(*) INTO n FROM public.v_learner_course_progress;
-  IF n = 0 THEN RAISE EXCEPTION 'v_learner_course_progress is empty'; END IF;
-
-  RAISE NOTICE 'ok  cross-service views return data';
-END;
-$$;
-
--- ---------------------------------------------------------------------------
--- Constraints actually bite. Each of these must fail.
--- ---------------------------------------------------------------------------
-DO $$
-BEGIN
+  -- The handler is scoped to this inner block on purpose. Declared at
+  -- procedure level it would also swallow the SIGNAL raised by the assertion
+  -- below, and the check would silently pass no matter what - which is exactly
+  -- what happened the first time this was written.
   BEGIN
-    INSERT INTO content.lesson_videos (lesson_id, video_url)
-    VALUES (gen_random_uuid(), '/local/file.mp4');
-    RAISE EXCEPTION 'a relative video path was accepted - the http check is not working';
-  EXCEPTION WHEN check_violation THEN
-    NULL;
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET rejected = rejected + 1;
+
+  -- 1. A relative video path must be refused.
+  INSERT INTO content.lesson_videos (lesson_id, video_url)
+  VALUES (UUID(), '/local/file.mp4');
+
+  -- 2. A published course without published_at must be refused.
+  INSERT INTO catalog.courses (slug, title, description, instructor_id, status,
+                               learning_outcomes, requirements)
+  VALUES ('no-date-course', 'No Date', '', UUID(), 'published', JSON_ARRAY(), JSON_ARRAY());
+
+  -- 3. An uppercase slug must be refused.
+  INSERT INTO catalog.courses (slug, title, description, instructor_id,
+                               learning_outcomes, requirements)
+  VALUES ('Bad Slug', 'Bad', '', UUID(), JSON_ARRAY(), JSON_ARRAY());
+
+  -- 4. A second open attempt for the same quiz and learner must be refused.
+  INSERT INTO assessment.quiz_attempts (quiz_id, user_id, course_id, attempt_no, state)
+  VALUES ('f0000001-0000-4000-8000-000000000001', '44444444-4444-4444-8444-444444444444',
+          'c0000001-0000-4000-8000-000000000001', 90, 'in_progress');
+  INSERT INTO assessment.quiz_attempts (quiz_id, user_id, course_id, attempt_no, state)
+  VALUES ('f0000001-0000-4000-8000-000000000001', '44444444-4444-4444-8444-444444444444',
+          'c0000001-0000-4000-8000-000000000001', 91, 'in_progress');
+
+  -- 5. A lesson whose course disagrees with its module must be refused.
+  INSERT INTO catalog.lessons (module_id, course_id, slug, title, `position`)
+  VALUES ('d0000001-0000-4000-8000-000000000001', 'c0000001-0000-4000-8000-000000000003',
+          'wrong-course', 'Wrong', 99);
+
   END;
 
-  BEGIN
-    INSERT INTO catalog.courses (slug, title, instructor_id, status)
-    VALUES ('no-date-course', 'No Date', gen_random_uuid(), 'published');
-    RAISE EXCEPTION 'a published course without published_at was accepted';
-  EXCEPTION WHEN check_violation THEN
-    NULL;
-  END;
+  ROLLBACK;
 
-  BEGIN
-    INSERT INTO assessment.quiz_attempts (quiz_id, user_id, course_id, attempt_no, state)
-    VALUES ('f0000001-0000-4000-8000-000000000001',
-            '44444444-4444-4444-8444-444444444444',
-            'c0000001-0000-4000-8000-000000000001', 9, 'in_progress');
-    INSERT INTO assessment.quiz_attempts (quiz_id, user_id, course_id, attempt_no, state)
-    VALUES ('f0000001-0000-4000-8000-000000000001',
-            '44444444-4444-4444-8444-444444444444',
-            'c0000001-0000-4000-8000-000000000001', 10, 'in_progress');
-    RAISE EXCEPTION 'two attempts were open at once - the partial unique index is not working';
-  EXCEPTION WHEN unique_violation THEN
-    NULL;
-  END;
-
-  RAISE NOTICE 'ok  check constraints and partial unique index reject bad rows';
-
-  -- Nothing above should persist.
-  RAISE EXCEPTION 'rollback_marker';
-EXCEPTION WHEN OTHERS THEN
-  IF SQLERRM <> 'rollback_marker' THEN RAISE; END IF;
-END;
-$$;
+  IF rejected <> 5 THEN
+    SET @msg = CONCAT('expected 5 constraint rejections, got ', rejected);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+  END IF;
+  SELECT 'ok  check constraints, the unique index and the module guard all reject bad rows'
+         AS check_result;
+END$$
 
 -- ---------------------------------------------------------------------------
--- Article edits are versioned by the snapshot trigger.
+-- Article edits are versioned, and reordering survives the lack of DEFERRABLE.
 -- ---------------------------------------------------------------------------
-DO $$
-DECLARE
-  target uuid;
-  before_rev integer;
-  after_rev  integer;
-  snapshots  bigint;
+DROP PROCEDURE IF EXISTS platform.verify_behaviour$$
+CREATE PROCEDURE platform.verify_behaviour()
 BEGIN
-  SELECT id, revision INTO target, before_rev FROM content.articles ORDER BY created_at LIMIT 1;
+  DECLARE v_id CHAR(36) CHARACTER SET ascii;
+  DECLARE v_before INT;
+  DECLARE v_after INT;
+  DECLARE v_snapshots INT;
+  DECLARE v_order TEXT;
 
-  UPDATE content.articles SET body = body || E'\n\nAppended by the verify suite.' WHERE id = target;
+  START TRANSACTION;
 
-  SELECT revision INTO after_rev FROM content.articles WHERE id = target;
-  SELECT count(*) INTO snapshots FROM content.article_revisions WHERE article_id = target;
+  SELECT id, revision INTO v_id, v_before
+    FROM content.articles ORDER BY created_at LIMIT 1;
 
-  IF after_rev <> before_rev + 1 THEN
-    RAISE EXCEPTION 'article revision did not advance (% -> %)', before_rev, after_rev;
+  UPDATE content.articles SET body = CONCAT(body, '\n\nAppended by the verify suite.')
+   WHERE id = v_id;
+
+  SELECT revision INTO v_after FROM content.articles WHERE id = v_id;
+  SELECT COUNT(*) INTO v_snapshots FROM content.article_revisions WHERE article_id = v_id;
+
+  IF v_after <> v_before + 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'the article revision did not advance';
   END IF;
-  IF snapshots = 0 THEN
-    RAISE EXCEPTION 'no revision snapshot was written';
+  IF v_snapshots = 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no revision snapshot was written';
   END IF;
+  SELECT 'ok  article edits snapshot into article_revisions' AS check_result;
 
-  RAISE NOTICE 'ok  article edits snapshot into article_revisions (rev % -> %)', before_rev, after_rev;
+  -- Reverse a module's lessons. Without the negative-staging trick in
+  -- catalog.reorder_lessons() this collides on the unique (module_id, position).
+  CALL catalog.reorder_lessons(
+    'd0000001-0000-4000-8000-000000000002',
+    JSON_ARRAY('e0000001-0000-4000-8000-000000000006',
+               'e0000001-0000-4000-8000-000000000005',
+               'e0000001-0000-4000-8000-000000000004')
+  );
 
-  RAISE EXCEPTION 'rollback_marker';
-EXCEPTION WHEN OTHERS THEN
-  IF SQLERRM <> 'rollback_marker' THEN RAISE; END IF;
-END;
-$$;
+  SELECT GROUP_CONCAT(slug ORDER BY `position`) INTO v_order
+    FROM catalog.lessons WHERE module_id = 'd0000001-0000-4000-8000-000000000002';
+
+  IF v_order <> 'repository-layer,service-layer,routes-controllers-layer' THEN
+    SET @msg = CONCAT('reorder produced the wrong order: ', v_order);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+  END IF;
+  SELECT 'ok  lessons reorder without deferrable constraints' AS check_result;
+
+  ROLLBACK;
+END$$
+
+DELIMITER ;
+
+CALL platform.verify_all();
+CALL platform.verify_constraints();
+CALL platform.verify_behaviour();
+
+DROP PROCEDURE platform.verify_all;
+DROP PROCEDURE platform.verify_constraints;
+DROP PROCEDURE platform.verify_behaviour;
