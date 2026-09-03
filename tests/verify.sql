@@ -141,6 +141,9 @@ BEGIN
     LEFT JOIN content.articles a ON a.lesson_id = l.id
    WHERE l.course_id IN ('c0000001-0000-4000-8000-000000000004',
                          'c0000001-0000-4000-8000-000000000005')
+     -- Only the article lessons. A quiz lesson has no article by design; its
+     -- runnable code is the scratchpad on the quiz page instead.
+     AND l.kind = 'article'
      AND (a.id IS NULL OR a.body NOT LIKE '%```html%');
   IF n > 0 THEN
     SIGNAL SQLSTATE '45000'
