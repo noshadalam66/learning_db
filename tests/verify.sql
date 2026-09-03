@@ -115,6 +115,35 @@ BEGIN
   IF n > 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'an article has an empty body'; END IF;
   SELECT 'ok  articles stored as both markdown and html' AS check_result;
 
+  -- --- plain-text columns really are plain text ---------------------------
+  -- catalog.courses.description is rendered as-is by every consumer; only
+  -- content.articles carries a format column. Markdown emphasis written into a
+  -- description reaches the page as literal asterisks, which is a bug you only
+  -- notice by looking. This catches it at build time instead.
+  SELECT COUNT(*) INTO n
+    FROM catalog.courses
+   WHERE description REGEXP '\\*\\*[^*]+\\*\\*'
+      OR subtitle REGEXP '\\*\\*[^*]+\\*\\*';
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'a course description contains Markdown - that column is plain text';
+  END IF;
+  SELECT 'ok  plain-text course copy contains no markdown' AS check_result;
+
+  -- --- every HTML lesson carries a runnable example ------------------------
+  -- The front end turns a ```html fence into a code box with a Try yourself
+  -- button. A lesson in the HTML course without one silently loses the feature.
+  SELECT COUNT(*) INTO n
+    FROM catalog.lessons l
+    LEFT JOIN content.articles a ON a.lesson_id = l.id
+   WHERE l.course_id = 'c0000001-0000-4000-8000-000000000004'
+     AND (a.id IS NULL OR a.body NOT LIKE '%```html%');
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'an HTML-course lesson has no runnable ```html example';
+  END IF;
+  SELECT 'ok  every HTML lesson has a runnable example' AS check_result;
+
   -- --- cross-table integrity ----------------------------------------------
   SELECT COUNT(*) INTO n
     FROM catalog.lessons l JOIN catalog.modules mo ON mo.id = l.module_id
