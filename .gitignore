@@ -16,3 +16,6 @@ backups/
 
 # Logs
 *.log
+
+# Only the content tests need these.
+node_modules

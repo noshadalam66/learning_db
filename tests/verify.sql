@@ -159,13 +159,15 @@ BEGIN
     FROM catalog.lessons l
     LEFT JOIN content.articles a ON a.lesson_id = l.id
    WHERE l.course_id IN ('c0000001-0000-4000-8000-000000000006',
-                         'c0000001-0000-4000-8000-000000000007')
+                         'c0000001-0000-4000-8000-000000000007',
+                         'c0000001-0000-4000-8000-000000000008')
      AND l.kind = 'article'
      AND (a.id IS NULL
           OR a.body NOT LIKE CONCAT('%```',
                CASE l.course_id
                  WHEN 'c0000001-0000-4000-8000-000000000006' THEN 'javascript'
-                 ELSE 'typescript'
+                 WHEN 'c0000001-0000-4000-8000-000000000007' THEN 'typescript'
+                 ELSE 'python'
                END, '%'));
   IF n > 0 THEN
     SIGNAL SQLSTATE '45000'
@@ -186,6 +188,7 @@ BEGIN
       SET MESSAGE_TEXT = 'two lessons share a title - each one is an indexed page';
   END IF;
   SELECT 'ok  every lesson title is unique' AS check_result;
+
 
   -- --- cross-table integrity ----------------------------------------------
   SELECT COUNT(*) INTO n
