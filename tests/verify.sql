@@ -151,6 +151,42 @@ BEGIN
   END IF;
   SELECT 'ok  every hands-on lesson has a runnable example' AS check_result;
 
+  -- The language courses use the fence of their own language, and the front
+  -- end reads the fence to decide which runner the Try yourself button opens.
+  -- A JavaScript lesson carrying a ```html fence would open the wrong one, so
+  -- check the pairing rather than merely that some fence exists.
+  SELECT COUNT(*) INTO n
+    FROM catalog.lessons l
+    LEFT JOIN content.articles a ON a.lesson_id = l.id
+   WHERE l.course_id IN ('c0000001-0000-4000-8000-000000000006',
+                         'c0000001-0000-4000-8000-000000000007')
+     AND l.kind = 'article'
+     AND (a.id IS NULL
+          OR a.body NOT LIKE CONCAT('%```',
+               CASE l.course_id
+                 WHEN 'c0000001-0000-4000-8000-000000000006' THEN 'javascript'
+                 ELSE 'typescript'
+               END, '%'));
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'a language lesson has no example fenced in its own language';
+  END IF;
+  SELECT 'ok  every language lesson has a runnable example in its own language' AS check_result;
+
+  -- --- lesson titles are unique across the catalogue -----------------------
+  -- A lesson title becomes the page's <title> and its breadcrumb. Three
+  -- courses each ending a level with "Level 1 Check: The Basics" gives search
+  -- engines three indexed pages that look identical and gives a learner
+  -- looking at their own results no way to tell which one they took. The
+  -- titles have to carry the subject, not just the level.
+  SELECT COUNT(*) INTO n
+    FROM (SELECT title FROM catalog.lessons GROUP BY title HAVING COUNT(*) > 1) dupes;
+  IF n > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'two lessons share a title - each one is an indexed page';
+  END IF;
+  SELECT 'ok  every lesson title is unique' AS check_result;
+
   -- --- cross-table integrity ----------------------------------------------
   SELECT COUNT(*) INTO n
     FROM catalog.lessons l JOIN catalog.modules mo ON mo.id = l.module_id
