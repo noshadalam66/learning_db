@@ -1,0 +1,13 @@
+{
+  "name": "learning-db",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Schema, migrations and seeds. The npm package exists only for the content tests, which drive a real browser.",
+  "type": "module",
+  "scripts": {
+    "test:fences": "node tests/run-code-fences.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
