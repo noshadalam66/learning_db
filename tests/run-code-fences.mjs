@@ -32,6 +32,8 @@ const SITE = (process.env.SITE_URL || 'http://localhost:8080').replace(/\/$/, ''
 // a question their fences answer.
 const COURSES = [
   { id: 'c0000001-0000-4000-8000-000000000008', fence: 'python', example: 'py-basics' },
+  { id: 'c0000001-0000-4000-8000-000000000009', fence: 'php', example: 'php-basics' },
+  { id: 'c0000001-0000-4000-8000-00000000000a', fence: 'ruby', example: 'rb-basics' },
 ];
 
 function fencesFor(courseId, fence) {
@@ -63,11 +65,15 @@ let total = 0;
 
 for (const course of COURSES) {
   const blocks = fencesFor(course.id, course.fence);
+  if (!blocks.length) {
+    console.log(`\n${course.fence}: not seeded, skipping`);
+    continue;
+  }
   console.log(`\n${course.fence}: ${blocks.length} fences`);
 
   await page.goto(`${SITE}/playground.php?example=${course.example}`);
   await page.frameLocator('[data-output]').locator('#out')
-    .filter({ hasNotText: 'Starting Python' }).waitFor({ timeout: 180000 });
+    .filter({ hasNotText: 'Starting' }).waitFor({ timeout: 180000 });
 
   for (const block of blocks) {
     total++;
@@ -76,7 +82,7 @@ for (const course of COURSES) {
       return new Promise((resolve) => {
         const onMessage = (event) => {
           if (event.source !== frame.contentWindow) return;
-          if (event.data.kind !== 'python-done') return;
+          if (event.data.kind !== 'interpreter-done') return;
           window.removeEventListener('message', onMessage);
           resolve(event.data);
         };
@@ -84,7 +90,7 @@ for (const course of COURSES) {
         // Generous stdin: an example that calls input() should be exercised,
         // not reported as a failure for having nothing to read.
         frame.contentWindow.postMessage(
-          { kind: 'python-run', token: 1, code, stdin: 'Aisha\n1997\nx\ny\nz' }, '*');
+          { kind: 'interpreter-run', token: 1, code, stdin: 'Aisha\n1997\nx\ny\nz' }, '*');
       });
     }, block.code);
 

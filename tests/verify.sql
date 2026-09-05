@@ -160,14 +160,18 @@ BEGIN
     LEFT JOIN content.articles a ON a.lesson_id = l.id
    WHERE l.course_id IN ('c0000001-0000-4000-8000-000000000006',
                          'c0000001-0000-4000-8000-000000000007',
-                         'c0000001-0000-4000-8000-000000000008')
+                         'c0000001-0000-4000-8000-000000000008',
+                         'c0000001-0000-4000-8000-000000000009',
+                         'c0000001-0000-4000-8000-00000000000a')
      AND l.kind = 'article'
      AND (a.id IS NULL
           OR a.body NOT LIKE CONCAT('%```',
                CASE l.course_id
                  WHEN 'c0000001-0000-4000-8000-000000000006' THEN 'javascript'
                  WHEN 'c0000001-0000-4000-8000-000000000007' THEN 'typescript'
-                 ELSE 'python'
+                 WHEN 'c0000001-0000-4000-8000-000000000008' THEN 'python'
+                 WHEN 'c0000001-0000-4000-8000-000000000009' THEN 'php'
+                 ELSE 'ruby'
                END, '%'));
   IF n > 0 THEN
     SIGNAL SQLSTATE '45000'
