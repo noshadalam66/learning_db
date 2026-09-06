@@ -35,7 +35,7 @@ erDiagram
         char36 id PK
         varchar slug UK
         varchar title
-        char36 instructor_id "identity.users - no FK"
+        char36 instructor_id "identity_users - no FK"
         enum status "draft|in_review|published|archived"
         int lesson_count "cached"
         int duration_minutes "cached"
@@ -100,8 +100,8 @@ Three things to notice:
 
 ## Seven owners, one server
 
-In MySQL a schema *is* a database, so the per-service split is seven databases
-plus `platform` for the shared read views.
+Everything lives in one database. The per-service split is carried by a prefix
+on the table name, and the groupings below are that convention.
 
 ```mermaid
 flowchart TB
@@ -259,7 +259,7 @@ erDiagram
 
 The four cached columns — `lesson_count`, `duration_minutes`, `rating_average`,
 `rating_count` — each have exactly one procedure that recomputes them
-(`catalog.refresh_course_rollup`, `catalog.refresh_course_rating`), and
+(`catalog_refresh_course_rollup`, `catalog_refresh_course_rating`), and
 `tests/verify.sql` fails if they drift from the rows they summarise.
 
 ---
@@ -456,7 +456,7 @@ erDiagram
     }
 ```
 
-`documents` is a flattened copy rebuilt by `search.reindex_all()`. It has no
+`documents` is a flattened copy rebuilt by `search_reindex_all()`. It has no
 foreign keys by design — it is a derived store, and a stale row is a reindex
 away from being fixed.
 
@@ -515,10 +515,10 @@ gateway, and here is every row that moves:
 ```mermaid
 sequenceDiagram
     participant API as Progress Service
-    participant LP as progress.lesson_progress
-    participant EN as progress.enrolments
-    participant CE as progress.certificates
-    participant AN as analytics.events
+    participant LP as progress_lesson_progress
+    participant EN as progress_enrolments
+    participant CE as progress_certificates
+    participant AN as analytics_events
 
     API->>LP: UPSERT (user_id, lesson_id)<br/>seconds_watched += delta<br/>state = 'completed'
     API->>EN: last_lesson_id = lesson 5
@@ -537,4 +537,4 @@ Two details worth keeping:
   ever sees an updated lesson row beside a stale summary.
 - The analytics emit is **not** awaited. Events can be lost, which is precisely
   why nothing authoritative is ever reconstructed from the event stream — the
-  drop-off report reads `progress`, not `analytics.events`.
+  drop-off report reads `progress`, not `analytics_events`.

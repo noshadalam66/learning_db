@@ -15,14 +15,14 @@
 -- ===========================================================================
 
 -- Lena is seeded as a student in 0001; the HTML course needs her as its author.
-INSERT INTO identity.user_roles (user_id, role_id)
+INSERT INTO identity_user_roles (user_id, role_id)
 SELECT u.id, r.id
-  FROM identity.users u
-  JOIN identity.roles r ON r.name = 'instructor'
+  FROM identity_users u
+  JOIN identity_roles r ON r.name = 'instructor'
  WHERE u.email = 'lena@learning.test'
-ON DUPLICATE KEY UPDATE granted_at = identity.user_roles.granted_at;
+ON DUPLICATE KEY UPDATE granted_at = identity_user_roles.granted_at;
 
-INSERT INTO catalog.tags (id, slug, name) VALUES
+INSERT INTO catalog_tags (id, slug, name) VALUES
   ('bbbbbbb1-0000-4000-8000-000000000008', 'html',          'HTML'),
   ('bbbbbbb1-0000-4000-8000-000000000009', 'accessibility', 'Accessibility'),
   ('bbbbbbb1-0000-4000-8000-00000000000a', 'web-standards', 'Web Standards')
@@ -31,7 +31,7 @@ ON DUPLICATE KEY UPDATE name = VALUES(name);
 -- ---------------------------------------------------------------------------
 -- The course
 -- ---------------------------------------------------------------------------
-INSERT INTO catalog.courses
+INSERT INTO catalog_courses
   (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
@@ -39,8 +39,8 @@ VALUES
    'html-from-basics-to-expert',
    'HTML: From Basics to Expert',
    'Four levels, twelve lessons, every example runnable in the browser',
-   -- catalog.courses.description is plain text, not Markdown. Only
-   -- content.articles carries a format column, and only that body is rendered.
+   -- catalog_courses.description is plain text, not Markdown. Only
+   -- content_articles carries a format column, and only that body is rendered.
    -- Asterisks here would reach the page as literal asterisks.
    'A complete path through HTML in four levels. Level 1, Basic, gets a valid document on screen and teaches the elements you will use every day. Level 2, Intermediate, covers the two hard parts of real pages: tables that actually communicate data, and forms that validate themselves. Level 3, Advanced, moves to semantic layout, accessible components and the metadata that decides how your page looks when someone shares it. Level 4, Expert, finishes with templates, custom elements, loading performance and progressive enhancement.
 
@@ -61,7 +61,7 @@ ON DUPLICATE KEY UPDATE
   title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
-INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
+INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000004', 'bbbbbbb1-0000-4000-8000-000000000008'),
   ('c0000001-0000-4000-8000-000000000004', 'bbbbbbb1-0000-4000-8000-000000000009'),
   ('c0000001-0000-4000-8000-000000000004', 'bbbbbbb1-0000-4000-8000-00000000000a')
@@ -70,7 +70,7 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 -- ---------------------------------------------------------------------------
 -- The four levels
 -- ---------------------------------------------------------------------------
-INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
+INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000008', 'c0000001-0000-4000-8000-000000000004',
    'Level 1 - Basic',
    'A valid document, the text elements, and the three things every page is made of: words, links and pictures.', 1),
@@ -89,7 +89,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 -- Twelve lessons, three per level. All articles: this course is read-and-run,
 -- not watch-and-forget, so there is no video metadata for any of them.
 -- ---------------------------------------------------------------------------
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -157,7 +157,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `posit
 -- Service fills it from body on first read; seeding it here would mean
 -- maintaining the same document twice and letting the two drift.
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -422,12 +422,12 @@ whole reason to use a list element instead of three paragraphs with dashes.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 2 - Intermediate
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -810,12 +810,12 @@ people on a phone. `default` marks the track to enable automatically.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 3 - Advanced
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1199,12 +1199,12 @@ describing a paid course as free is a manual-action penalty, not a clever trick.
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 4 - Expert
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1621,10 +1621,10 @@ to it.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Refresh the denormalised counters and re-index for search.
 -- ---------------------------------------------------------------------------
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000004');
-CALL `search`.reindex_all();
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000004');
+CALL search_reindex_all();

@@ -3,7 +3,7 @@
 -- ===========================================================================
 
 -- lessons_total comes from the catalogue so the rollup has a denominator.
-INSERT INTO progress.enrolments (id, user_id, course_id, lessons_total, enrolled_at)
+INSERT INTO progress_enrolments (id, user_id, course_id, lessons_total, enrolled_at)
 SELECT v.enrolment_id, v.user_id, v.course_id, c.lesson_count,
        DATE_SUB(UTC_TIMESTAMP(3), INTERVAL v.age_days DAY)
   FROM (
@@ -17,12 +17,12 @@ SELECT v.enrolment_id, v.user_id, v.course_id, c.lesson_count,
     UNION ALL SELECT 'b0000001-0000-4000-8000-000000000004',
            '55555555-5555-4555-8555-555555555555', 'c0000001-0000-4000-8000-000000000001', 5
   ) v
-  JOIN catalog.courses c ON c.id = v.course_id
+  JOIN catalog_courses c ON c.id = v.course_id
 ON DUPLICATE KEY UPDATE lessons_total = VALUES(lessons_total);
 
 -- Sam has worked through the first four lessons of the microservices course
 -- and is part way into the fifth.
-INSERT INTO progress.lesson_progress
+INSERT INTO progress_lesson_progress
   (enrolment_id, user_id, course_id, lesson_id, state, seconds_watched,
    last_position_seconds, view_count, first_viewed_at, last_viewed_at, completed_at)
 VALUES
@@ -57,18 +57,18 @@ VALUES
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY), NULL)
 ON DUPLICATE KEY UPDATE state = VALUES(state);
 
-UPDATE progress.enrolments SET last_lesson_id = 'e0000001-0000-4000-8000-000000000005'
+UPDATE progress_enrolments SET last_lesson_id = 'e0000001-0000-4000-8000-000000000005'
  WHERE id = 'b0000001-0000-4000-8000-000000000001';
-UPDATE progress.enrolments SET last_lesson_id = 'e0000001-0000-4000-8000-00000000000f'
+UPDATE progress_enrolments SET last_lesson_id = 'e0000001-0000-4000-8000-00000000000f'
  WHERE id = 'b0000001-0000-4000-8000-000000000003';
 
-CALL progress.refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000001');
-CALL progress.refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000002');
-CALL progress.refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000003');
-CALL progress.refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000004');
+CALL progress_refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000001');
+CALL progress_refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000002');
+CALL progress_refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000003');
+CALL progress_refresh_enrolment_rollup('b0000001-0000-4000-8000-000000000004');
 
 -- Notes carry no unique key, so guard the insert by hand.
-INSERT INTO progress.lesson_notes (user_id, lesson_id, course_id, body, at_seconds)
+INSERT INTO progress_lesson_notes (user_id, lesson_id, course_id, body, at_seconds)
 SELECT v.user_id, v.lesson_id, v.course_id, v.body, v.at_seconds
   FROM (
     SELECT '44444444-4444-4444-8444-444444444444' AS user_id,
@@ -81,7 +81,7 @@ SELECT v.user_id, v.lesson_id, v.course_id, v.body, v.at_seconds
            'Transactional coupling as the boundary test. Try this on the billing code at work.', NULL
   ) v
  WHERE NOT EXISTS (
-   SELECT 1 FROM progress.lesson_notes n
+   SELECT 1 FROM progress_lesson_notes n
     WHERE n.user_id = v.user_id AND n.lesson_id = v.lesson_id
  );
 
@@ -90,7 +90,7 @@ SELECT v.user_id, v.lesson_id, v.course_id, v.body, v.at_seconds
 -- Sam gets Q1 right, Q2 right, Q3 partially wrong (choice questions are
 -- all-or-nothing), Q4 right and Q5 right: 5 of 7 points.
 -- ---------------------------------------------------------------------------
-INSERT INTO assessment.quiz_attempts
+INSERT INTO assessment_quiz_attempts
   (id, quiz_id, user_id, course_id, attempt_no, state, started_at, submitted_at)
 VALUES
   ('a2000001-0000-4000-8000-000000000001', 'f0000001-0000-4000-8000-000000000001',
@@ -99,10 +99,10 @@ VALUES
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 26 DAY))
 ON DUPLICATE KEY UPDATE state = VALUES(state);
 
-INSERT INTO assessment.attempt_answers (attempt_id, question_id, selected_option_ids, text_answer)
+INSERT INTO assessment_attempt_answers (attempt_id, question_id, selected_option_ids, text_answer)
 SELECT 'a2000001-0000-4000-8000-000000000001', v.question_id,
        IFNULL(
-         (SELECT JSON_ARRAYAGG(o.id) FROM assessment.question_options o
+         (SELECT JSON_ARRAYAGG(o.id) FROM assessment_question_options o
            WHERE o.question_id = v.question_id AND o.body = v.chosen_body),
          JSON_ARRAY()
        ),
@@ -119,18 +119,18 @@ SELECT 'a2000001-0000-4000-8000-000000000001', v.question_id,
   ) v
 ON DUPLICATE KEY UPDATE selected_option_ids = VALUES(selected_option_ids);
 
-CALL assessment.grade_attempt('a2000001-0000-4000-8000-000000000001');
+CALL assessment_grade_attempt('a2000001-0000-4000-8000-000000000001');
 
 -- ---------------------------------------------------------------------------
 -- Behaviour events across the last two weeks, then the rollups.
 -- ---------------------------------------------------------------------------
-CALL analytics.ensure_month_partition(DATE(UTC_TIMESTAMP()));
-CALL analytics.ensure_month_partition(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
-CALL analytics.ensure_month_partition(DATE_ADD(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
+CALL analytics_ensure_month_partition(DATE(UTC_TIMESTAMP()));
+CALL analytics_ensure_month_partition(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
+CALL analytics_ensure_month_partition(DATE_ADD(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
 
 -- MySQL has no generate_series, so the day range comes from a small derived
 -- table of digits. 14 days x 2 learners x 3 event kinds.
-INSERT INTO analytics.events
+INSERT INTO analytics_events
   (occurred_at, user_id, session_id, event_name, entity_type, entity_id,
    course_id, lesson_id, properties)
 SELECT
@@ -156,19 +156,19 @@ JOIN (
   SELECT id, course_id,
          ROW_NUMBER() OVER (ORDER BY course_id, `position`) - 1 AS rn,
          COUNT(*) OVER () AS total
-    FROM catalog.lessons
+    FROM catalog_lessons
    WHERE status = 'published'
 ) l
   ON l.rn = (d.n * 3 + IF(u.user_id = '44444444-4444-4444-8444-444444444444', 0, 1)) % l.total
-WHERE NOT EXISTS (SELECT 1 FROM analytics.events WHERE event_name = 'lesson_viewed');
+WHERE NOT EXISTS (SELECT 1 FROM analytics_events WHERE event_name = 'lesson_viewed');
 
-INSERT INTO analytics.events (occurred_at, user_id, event_name, entity_type, course_id, properties)
+INSERT INTO analytics_events (occurred_at, user_id, event_name, entity_type, course_id, properties)
 SELECT e.enrolled_at, e.user_id, 'course_enrolled', 'course', e.course_id,
        JSON_OBJECT('source', 'catalogue')
-  FROM progress.enrolments e
- WHERE NOT EXISTS (SELECT 1 FROM analytics.events WHERE event_name = 'course_enrolled');
+  FROM progress_enrolments e
+ WHERE NOT EXISTS (SELECT 1 FROM analytics_events WHERE event_name = 'course_enrolled');
 
-INSERT INTO analytics.events (occurred_at, user_id, event_name, properties)
+INSERT INTO analytics_events (occurred_at, user_id, event_name, properties)
 SELECT DATE_SUB(UTC_TIMESTAMP(3), INTERVAL d.n DAY),
        '44444444-4444-4444-8444-444444444444', 'search_performed',
        JSON_OBJECT('query', q.term, 'results', q.hits)
@@ -176,9 +176,9 @@ SELECT DATE_SUB(UTC_TIMESTAMP(3), INTERVAL d.n DAY),
  CROSS JOIN (SELECT 'mysql indexes' AS term, 4 AS hits
              UNION ALL SELECT 'microservices', 3
              UNION ALL SELECT 'csrf', 1) q
- WHERE NOT EXISTS (SELECT 1 FROM analytics.events WHERE event_name = 'search_performed');
+ WHERE NOT EXISTS (SELECT 1 FROM analytics_events WHERE event_name = 'search_performed');
 
-INSERT INTO `search`.query_log (user_id, query_text, result_count)
+INSERT INTO search_query_log (user_id, query_text, result_count)
 SELECT v.user_id, v.query_text, v.result_count
   FROM (
     SELECT '44444444-4444-4444-8444-444444444444' AS user_id, 'mysql indexes' AS query_text, 4 AS result_count
@@ -186,11 +186,11 @@ SELECT v.user_id, v.query_text, v.result_count
     UNION ALL SELECT '55555555-5555-4555-8555-555555555555', 'csrf token php', 1
     UNION ALL SELECT '55555555-5555-4555-8555-555555555555', 'kubernetes operators', 0
   ) v
- WHERE NOT EXISTS (SELECT 1 FROM `search`.query_log);
+ WHERE NOT EXISTS (SELECT 1 FROM search_query_log);
 
 -- Synonyms also rescue terms shorter than innodb_ft_min_token_size (3), which
 -- FULLTEXT will not index at all.
-INSERT INTO `search`.synonyms (term, expands_to) VALUES
+INSERT INTO search_synonyms (term, expands_to) VALUES
   ('js',    JSON_ARRAY('javascript')),
   ('ci',    JSON_ARRAY('continuous', 'integration')),
   ('db',    JSON_ARRAY('database', 'mysql')),
@@ -198,18 +198,18 @@ INSERT INTO `search`.synonyms (term, expands_to) VALUES
   ('sql',   JSON_ARRAY('mysql', 'query'))
 ON DUPLICATE KEY UPDATE expands_to = VALUES(expands_to);
 
-CALL `search`.reindex_all();
+CALL search_reindex_all();
 
 -- Roll up the last eight days.
-CALL analytics.rollup_day(DATE(UTC_TIMESTAMP()));
-CALL analytics.rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 1 DAY));
-CALL analytics.rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 2 DAY));
-CALL analytics.rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 3 DAY));
-CALL analytics.rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 4 DAY));
-CALL analytics.rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 5 DAY));
-CALL analytics.rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 6 DAY));
-CALL analytics.rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 7 DAY));
+CALL analytics_rollup_day(DATE(UTC_TIMESTAMP()));
+CALL analytics_rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 1 DAY));
+CALL analytics_rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 2 DAY));
+CALL analytics_rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 3 DAY));
+CALL analytics_rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 4 DAY));
+CALL analytics_rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 5 DAY));
+CALL analytics_rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 6 DAY));
+CALL analytics_rollup_day(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 7 DAY));
 
-CALL catalog.refresh_course_rating('c0000001-0000-4000-8000-000000000001');
-CALL catalog.refresh_course_rating('c0000001-0000-4000-8000-000000000002');
-CALL catalog.refresh_course_rating('c0000001-0000-4000-8000-000000000003');
+CALL catalog_refresh_course_rating('c0000001-0000-4000-8000-000000000001');
+CALL catalog_refresh_course_rating('c0000001-0000-4000-8000-000000000002');
+CALL catalog_refresh_course_rating('c0000001-0000-4000-8000-000000000003');

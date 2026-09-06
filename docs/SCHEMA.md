@@ -1,21 +1,25 @@
 # Schema reference
 
-Seven MySQL databases, one per microservice, plus `platform` for the shared read
-views and the migration ledger. In MySQL a schema *is* a database, so the split
-that PostgreSQL would express as seven schemas is expressed here as seven
-databases on one server.
+One MySQL database holding 32 tables, with a prefix on each table name saying
+which microservice owns it. In MySQL a schema *is* a database, so the split that
+PostgreSQL would express as seven schemas is expressed here as a naming
+convention instead — see [`DECISIONS.md`](DECISIONS.md) for why.
+
+The database is named only in the connection string, so it can be whatever the
+host calls it; on shared hosting that is the account prefix plus your name.
 
 For the diagrams, see [`ERD.md`](ERD.md).
 
 ```
-identity     User Service       accounts, credentials, roles
-catalog      Course Service     courses, modules, lessons, categories, reviews
-content      Content Service    article bodies, video URL metadata, attachments
-progress     Progress Service   enrolments, per-lesson progress, certificates
-assessment   Quiz Service       quizzes, questions, attempts, grading
-search       Search Service     denormalised search documents, query log
-analytics    Analytics Service  behaviour events, daily rollups
-platform     (nobody)           cross-service views, schema_migrations
+identity_*     User Service       accounts, credentials, roles
+catalog_*      Course Service     courses, modules, lessons, categories, reviews
+content_*      Content Service    article bodies, video URL metadata, attachments
+progress_*     Progress Service   enrolments, per-lesson progress, certificates
+assessment_*   Quiz Service       quizzes, questions, attempts, grading
+search_*       Search Service     denormalised search documents, query log
+analytics_*    Analytics Service  behaviour events, daily rollups
+v_*            (nobody)           cross-service read views
+platform_*     (nobody)           schema_migrations, the migration ledger
 ```
 
 ## Conventions
@@ -29,7 +33,7 @@ charset — **InnoDB refuses a foreign key between columns whose character sets
 differ**, and `tests/verify.sql` fails if a `CHAR` id column is anything but
 ascii.
 
-The append-heavy log tables (`analytics.events`, `search.query_log`) use
+The append-heavy log tables (`analytics_events`, `search_query_log`) use
 `BIGINT AUTO_INCREMENT` instead, because random uuids scatter inserts across
 the B-tree rather than appending to it.
 
@@ -49,7 +53,7 @@ There is one such trigger per table with an `updated_at`.
 
 **Text is utf8mb4 with the server default collation** (`utf8mb4_0900_ai_ci`),
 which is case- and accent-insensitive. That is what makes
-`identity.users.email` behave like PostgreSQL's `citext` for free.
+`identity_users.email` behave like PostgreSQL's `citext` for free.
 Digest and token columns are the exception — declared `ascii`/`ascii_bin` so
 comparison is exact and byte-for-byte.
 
@@ -74,26 +78,28 @@ where each appears.
 
 ## Where cross-service references stop being foreign keys
 
-Inside a database, referential integrity is enforced normally — all 21 foreign
-keys in this schema are internal. Across databases it is not, and that is
-deliberate rather than a MySQL limitation: **InnoDB supports cross-database
-foreign keys.** A foreign key across a service boundary means those two services
-can never be moved onto separate servers, which is the point of splitting them.
+Within a service's own tables, referential integrity is enforced normally — all
+21 foreign keys in this schema stay inside one prefix group. Across a service
+boundary there is no constraint, and that is deliberate rather than a MySQL
+limitation: every table now shares one database, so a foreign key there would
+be trivial to add. It is left out because a foreign key across a service
+boundary means those two services can never be moved apart, which is the point
+of splitting them.
 
 | Column | Logically points at |
 |---|---|
-| `catalog.courses.instructor_id` | `identity.users.id` |
-| `catalog.course_reviews.user_id` | `identity.users.id` |
-| `content.lesson_videos.lesson_id` | `catalog.lessons.id` |
-| `content.articles.lesson_id` | `catalog.lessons.id` |
-| `content.articles.author_id` | `identity.users.id` |
-| `content.lesson_attachments.lesson_id` | `catalog.lessons.id` |
-| `progress.enrolments.user_id` / `.course_id` | `identity.users.id` / `catalog.courses.id` |
-| `progress.lesson_progress.lesson_id` | `catalog.lessons.id` |
-| `assessment.quizzes.course_id` / `.lesson_id` | `catalog.courses.id` / `catalog.lessons.id` |
-| `assessment.quiz_attempts.user_id` | `identity.users.id` |
-| `search.documents.entity_id` | whichever entity `entity_type` names |
-| `analytics.events.*_id` | anything; the stream is intentionally schemaless here |
+| `catalog_courses.instructor_id` | `identity_users.id` |
+| `catalog_course_reviews.user_id` | `identity_users.id` |
+| `content_lesson_videos.lesson_id` | `catalog_lessons.id` |
+| `content_articles.lesson_id` | `catalog_lessons.id` |
+| `content_articles.author_id` | `identity_users.id` |
+| `content_lesson_attachments.lesson_id` | `catalog_lessons.id` |
+| `progress_enrolments.user_id` / `.course_id` | `identity_users.id` / `catalog_courses.id` |
+| `progress_lesson_progress.lesson_id` | `catalog_lessons.id` |
+| `assessment_quizzes.course_id` / `.lesson_id` | `catalog_courses.id` / `catalog_lessons.id` |
+| `assessment_quiz_attempts.user_id` | `identity_users.id` |
+| `search_documents.entity_id` | whichever entity `entity_type` names |
+| `analytics_events.*_id` | anything; the stream is intentionally schemaless here |
 
 Every such column carries a `-- deliberately not a foreign key` comment in the
 migration that creates it. The API layer validates them before writing, and
@@ -101,7 +107,7 @@ migration that creates it. The API layer validates them before writing, and
 
 ## Video: URLs, not files
 
-`content.lesson_videos` stores a pointer and nothing else:
+`content_lesson_videos` stores a pointer and nothing else:
 
 ```sql
 video_url         VARCHAR(2000) NOT NULL,   -- CHECK REGEXP_LIKE(..., '^https?://')
@@ -121,7 +127,7 @@ the small ones in the database" patch fails CI rather than shipping.
 
 ## Articles: Markdown or HTML
 
-`content.articles` holds the source in `body` and the format in `format`:
+`content_articles` holds the source in `body` and the format in `format`:
 
 - `format = 'markdown'` — `body` is Markdown, `body_html` caches the render.
 - `format = 'html'` — `body` is sanitised HTML from a rich-text editor or a CMS.
@@ -136,7 +142,7 @@ CMS, which makes "database *or* headless CMS" a per-article configuration choice
 rather than a fork of the schema. Locally authored articles leave both NULL.
 
 Every edit fires a `BEFORE UPDATE` trigger that copies the previous body into
-`content.article_revisions` and increments `revision`, so history is append-only
+`content_article_revisions` and increments `revision`, so history is append-only
 and a rollback is an ordinary write.
 
 ## Denormalised columns and who refreshes them
@@ -146,10 +152,10 @@ owning service calls that routine after any write that could invalidate it:
 
 | Column | Refreshed by |
 |---|---|
-| `catalog.courses.lesson_count`, `.duration_minutes` | `CALL catalog.refresh_course_rollup(course_id)` |
-| `catalog.courses.rating_average`, `.rating_count` | `CALL catalog.refresh_course_rating(course_id)` |
-| `progress.enrolments.progress_percent`, `.lessons_completed`, `.state` | `CALL progress.refresh_enrolment_rollup(enrolment_id)` |
-| `search.documents.*` | `CALL search.reindex_all()` or a single-document upsert |
+| `catalog_courses.lesson_count`, `.duration_minutes` | `CALL catalog_refresh_course_rollup(course_id)` |
+| `catalog_courses.rating_average`, `.rating_count` | `CALL catalog_refresh_course_rating(course_id)` |
+| `progress_enrolments.progress_percent`, `.lessons_completed`, `.state` | `CALL progress_refresh_enrolment_rollup(enrolment_id)` |
+| `search_documents.*` | `CALL search_reindex_all()` or a single-document upsert |
 
 `tests/verify.sql` checks none of them have drifted. A denormalised column with
 three different writers is how these go wrong.
@@ -161,20 +167,20 @@ as a result set — the API repositories read row 0.
 
 | Routine | Purpose |
 |---|---|
-| `catalog.refresh_course_rollup(uuid)` | Recomputes `lesson_count` / `duration_minutes` |
-| `catalog.refresh_course_rating(uuid)` | Recomputes `rating_average` / `rating_count` |
-| `catalog.reorder_lessons(uuid, json)` | Reorders a module's lessons; see below |
-| `progress.refresh_enrolment_rollup(uuid)` | Recomputes completion figures |
-| `assessment.grade_attempt(uuid)` | Grades a submitted attempt server-side |
-| `search.reindex_all()` | Rebuilds `search.documents`, returns the count |
-| `search.levenshtein(varchar, varchar)` | Edit distance — function, not procedure |
-| `search.similarity_score(varchar, varchar)` | `1 - distance/longest`, in 0..1 |
-| `analytics.ensure_month_partition(date)` | Creates monthly partitions up to that month |
-| `analytics.rollup_day(date)` | Recomputes both daily rollups for one day |
+| `catalog_refresh_course_rollup(uuid)` | Recomputes `lesson_count` / `duration_minutes` |
+| `catalog_refresh_course_rating(uuid)` | Recomputes `rating_average` / `rating_count` |
+| `catalog_reorder_lessons(uuid, json)` | Reorders a module's lessons; see below |
+| `progress_refresh_enrolment_rollup(uuid)` | Recomputes completion figures |
+| `assessment_grade_attempt(uuid)` | Grades a submitted attempt server-side |
+| `search_reindex_all()` | Rebuilds `search_documents`, returns the count |
+| `search_levenshtein(varchar, varchar)` | Edit distance — function, not procedure |
+| `search_similarity_score(varchar, varchar)` | `1 - distance/longest`, in 0..1 |
+| `analytics_ensure_month_partition(date)` | Creates monthly partitions up to that month |
+| `analytics_rollup_day(date)` | Recomputes both daily rollups for one day |
 
 ### Grading lives in SQL on purpose
 
-`assessment.grade_attempt()` marks every answer, sums the points and writes the
+`assessment_grade_attempt()` marks every answer, sums the points and writes the
 result. Correct answers never leave the database to be compared, and there is
 exactly one implementation of the marking rules no matter which service or
 script triggers a regrade.
@@ -208,14 +214,14 @@ a column that a stored generated column reads**, and `quiz_id` needs both.
 
 ### 2. No DEFERRABLE constraints → stage in the negative range
 
-`(module_id, position)` is unique on `catalog.lessons`, so a reorder passes
+`(module_id, position)` is unique on `catalog_lessons`, so a reorder passes
 through a transient duplicate. PostgreSQL defers the check to `COMMIT`; MySQL
-checks immediately. `catalog.reorder_lessons()` parks every position in the
+checks immediately. `catalog_reorder_lessons()` parks every position in the
 negative range first — where it cannot collide with any target value — then
 writes the final numbers:
 
 ```sql
-UPDATE catalog.lessons SET position = -position WHERE module_id = ?;
+UPDATE catalog_lessons SET position = -position WHERE module_id = ?;
 -- then write 1..n from a JSON_TABLE of the requested order
 ```
 
@@ -224,9 +230,9 @@ list would leave the rest holding stale positions.
 
 ### 3. No arrays → JSON
 
-`catalog.courses.learning_outcomes`, `.requirements`,
-`assessment.attempt_answers.selected_option_ids` and
-`search.synonyms.expands_to` are `JSON` columns with a
+`catalog_courses.learning_outcomes`, `.requirements`,
+`assessment_attempt_answers.selected_option_ids` and
+`search_synonyms.expands_to` are `JSON` columns with a
 `CHECK (JSON_TYPE(col) = 'ARRAY')`. Read them back with `JSON_TABLE`:
 
 ```sql
@@ -249,7 +255,7 @@ SELECT d.*,
      + MATCH(d.subtitle)  AGAINST(? IN NATURAL LANGUAGE MODE) * 2
      + MATCH(d.body)      AGAINST(? IN NATURAL LANGUAGE MODE) * 1
      + MATCH(d.tags_text) AGAINST(? IN NATURAL LANGUAGE MODE) AS score
-  FROM search.documents d
+  FROM search_documents d
  WHERE MATCH(d.title, d.subtitle, d.body, d.tags_text)
        AGAINST(? IN NATURAL LANGUAGE MODE)
  ORDER BY score DESC;
@@ -259,7 +265,7 @@ The combined index answers the `WHERE` in one lookup; the per-field ones
 re-score the survivors. Five FULLTEXT indexes on one table is not redundancy.
 
 **Two MySQL defaults will surprise you.** `innodb_ft_min_token_size` is 3, so
-one- and two-letter words are not indexed at all — `search.synonyms` is what
+one- and two-letter words are not indexed at all — `search_synonyms` is what
 rescues `js`, `ci`, `db`. And boolean-mode scores are not comparable to
 natural-language-mode scores, so do not mix them in one `ORDER BY`.
 
@@ -268,7 +274,7 @@ similarity and no built-in edit distance. What replaces `word_similarity`:
 
 1. Prefix relaxation in boolean mode — `microservics` → `microserv*`. Catches a
    typo in the tail of a word and nothing else.
-2. `search.levenshtein()` for ranking the candidates a prefix match found. It is
+2. `search_levenshtein()` for ranking the candidates a prefix match found. It is
    O(len(a) × len(b)) per call, so it must never run across the whole table.
 3. `SOUNDEX` for phonetic near-misses. Cheap and blunt.
 
@@ -278,12 +284,12 @@ search engine earns its keep.
 
 ## Analytics partitioning
 
-`analytics.events` is range-partitioned by month on `occurred_at`.
+`analytics_events` is range-partitioned by month on `occurred_at`.
 **MySQL requires the partitioning column in every unique key**, which is why the
 primary key is `(id, occurred_at)` rather than `id` alone.
 
 MySQL has no `DEFAULT` partition, so the equivalent is a `MAXVALUE` catch-all
-called `p_future` that `analytics.ensure_month_partition()` splits with
+called `p_future` that `analytics_ensure_month_partition()` splits with
 `REORGANIZE PARTITION`. Boundaries must be strictly increasing, so months can
 only be appended — asking for a month already covered is a no-op, and asking for
 one several months ahead fills the gap rather than leaving a hole MySQL would
@@ -300,5 +306,5 @@ persisted.
 PostgreSQL can wrap a migration in a transaction and roll the whole thing back.
 MySQL cannot: **a migration that fails half way leaves the statements before the
 failure applied.** Keep each file small enough that re-running it by hand after
-a fix is realistic, and check `platform.schema_migrations` to see how far the
+a fix is realistic, and check `platform_schema_migrations` to see how far the
 runner got.

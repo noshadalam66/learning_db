@@ -11,6 +11,11 @@ MYSQL_PORT="${MYSQL_PORT:-3306}"
 MYSQL_USER="${MYSQL_USER:-root}"
 MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"
 
+# Everything lives in one database, so its name appears here and nowhere else.
+# On shared hosting it arrives with the account prefix - noshadal_learning -
+# and only this value changes; no migration, seed or query names it.
+MYSQL_DATABASE="${MYSQL_DATABASE:-learning}"
+
 # Every connection sets time_zone to UTC. The schema defaults to UTC_TIMESTAMP
 # regardless, so forgetting is not corrupting - but NOW() and CURRENT_TIMESTAMP
 # in an ad-hoc query would otherwise return the server's local time.
@@ -23,10 +28,21 @@ mysql_run() {
     --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USER" \
     --default-character-set=utf8mb4 \
     --init-command="$MYSQL_INIT" \
+    --database="$MYSQL_DATABASE" \
     "$@"
 }
 
 # Same, but tab-separated and without column headers - for scripting.
 mysql_value() {
   mysql_run --batch --skip-column-names "$@"
+}
+
+# The same, but with no database selected - for the handful of statements that
+# run before it exists (creating it) or that are about the server itself.
+mysql_server() {
+  MYSQL_PWD="$MYSQL_PASSWORD" mysql \
+    --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USER" \
+    --default-character-set=utf8mb4 \
+    --init-command="$MYSQL_INIT" \
+    "$@"
 }

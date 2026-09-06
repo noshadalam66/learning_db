@@ -16,7 +16,7 @@
 -- ---------------------------------------------------------------------------
 -- The eight quiz lessons, one at the end of each level.
 -- ---------------------------------------------------------------------------
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -63,7 +63,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 -- show_answers is on for every one: the explanation is where the learning
 -- happens, and hiding it turns a wrong answer into a dead end.
 -- ---------------------------------------------------------------------------
-INSERT INTO assessment.quizzes
+INSERT INTO assessment_quizzes
   (id, course_id, lesson_id, title, description, pass_percent, time_limit_seconds,
    max_attempts, shuffle_questions, shuffle_options, show_answers, status)
 VALUES
@@ -121,7 +121,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Questions: HTML course
 -- ---------------------------------------------------------------------------
-INSERT INTO assessment.questions
+INSERT INTO assessment_questions
   (id, quiz_id, kind, prompt, explanation, points, `position`, correct_text)
 VALUES
   -- HTML Level 1
@@ -234,7 +234,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Questions: CSS course
 -- ---------------------------------------------------------------------------
-INSERT INTO assessment.questions
+INSERT INTO assessment_questions
   (id, quiz_id, kind, prompt, explanation, points, `position`, correct_text)
 VALUES
   -- CSS Level 1
@@ -351,9 +351,9 @@ ON DUPLICATE KEY UPDATE
 -- no rows here. Options are re-inserted rather than updated, so editing a
 -- distractor above and re-running the seed cannot leave the old one behind.
 -- ---------------------------------------------------------------------------
-DELETE FROM assessment.question_options
+DELETE FROM assessment_question_options
  WHERE question_id IN (
-   SELECT id FROM assessment.questions
+   SELECT id FROM assessment_questions
     WHERE quiz_id IN ('f0000001-0000-4000-8000-000000000004',
                       'f0000001-0000-4000-8000-000000000005',
                       'f0000001-0000-4000-8000-000000000006',
@@ -363,7 +363,7 @@ DELETE FROM assessment.question_options
                       'f0000001-0000-4000-8000-00000000000a',
                       'f0000001-0000-4000-8000-00000000000b'));
 
-INSERT INTO assessment.question_options (question_id, body, is_correct, `position`)
+INSERT INTO assessment_question_options (question_id, body, is_correct, `position`)
 SELECT v.question_id, v.body, v.is_correct, v.pos
   FROM (
     -- HTML L1 Q1: doctype
@@ -580,6 +580,6 @@ SELECT v.question_id, v.body, v.is_correct, v.pos
 -- ---------------------------------------------------------------------------
 -- The lesson counts changed, so the rollups have to be refreshed.
 -- ---------------------------------------------------------------------------
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000004');
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000005');
-CALL `search`.reindex_all();
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000004');
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000005');
+CALL search_reindex_all();

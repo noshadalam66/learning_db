@@ -9,11 +9,11 @@
 -- backslashes, and escaping those by hand is how a seed gets broken.
 -- ===========================================================================
 
-INSERT INTO catalog.tags (id, slug, name) VALUES
+INSERT INTO catalog_tags (id, slug, name) VALUES
   ('bbbbbbb1-0000-4000-8000-000000000012', 'php-language', 'PHP')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
-INSERT INTO catalog.courses
+INSERT INTO catalog_courses
   (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
@@ -40,13 +40,13 @@ ON DUPLICATE KEY UPDATE
   title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
-INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
+INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000009', 'bbbbbbb1-0000-4000-8000-000000000012'),
   ('c0000001-0000-4000-8000-000000000009', 'bbbbbbb1-0000-4000-8000-000000000007'),
   ('c0000001-0000-4000-8000-000000000009', 'bbbbbbb1-0000-4000-8000-000000000006')
 ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
-INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
+INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-00000000001c', 'c0000001-0000-4000-8000-000000000009',
    'Level 1 - Basic', 'Values and comparison, the flow of control, and the one data structure.', 1),
   ('d0000001-0000-4000-8000-00000000001d', 'c0000001-0000-4000-8000-000000000009',
@@ -57,7 +57,7 @@ INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
    'Level 4 - Expert', 'Attributes and reflection, where the time and memory go, and how to arrange it all.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -130,7 +130,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `posit
 -- ---------------------------------------------------------------------------
 -- Values, Types and Variables
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -249,7 +249,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Control Flow and Functions
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -404,7 +404,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Arrays, the One Data Structure
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -527,7 +527,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Strings, Formatting and Dates
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -650,7 +650,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Classes, Interfaces and Enums
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -802,7 +802,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Errors, Exceptions and Debugging
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -956,7 +956,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Traits, Static and Composition
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1131,7 +1131,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Generators, Iterators and Laziness
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1282,7 +1282,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Input, Output and Staying Safe
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1402,7 +1402,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Attributes and Reflection
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1547,7 +1547,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Performance and Memory
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1688,7 +1688,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Structuring an Application
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1951,5 +1951,5 @@ ON DUPLICATE KEY UPDATE
   reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
   status = VALUES(status);
 
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000009');
-CALL `search`.reindex_all();
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000009');
+CALL search_reindex_all();

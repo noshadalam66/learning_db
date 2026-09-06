@@ -6,7 +6,7 @@
 -- instead of a DELETE that runs for hours and leaves the table bloated.
 -- ===========================================================================
 
-CREATE TABLE analytics.events (
+CREATE TABLE analytics_events (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   occurred_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
   user_id     CHAR(36) CHARACTER SET ascii NULL,
@@ -32,7 +32,7 @@ CREATE TABLE analytics.events (
 ) ENGINE=InnoDB
   COMMENT='Append-only behaviour stream, partitioned monthly by occurred_at.'
 PARTITION BY RANGE COLUMNS (occurred_at) (
-  -- One catch-all to begin with. analytics.ensure_month_partition() splits it
+  -- One catch-all to begin with. analytics_ensure_month_partition() splits it
   -- into real months; p_future itself is the safety net that stops an insert
   -- ever failing for want of a partition, and tests/verify.sql fails if rows
   -- are sitting in it, because that means partition maintenance has stopped
@@ -40,7 +40,7 @@ PARTITION BY RANGE COLUMNS (occurred_at) (
   PARTITION p_future VALUES LESS THAN (MAXVALUE)
 );
 
-CREATE TABLE analytics.daily_course_stats (
+CREATE TABLE analytics_daily_course_stats (
   day             DATE NOT NULL,
   course_id       CHAR(36) CHARACTER SET ascii NOT NULL,
   views           INT NOT NULL DEFAULT 0,
@@ -56,7 +56,7 @@ CREATE TABLE analytics.daily_course_stats (
   KEY ix_daily_course (course_id, day DESC)
 ) ENGINE=InnoDB;
 
-CREATE TABLE analytics.daily_platform_stats (
+CREATE TABLE analytics_daily_platform_stats (
   day               DATE NOT NULL,
   active_users      INT NOT NULL DEFAULT 0,
   new_users         INT NOT NULL DEFAULT 0,
@@ -81,7 +81,8 @@ DELIMITER $$
 --
 -- Run from cron on the 25th of each month, or ad hoc via the Analytics Service.
 -- ---------------------------------------------------------------------------
-CREATE PROCEDURE analytics.ensure_month_partition(IN p_month DATE)
+CREATE PROCEDURE analytics_ensure_month_partition(IN p_month DATE)
+  SQL SECURITY INVOKER
 MODIFIES SQL DATA
 BEGIN
   DECLARE v_target_end DATE;
@@ -99,8 +100,8 @@ BEGIN
   SELECT MAX(CAST(TRIM(BOTH '''' FROM partition_description) AS DATE))
     INTO v_cursor
     FROM information_schema.partitions
-   WHERE table_schema = 'analytics'
-     AND table_name = 'events'
+   WHERE table_schema = DATABASE()
+     AND table_name = 'analytics_events'
      AND partition_description <> 'MAXVALUE';
 
   -- Nothing but p_future yet: start at the requested month. The first real
@@ -119,7 +120,7 @@ BEGIN
     SET v_name = CONCAT('p_', DATE_FORMAT(v_cursor, '%Y_%m'));
 
     SET @ddl = CONCAT(
-      'ALTER TABLE analytics.events REORGANIZE PARTITION p_future INTO (',
+      'ALTER TABLE analytics_events REORGANIZE PARTITION p_future INTO (',
       'PARTITION ', v_name, " VALUES LESS THAN ('", v_next, "'), ",
       'PARTITION p_future VALUES LESS THAN (MAXVALUE))'
     );
@@ -141,7 +142,8 @@ END$$
 -- One day at a time, so a late-arriving event only forces that day to be
 -- rebuilt rather than the whole history.
 -- ---------------------------------------------------------------------------
-CREATE PROCEDURE analytics.rollup_day(IN p_day DATE)
+CREATE PROCEDURE analytics_rollup_day(IN p_day DATE)
+  SQL SECURITY INVOKER
 MODIFIES SQL DATA
 BEGIN
   DECLARE v_start DATETIME(3);
@@ -151,9 +153,9 @@ BEGIN
   SET v_start = CAST(p_day AS DATETIME(3));
   SET v_end   = DATE_ADD(v_start, INTERVAL 1 DAY);
 
-  DELETE FROM analytics.daily_course_stats WHERE day = p_day;
+  DELETE FROM analytics_daily_course_stats WHERE day = p_day;
 
-  INSERT INTO analytics.daily_course_stats
+  INSERT INTO analytics_daily_course_stats
     (day, course_id, views, unique_learners, watch_seconds, quiz_attempts,
      enrolments, completions)
   SELECT p_day, e.course_id,
@@ -165,7 +167,7 @@ BEGIN
          SUM(e.event_name = 'quiz_submitted'),
          SUM(e.event_name = 'course_enrolled'),
          SUM(e.event_name = 'course_completed')
-    FROM analytics.events e
+    FROM analytics_events e
    WHERE e.occurred_at >= v_start AND e.occurred_at < v_end
      AND e.course_id IS NOT NULL
    GROUP BY e.course_id;
@@ -173,18 +175,18 @@ BEGIN
   -- The pass rate comes from the assessment database, which holds the graded
   -- truth. Reading it from the event stream would be wrong: events are
   -- best-effort and can be lost.
-  UPDATE analytics.daily_course_stats s
+  UPDATE analytics_daily_course_stats s
     JOIN (
       SELECT course_id,
              ROUND(SUM(passed) * 100.0 / NULLIF(COUNT(*), 0), 2) AS pass_rate
-        FROM assessment.quiz_attempts
+        FROM assessment_quiz_attempts
        WHERE submitted_at >= v_start AND submitted_at < v_end
        GROUP BY course_id
     ) g ON g.course_id = s.course_id
      SET s.quiz_pass_rate = IFNULL(g.pass_rate, 0)
    WHERE s.day = p_day;
 
-  INSERT INTO analytics.daily_platform_stats
+  INSERT INTO analytics_daily_platform_stats
     (day, active_users, lessons_started, lessons_completed, searches, watch_seconds)
   SELECT p_day,
          COUNT(DISTINCT user_id),
@@ -194,7 +196,7 @@ BEGIN
          IFNULL(SUM(CASE WHEN event_name = 'video_progress'
                          THEN CAST(JSON_EXTRACT(properties, '$.seconds') AS UNSIGNED)
                          ELSE 0 END), 0)
-    FROM analytics.events
+    FROM analytics_events
    WHERE occurred_at >= v_start AND occurred_at < v_end
   ON DUPLICATE KEY UPDATE
     active_users      = VALUES(active_users),
@@ -204,8 +206,8 @@ BEGIN
     watch_seconds     = VALUES(watch_seconds),
     computed_at       = UTC_TIMESTAMP(3);
 
-  UPDATE analytics.daily_platform_stats
-     SET new_users = (SELECT COUNT(*) FROM identity.users u
+  UPDATE analytics_daily_platform_stats
+     SET new_users = (SELECT COUNT(*) FROM identity_users u
                        WHERE u.created_at >= v_start AND u.created_at < v_end)
    WHERE day = p_day;
 END$$

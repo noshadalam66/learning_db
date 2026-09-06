@@ -1,5 +1,5 @@
 -- ===========================================================================
--- 0011 : analytics.rollup_day() must survive a day with no events
+-- 0011 : analytics_rollup_day() must survive a day with no events
 --
 -- The platform-stats INSERT in 0008 aggregates without a GROUP BY. That is
 -- deliberate - it produces exactly one row per day - but it means the query
@@ -19,9 +19,10 @@
 
 DELIMITER $$
 
-DROP PROCEDURE IF EXISTS analytics.rollup_day$$
+DROP PROCEDURE IF EXISTS analytics_rollup_day$$
 
-CREATE PROCEDURE analytics.rollup_day(IN p_day DATE)
+CREATE PROCEDURE analytics_rollup_day(IN p_day DATE)
+  SQL SECURITY INVOKER
 MODIFIES SQL DATA
 BEGIN
   DECLARE v_start DATETIME(3);
@@ -31,9 +32,9 @@ BEGIN
   SET v_start = CAST(p_day AS DATETIME(3));
   SET v_end   = DATE_ADD(v_start, INTERVAL 1 DAY);
 
-  DELETE FROM analytics.daily_course_stats WHERE day = p_day;
+  DELETE FROM analytics_daily_course_stats WHERE day = p_day;
 
-  INSERT INTO analytics.daily_course_stats
+  INSERT INTO analytics_daily_course_stats
     (day, course_id, views, unique_learners, watch_seconds, quiz_attempts,
      enrolments, completions)
   SELECT p_day, e.course_id,
@@ -45,16 +46,16 @@ BEGIN
          SUM(e.event_name = 'quiz_submitted'),
          SUM(e.event_name = 'course_enrolled'),
          SUM(e.event_name = 'course_completed')
-    FROM analytics.events e
+    FROM analytics_events e
    WHERE e.occurred_at >= v_start AND e.occurred_at < v_end
      AND e.course_id IS NOT NULL
    GROUP BY e.course_id;
 
-  UPDATE analytics.daily_course_stats s
+  UPDATE analytics_daily_course_stats s
     JOIN (
       SELECT course_id,
              ROUND(SUM(passed) * 100.0 / NULLIF(COUNT(*), 0), 2) AS pass_rate
-        FROM assessment.quiz_attempts
+        FROM assessment_quiz_attempts
        WHERE submitted_at >= v_start AND submitted_at < v_end
        GROUP BY course_id
     ) g ON g.course_id = s.course_id
@@ -63,7 +64,7 @@ BEGIN
 
   -- Every aggregate here is coalesced. COUNT already returns 0 over an empty
   -- set; SUM does not, and that asymmetry is the whole bug.
-  INSERT INTO analytics.daily_platform_stats
+  INSERT INTO analytics_daily_platform_stats
     (day, active_users, lessons_started, lessons_completed, searches, watch_seconds)
   SELECT p_day,
          COUNT(DISTINCT user_id),
@@ -73,7 +74,7 @@ BEGIN
          IFNULL(SUM(CASE WHEN event_name = 'video_progress'
                          THEN CAST(JSON_EXTRACT(properties, '$.seconds') AS UNSIGNED)
                          ELSE 0 END), 0)
-    FROM analytics.events
+    FROM analytics_events
    WHERE occurred_at >= v_start AND occurred_at < v_end
   ON DUPLICATE KEY UPDATE
     active_users      = VALUES(active_users),
@@ -83,8 +84,8 @@ BEGIN
     watch_seconds     = VALUES(watch_seconds),
     computed_at       = UTC_TIMESTAMP(3);
 
-  UPDATE analytics.daily_platform_stats
-     SET new_users = (SELECT COUNT(*) FROM identity.users u
+  UPDATE analytics_daily_platform_stats
+     SET new_users = (SELECT COUNT(*) FROM identity_users u
                        WHERE u.created_at >= v_start AND u.created_at < v_end)
    WHERE day = p_day;
 END$$

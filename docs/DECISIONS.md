@@ -3,36 +3,64 @@
 Short notes on the choices that are not obvious from reading the DDL, including
 the ones with real costs.
 
-## Seven databases on one server — not seven servers
+## One database, with the service boundary in the table name
 
-MySQL has no schemas-inside-a-database: a schema *is* a database. So the
-per-service split is seven databases on **one server**, with a separate MySQL
-account per service and grants that stop a service writing outside its own.
+MySQL has no schemas-inside-a-database: a schema *is* a database. The
+per-service split was originally seven databases on one server plus `platform`
+for the shared views, with a MySQL account per service and grants that stopped
+a service writing outside its own.
 
-What that buys:
+Everything now lives in **one** database, and the boundary is a prefix on the
+table name: `catalog_courses`, `identity_users`, `assessment_quizzes`.
 
-- One connection string, one backup, one local `docker compose up`.
-- The read views in `platform` can join across services cheaply, which is what
-  makes the course page a single query instead of five HTTP calls.
-- Moving a service onto its own server later is a deployment change, not a
-  schema rewrite, because no service is written against another's tables.
+### Why it changed
 
-What it costs, honestly:
+Shared hosting. On cPanel every database name is prefixed with the account
+name, so `catalog` is really `noshadal_catalog`. Eight databases means eight
+names to configure, eight sets of grants to click through by hand on every
+rebuild, and eight entries against a plan's database quota. Worse, the name is
+not knowable at development time, so any statement that qualifies its tables
+has to be rewritten at deploy or templated — for ~200 statements.
 
-- The isolation is enforced by grants, not by the network. A service with the
-  wrong credentials could read another's tables. Separate servers make that
-  impossible rather than merely denied.
-- Everything shares one buffer pool, one connection limit and one I/O budget. A
-  runaway analytics query can starve the login path.
+With one database the name appears once, in the connection string, and every
+statement is written unqualified. Moving the app to a host that calls the
+database something else is a configuration change and nothing more.
 
-For a learning platform at this size that trade is worth it. For a system where
-one service must scale independently — usually analytics first — move that one
-onto its own server and leave the rest. Nothing in the schema has to change,
-which was the point.
+### What it costs, honestly
+
+**Per-service GRANTs no longer come for free.** A grant covers a database or a
+single named table — MySQL accepts no wildcard on the table part. So the same
+isolation now costs one grant per table, which is what
+`migrations/optional/service_users.sql` is. It is optional because it cannot be
+applied on shared hosting at all: cPanel does not expose `CREATE USER` or
+`GRANT` over SQL.
+
+**The server no longer enforces the boundary by default.** With one account and
+one database, nothing stops the Quiz Service writing to `identity_users` except
+the code not doing it. That was already close to true — every service connected
+as the same user through one pool — but it was at least *possible* to enforce
+before, and now it takes deliberate work.
+
+**A dropped database takes everything.** `DROP DATABASE` used to cost one
+service its data. It now costs all of them.
+
+### What did not change
+
+Nothing about the shape of the data: 32 tables, 21 foreign keys, 40 check
+constraints, 3 views, 11 routines and 13 triggers, all identical. No table
+name collided, and no constraint name collided, which is what made the move
+mechanical rather than a redesign.
+
+Each service is still the only writer to its own tables, cross-service reads
+still go through the `v_` views or over HTTP, and no service is written against
+another's tables. Moving a service onto its own database or its own server
+later is still a deployment change rather than a schema rewrite — the rule that
+made that true was never the database boundary, it was the discipline about who
+writes what.
 
 ## No foreign keys across service boundaries
 
-`catalog.courses.instructor_id` holds a user id with no constraint behind it.
+`catalog_courses.instructor_id` holds a user id with no constraint behind it.
 
 Worth being clear that this is a **choice, not a MySQL limitation**: InnoDB
 supports foreign keys across databases on the same server, and one here would
@@ -55,7 +83,7 @@ The mitigations actually in place:
 
 Storing media in a relational database is a well-known way to make backups
 enormous and restores slow — and MySQL makes it especially tempting, since
-`LONGBLOB` will hold 4GB without complaint. `content.lesson_videos` holds a URL,
+`LONGBLOB` will hold 4GB without complaint. `content_lesson_videos` holds a URL,
 a provider, an asset id and metadata; the bytes live on YouTube, Vimeo, Mux,
 Cloudflare Stream, Bunny or S3 behind a CDN.
 
@@ -70,7 +98,7 @@ the former while a share link needs the latter.
 
 The brief allowed either a database or a headless CMS. This schema does the
 first and leaves a documented door to the second: `external_source` and
-`external_id` on `content.articles` identify rows synced in from a CMS, and the
+`external_id` on `content_articles` identify rows synced in from a CMS, and the
 Content Service treats a row with `external_source` set as read-only locally.
 
 That means "which one" becomes a per-article configuration question rather than
@@ -87,7 +115,7 @@ another writer, it has to as well.
 
 ## Grading in the database
 
-`assessment.grade_attempt()` is a MySQL stored procedure rather than JavaScript
+`assessment_grade_attempt()` is a MySQL stored procedure rather than JavaScript
 in the Quiz Service. Two reasons: correct answers never need to leave the database to be
 compared, and a regrade triggered by a script, a migration or a different
 service applies exactly the same rules.
@@ -110,7 +138,7 @@ different writers is how these go wrong.
 
 ## Partitioned analytics events
 
-`analytics.events` is the only table expected to reach hundreds of millions of
+`analytics_events` is the only table expected to reach hundreds of millions of
 rows. Monthly range partitions mean old data is dropped or archived with a
 metadata operation instead of a `DELETE` that runs for hours and leaves the
 table bloated.
@@ -142,7 +170,7 @@ solution, just the honest best available.
 
 - **Payments.** `price_cents` exists on a course but nothing charges anyone.
   Payment data has compliance requirements this schema does not attempt to meet.
-- **Soft deletes.** There is no `deleted_at`. `identity.users.status` has a
+- **Soft deletes.** There is no `deleted_at`. `identity_users.status` has a
   `deleted` value for account lifecycle, but rows are otherwise really deleted.
   Add soft deletes when there is a product requirement, not preemptively.
 - **Row-level security.** Authorisation happens in the API layer. MySQL has no

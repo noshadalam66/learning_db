@@ -2,7 +2,7 @@
 -- Seed 04 : quizzes, questions and options
 -- ===========================================================================
 
-INSERT INTO assessment.quizzes
+INSERT INTO assessment_quizzes
   (id, course_id, lesson_id, title, description, pass_percent, time_limit_seconds,
    max_attempts, status)
 VALUES
@@ -24,7 +24,7 @@ VALUES
    75, 900, 5, 'published')
 ON DUPLICATE KEY UPDATE title = VALUES(title);
 
-INSERT INTO assessment.questions
+INSERT INTO assessment_questions
   (id, quiz_id, kind, prompt, explanation, points, `position`, correct_text)
 VALUES
   ('a1000001-0000-4000-8000-000000000001', 'f0000001-0000-4000-8000-000000000001', 'single_choice',
@@ -105,7 +105,7 @@ ON DUPLICATE KEY UPDATE prompt = VALUES(prompt);
 -- ON DUPLICATE KEY UPDATE, because the natural key here is
 -- (question_id, position) and re-running must not renumber anything.
 -- ---------------------------------------------------------------------------
-INSERT INTO assessment.question_options (question_id, body, is_correct, `position`)
+INSERT INTO assessment_question_options (question_id, body, is_correct, `position`)
 SELECT v.question_id, v.body, v.is_correct, v.pos
   FROM (
     SELECT 'a1000001-0000-4000-8000-000000000001' AS question_id, 'They are displayed on the same screen' AS body, 0 AS is_correct, 1 AS pos
@@ -158,6 +158,6 @@ SELECT v.question_id, v.body, v.is_correct, v.pos
     UNION ALL SELECT 'a1000001-0000-4000-8000-00000000000d', 'A FULLTEXT index can only cover one column', 0, 4
   ) v
  WHERE NOT EXISTS (
-   SELECT 1 FROM assessment.question_options o
+   SELECT 1 FROM assessment_question_options o
     WHERE o.question_id = v.question_id AND o.`position` = v.pos
  );

@@ -2,7 +2,7 @@
 -- Seed 02 : three courses with their module / lesson structure
 -- ===========================================================================
 
-INSERT INTO catalog.courses
+INSERT INTO catalog_courses
   (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
@@ -54,7 +54,7 @@ VALUES
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 20 DAY))
 ON DUPLICATE KEY UPDATE title = VALUES(title);
 
-INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
+INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000001', 'bbbbbbb1-0000-4000-8000-000000000001'),
   ('c0000001-0000-4000-8000-000000000001', 'bbbbbbb1-0000-4000-8000-000000000002'),
   ('c0000001-0000-4000-8000-000000000001', 'bbbbbbb1-0000-4000-8000-000000000006'),
@@ -65,7 +65,7 @@ INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000003', 'bbbbbbb1-0000-4000-8000-000000000006')
 ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
-INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
+INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000001', 'c0000001-0000-4000-8000-000000000001',
    'Why Split at All', 'The honest case for and against microservices.', 1),
   ('d0000001-0000-4000-8000-000000000002', 'c0000001-0000-4000-8000-000000000001',
@@ -82,7 +82,7 @@ INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
    'Sessions and Safety', 'Cookies, CSRF and the things that bite.', 2)
 ON DUPLICATE KEY UPDATE title = VALUES(title);
 
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -155,6 +155,6 @@ VALUES
 ON DUPLICATE KEY UPDATE title = VALUES(title);
 
 -- Refresh the denormalised counters now that lessons exist.
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000001');
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000002');
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000003');
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000001');
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000002');
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000003');

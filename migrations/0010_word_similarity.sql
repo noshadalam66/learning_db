@@ -1,5 +1,5 @@
 -- ===========================================================================
--- 0010 : search.word_similarity()
+-- 0010 : search_word_similarity()
 --
 -- similarity_score() compares two strings whole. That is the wrong measure for
 -- a typo fallback: a short misspelled query against a long title always scores
@@ -16,8 +16,9 @@
 
 DELIMITER $$
 
-CREATE FUNCTION `search`.word_similarity(needle VARCHAR(255), haystack VARCHAR(500))
+CREATE FUNCTION search_word_similarity(needle VARCHAR(255), haystack VARCHAR(500))
 RETURNS DECIMAL(4,3)
+  SQL SECURITY INVOKER
 DETERMINISTIC
 NO SQL
 BEGIN
@@ -41,7 +42,7 @@ BEGIN
     SET word = SUBSTRING_INDEX(rest, ' ', 1);
 
     IF word <> '' THEN
-      SET current = `search`.similarity_score(needle, word);
+      SET current = search_similarity_score(needle, word);
       IF current > best THEN SET best = current; END IF;
     END IF;
 
