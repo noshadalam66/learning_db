@@ -11,9 +11,9 @@
 -- so "just store the small ones inline" fails the build instead of shipping.
 -- ===========================================================================
 
-CREATE TABLE content.lesson_videos (
+CREATE TABLE content_lesson_videos (
   id                CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
-  -- catalog.lessons.id - deliberately not a foreign key.
+  -- catalog_lessons.id - deliberately not a foreign key.
   lesson_id         CHAR(36) CHARACTER SET ascii NOT NULL,
   provider          ENUM('youtube','vimeo','mux','cloudflare','bunny','s3','external')
                       NOT NULL DEFAULT 'external',
@@ -60,9 +60,9 @@ CREATE TABLE content.lesson_videos (
 -- headless CMS. That is what makes "database OR headless CMS" a per-article
 -- configuration choice rather than a fork of the schema.
 -- ---------------------------------------------------------------------------
-CREATE TABLE content.articles (
+CREATE TABLE content_articles (
   id                   CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
-  -- catalog.lessons.id - deliberately not a foreign key.
+  -- catalog_lessons.id - deliberately not a foreign key.
   lesson_id            CHAR(36) CHARACTER SET ascii NOT NULL,
   title                VARCHAR(300) NOT NULL,
   format               ENUM('markdown','html') NOT NULL DEFAULT 'markdown',
@@ -72,7 +72,7 @@ CREATE TABLE content.articles (
   reading_time_minutes INT NOT NULL DEFAULT 0,
   word_count           INT NOT NULL DEFAULT 0,
   revision             INT NOT NULL DEFAULT 1,
-  -- identity.users.id - deliberately not a foreign key.
+  -- identity_users.id - deliberately not a foreign key.
   author_id            CHAR(36) CHARACTER SET ascii NULL,
   status               ENUM('draft','in_review','published','archived') NOT NULL DEFAULT 'draft',
   external_source      VARCHAR(100) NULL,
@@ -93,7 +93,7 @@ CREATE TABLE content.articles (
     CHECK (status <> 'published' OR published_at IS NOT NULL)
 ) ENGINE=InnoDB;
 
-CREATE TABLE content.article_revisions (
+CREATE TABLE content_article_revisions (
   id         CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   article_id CHAR(36) CHARACTER SET ascii NOT NULL,
   revision   INT NOT NULL,
@@ -108,13 +108,13 @@ CREATE TABLE content.article_revisions (
   KEY ix_revisions_article (article_id, revision DESC),
 
   CONSTRAINT fk_revisions_article FOREIGN KEY (article_id)
-    REFERENCES content.articles (id) ON DELETE CASCADE
+    REFERENCES content_articles (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- Downloadable extras attached to a lesson. Again: a URL, never the bytes.
-CREATE TABLE content.lesson_attachments (
+CREATE TABLE content_lesson_attachments (
   id         CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
-  -- catalog.lessons.id - deliberately not a foreign key.
+  -- catalog_lessons.id - deliberately not a foreign key.
   lesson_id  CHAR(36) CHARACTER SET ascii NOT NULL,
   title      VARCHAR(200) NOT NULL,
   file_url   VARCHAR(2000) NOT NULL,
@@ -137,17 +137,17 @@ CREATE TABLE content.lesson_attachments (
 -- ---------------------------------------------------------------------------
 DELIMITER $$
 
-CREATE TRIGGER content.trg_videos_touch
-  BEFORE UPDATE ON content.lesson_videos FOR EACH ROW
+CREATE TRIGGER trg_videos_touch
+  BEFORE UPDATE ON content_lesson_videos FOR EACH ROW
 BEGIN SET NEW.updated_at = UTC_TIMESTAMP(3); END$$
 
-CREATE TRIGGER content.trg_articles_snapshot
-  BEFORE UPDATE ON content.articles FOR EACH ROW
+CREATE TRIGGER trg_articles_snapshot
+  BEFORE UPDATE ON content_articles FOR EACH ROW
 BEGIN
   SET NEW.updated_at = UTC_TIMESTAMP(3);
 
   IF NOT (NEW.body <=> OLD.body) OR NOT (NEW.title <=> OLD.title) THEN
-    INSERT INTO content.article_revisions (article_id, revision, format, title, body, edited_by)
+    INSERT INTO content_article_revisions (article_id, revision, format, title, body, edited_by)
     VALUES (OLD.id, OLD.revision, OLD.format, OLD.title, OLD.body, OLD.author_id);
     SET NEW.revision = OLD.revision + 1;
   END IF;

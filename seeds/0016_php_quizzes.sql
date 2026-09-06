@@ -10,7 +10,7 @@
 -- at least two. A quiz that cannot be passed is not obvious from the SQL.
 -- ===========================================================================
 
-INSERT INTO assessment.quizzes
+INSERT INTO assessment_quizzes
   (id, course_id, lesson_id, title, description, pass_percent, time_limit_seconds,
    max_attempts, shuffle_questions, shuffle_options, show_answers, status)
 VALUES
@@ -41,7 +41,7 @@ ON DUPLICATE KEY UPDATE
   title = VALUES(title), description = VALUES(description),
   pass_percent = VALUES(pass_percent), status = VALUES(status);
 
-INSERT INTO assessment.questions
+INSERT INTO assessment_questions
   (id, quiz_id, kind, prompt, explanation, points, `position`, correct_text)
 VALUES
   -- Level 1 Check: Types, Flow and Arrays
@@ -151,15 +151,15 @@ ON DUPLICATE KEY UPDATE
   prompt = VALUES(prompt), explanation = VALUES(explanation),
   points = VALUES(points), correct_text = VALUES(correct_text);
 
-DELETE FROM assessment.question_options
+DELETE FROM assessment_question_options
  WHERE question_id IN (
-   SELECT id FROM assessment.questions
+   SELECT id FROM assessment_questions
     WHERE quiz_id IN ('f0000001-0000-4000-8000-000000000018',
                       'f0000001-0000-4000-8000-000000000019',
                       'f0000001-0000-4000-8000-00000000001a',
                       'f0000001-0000-4000-8000-00000000001b'));
 
-INSERT INTO assessment.question_options (question_id, body, is_correct, `position`)
+INSERT INTO assessment_question_options (question_id, body, is_correct, `position`)
 SELECT v.question_id, v.body, v.is_correct, v.pos
   FROM (
     SELECT 'a1000001-0000-4000-8000-000000000241' AS question_id, '== converts before comparing; === does not' AS body, 1 AS is_correct, 1 AS pos
@@ -250,5 +250,5 @@ SELECT v.question_id, v.body, v.is_correct, v.pos
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000275', 'False', 1, 2
   ) v;
 
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000009');
-CALL `search`.reindex_all();
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000009');
+CALL search_reindex_all();

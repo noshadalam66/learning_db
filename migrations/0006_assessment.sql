@@ -3,7 +3,7 @@
 -- Quizzes, questions, options, attempts and answers.
 -- ===========================================================================
 
-CREATE TABLE assessment.quizzes (
+CREATE TABLE assessment_quizzes (
   id                 CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   -- catalog ids - deliberately not foreign keys.
   course_id          CHAR(36) CHARACTER SET ascii NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE assessment.quizzes (
     CHECK (max_attempts IS NULL OR max_attempts > 0)
 ) ENGINE=InnoDB;
 
-CREATE TABLE assessment.questions (
+CREATE TABLE assessment_questions (
   id           CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   quiz_id      CHAR(36) CHARACTER SET ascii NOT NULL,
   kind         ENUM('single_choice','multiple_choice','true_false','short_text')
@@ -54,13 +54,13 @@ CREATE TABLE assessment.questions (
   UNIQUE KEY uq_question_position (quiz_id, `position`),
 
   CONSTRAINT fk_questions_quiz FOREIGN KEY (quiz_id)
-    REFERENCES assessment.quizzes (id) ON DELETE CASCADE,
+    REFERENCES assessment_quizzes (id) ON DELETE CASCADE,
   CONSTRAINT ck_question_points_positive CHECK (points > 0),
   CONSTRAINT ck_question_short_text_has_answer
     CHECK (kind <> 'short_text' OR TRIM(IFNULL(correct_text, '')) <> '')
 ) ENGINE=InnoDB;
 
-CREATE TABLE assessment.question_options (
+CREATE TABLE assessment_question_options (
   id          CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   question_id CHAR(36) CHARACTER SET ascii NOT NULL,
   body        VARCHAR(1000) NOT NULL,
@@ -73,7 +73,7 @@ CREATE TABLE assessment.question_options (
   KEY ix_options_correct (question_id, is_correct),
 
   CONSTRAINT fk_options_question FOREIGN KEY (question_id)
-    REFERENCES assessment.questions (id) ON DELETE CASCADE
+    REFERENCES assessment_questions (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
@@ -85,10 +85,10 @@ CREATE TABLE assessment.question_options (
 -- a MySQL unique index permits duplicate NULLs. Many graded attempts coexist;
 -- a second open one collides.
 -- ---------------------------------------------------------------------------
-CREATE TABLE assessment.quiz_attempts (
+CREATE TABLE assessment_quiz_attempts (
   id              CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   quiz_id         CHAR(36) CHARACTER SET ascii NOT NULL,
-  -- identity.users.id - deliberately not a foreign key.
+  -- identity_users.id - deliberately not a foreign key.
   user_id         CHAR(36) CHARACTER SET ascii NOT NULL,
   course_id       CHAR(36) CHARACTER SET ascii NOT NULL,
   attempt_no      SMALLINT UNSIGNED NOT NULL,
@@ -117,14 +117,14 @@ CREATE TABLE assessment.quiz_attempts (
   KEY ix_attempts_course (course_id),
 
   CONSTRAINT fk_attempts_quiz FOREIGN KEY (quiz_id)
-    REFERENCES assessment.quizzes (id) ON DELETE CASCADE,
+    REFERENCES assessment_quizzes (id) ON DELETE CASCADE,
   CONSTRAINT ck_attempt_no_positive CHECK (attempt_no > 0),
   CONSTRAINT ck_attempt_score_range CHECK (score_percent BETWEEN 0 AND 100),
   CONSTRAINT ck_attempt_submitted_has_date
     CHECK (state IN ('in_progress','abandoned') OR submitted_at IS NOT NULL)
 ) ENGINE=InnoDB;
 
-CREATE TABLE assessment.attempt_answers (
+CREATE TABLE assessment_attempt_answers (
   id                  CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   attempt_id          CHAR(36) CHARACTER SET ascii NOT NULL,
   question_id         CHAR(36) CHARACTER SET ascii NOT NULL,
@@ -141,20 +141,20 @@ CREATE TABLE assessment.attempt_answers (
   KEY ix_answers_question (question_id),
 
   CONSTRAINT fk_answers_attempt FOREIGN KEY (attempt_id)
-    REFERENCES assessment.quiz_attempts (id) ON DELETE CASCADE,
+    REFERENCES assessment_quiz_attempts (id) ON DELETE CASCADE,
   CONSTRAINT fk_answers_question FOREIGN KEY (question_id)
-    REFERENCES assessment.questions (id) ON DELETE CASCADE,
+    REFERENCES assessment_questions (id) ON DELETE CASCADE,
   CONSTRAINT ck_answer_selected_is_array CHECK (JSON_TYPE(selected_option_ids) = 'ARRAY')
 ) ENGINE=InnoDB;
 
 DELIMITER $$
 
-CREATE TRIGGER assessment.trg_quizzes_touch
-  BEFORE UPDATE ON assessment.quizzes FOR EACH ROW
+CREATE TRIGGER trg_quizzes_touch
+  BEFORE UPDATE ON assessment_quizzes FOR EACH ROW
 BEGIN SET NEW.updated_at = UTC_TIMESTAMP(3); END$$
 
-CREATE TRIGGER assessment.trg_questions_touch
-  BEFORE UPDATE ON assessment.questions FOR EACH ROW
+CREATE TRIGGER trg_questions_touch
+  BEFORE UPDATE ON assessment_questions FOR EACH ROW
 BEGIN SET NEW.updated_at = UTC_TIMESTAMP(3); END$$
 
 -- ---------------------------------------------------------------------------
@@ -169,7 +169,8 @@ BEGIN SET NEW.updated_at = UTC_TIMESTAMP(3); END$$
 -- select every option and score. Unanswered questions still count toward
 -- points_possible.
 -- ---------------------------------------------------------------------------
-CREATE PROCEDURE assessment.grade_attempt(IN p_attempt_id CHAR(36))
+CREATE PROCEDURE assessment_grade_attempt(IN p_attempt_id CHAR(36))
+  SQL SECURITY INVOKER
 MODIFIES SQL DATA
 BEGIN
   DECLARE v_quiz_id      CHAR(36) CHARACTER SET ascii;
@@ -181,8 +182,8 @@ BEGIN
 
   SELECT a.quiz_id, q.pass_percent
     INTO v_quiz_id, v_pass_percent
-    FROM assessment.quiz_attempts a
-    JOIN assessment.quizzes q ON q.id = a.quiz_id
+    FROM assessment_quiz_attempts a
+    JOIN assessment_quizzes q ON q.id = a.quiz_id
    WHERE a.id = p_attempt_id;
 
   IF v_quiz_id IS NULL THEN
@@ -190,8 +191,8 @@ BEGIN
   END IF;
 
   -- Mark every answer of this attempt.
-  UPDATE assessment.attempt_answers ans
-    JOIN assessment.questions q ON q.id = ans.question_id
+  UPDATE assessment_attempt_answers ans
+    JOIN assessment_questions q ON q.id = ans.question_id
      SET ans.is_correct = (
            CASE q.kind
              WHEN 'short_text' THEN
@@ -201,7 +202,7 @@ BEGIN
                -- equal the correct set exactly.
                (
                  SELECT IFNULL(JSON_ARRAYAGG(o.id), JSON_ARRAY())
-                   FROM (SELECT id FROM assessment.question_options
+                   FROM (SELECT id FROM assessment_question_options
                           WHERE question_id = q.id AND is_correct = 1
                           ORDER BY id) o
                ) = (
@@ -222,7 +223,7 @@ BEGIN
                  ELSE
                    (
                      SELECT IFNULL(JSON_ARRAYAGG(o.id), JSON_ARRAY())
-                       FROM (SELECT id FROM assessment.question_options
+                       FROM (SELECT id FROM assessment_question_options
                               WHERE question_id = q.id AND is_correct = 1
                               ORDER BY id) o
                    ) = (
@@ -240,18 +241,18 @@ BEGIN
    WHERE ans.attempt_id = p_attempt_id;
 
   SELECT IFNULL(SUM(points_awarded), 0) INTO v_earned
-    FROM assessment.attempt_answers WHERE attempt_id = p_attempt_id;
+    FROM assessment_attempt_answers WHERE attempt_id = p_attempt_id;
 
   -- Unanswered questions still count against the learner.
   SELECT IFNULL(SUM(points), 0) INTO v_possible
-    FROM assessment.questions WHERE quiz_id = v_quiz_id;
+    FROM assessment_questions WHERE quiz_id = v_quiz_id;
 
   IF v_possible > 0 THEN
     SET v_percent = ROUND(v_earned * 100.0 / v_possible, 2);
   END IF;
   SET v_passed = (v_percent >= v_pass_percent);
 
-  UPDATE assessment.quiz_attempts
+  UPDATE assessment_quiz_attempts
      SET points_earned   = v_earned,
          points_possible = v_possible,
          score_percent   = v_percent,

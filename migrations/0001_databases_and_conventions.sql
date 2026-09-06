@@ -1,22 +1,39 @@
 -- ===========================================================================
--- 0001 : the eight databases, and the conventions every later migration follows
+-- 0001 : one database, and the conventions every later migration follows
 -- ---------------------------------------------------------------------------
--- MySQL has no schemas-inside-a-database: a schema *is* a database. So the
--- per-service split that PostgreSQL would express as seven schemas is
--- expressed here as seven databases on one server, plus one more for the
--- cross-service read views.
+-- MySQL has no schemas-inside-a-database: a schema *is* a database. The
+-- per-service split that PostgreSQL would express as seven schemas was
+-- originally expressed here as seven databases plus one for the shared read
+-- views. Everything now lives in a single database instead, and the ownership
+-- boundary is carried by a prefix on the table name:
 --
---   identity     -> User Service      (login, profile, roles)
---   catalog      -> Course Service    (course + lesson structure)
---   content      -> Content Service   (articles, video URL metadata)
---   progress     -> Progress Service  (tracking what a learner has watched)
---   assessment   -> Quiz Service      (quizzes, questions, attempts)
---   search       -> Search Service    (denormalised, indexed search documents)
---   analytics    -> Analytics Service (raw behaviour events + rollups)
---   platform     -> shared read views and the migration ledger; owned by nobody
+--   identity_*    -> User Service      (login, profile, roles)
+--   catalog_*     -> Course Service    (course + lesson structure)
+--   content_*     -> Content Service   (articles, video URL metadata)
+--   progress_*    -> Progress Service  (tracking what a learner has watched)
+--   assessment_*  -> Quiz Service      (quizzes, questions, attempts)
+--   search_*      -> Search Service    (denormalised, indexed search documents)
+--   analytics_*   -> Analytics Service (raw behaviour events + rollups)
+--   v_*           -> shared read views; owned by nobody
+--   platform_*    -> the migration ledger
 --
--- Each service is the only writer to its own database. Cross-service reads go
--- through the views in `platform` (migration 0009) or over HTTP.
+-- Each service is still the only writer to its own tables. Cross-service reads
+-- go through the v_ views (migration 0009) or over HTTP. The rule is the same
+-- one it always was; only its expression changed, from a database boundary the
+-- server enforced to a naming convention it does not.
+--
+-- Why give that up: shared hosting. On cPanel every database name is prefixed
+-- with the account name, so `catalog` becomes `noshadal_catalog` and eight
+-- databases mean eight names to configure, eight sets of grants to click
+-- through by hand, and eight entries against a plan's database quota. With one
+-- database the name appears once, in the connection string, and every
+-- statement below is written unqualified so it does not care what that name is.
+--
+-- What that costs is per-service GRANTs: the server can no longer stop the
+-- Quiz Service writing to identity_users, because a grant covers a database or
+-- a named table, and the services all connect as one user regardless. That
+-- isolation was already notional here - see migrations/optional/ for the
+-- per-service users, which stay available where the host allows them.
 --
 -- ---------------------------------------------------------------------------
 -- Conventions used throughout, stated once here rather than repeated:
@@ -29,7 +46,7 @@
 --
 --    The cost of a random uuid primary key is index locality: inserts scatter
 --    across the B-tree instead of appending. The append-heavy log tables
---    (analytics.events, search.query_log) use BIGINT AUTO_INCREMENT instead,
+--    (analytics_events, search_query_log) use BIGINT AUTO_INCREMENT instead,
 --    for exactly that reason.
 --
 -- 2. TIMESTAMPS are DATETIME(3) defaulted to (UTC_TIMESTAMP(3)), never
@@ -48,7 +65,7 @@
 --
 -- 3. TEXT COLUMNS are utf8mb4 with the server default collation
 --    (utf8mb4_0900_ai_ci), which is case- and accent-insensitive. That is what
---    makes identity.users.email behave like PostgreSQL's citext for free:
+--    makes identity_users.email behave like PostgreSQL's citext for free:
 --    Ada@x.test and ada@x.test collide on the unique index.
 --
 --    Columns holding a digest or a token are the exception - they are declared
@@ -59,18 +76,18 @@
 --    docs/SCHEMA.md so a change can be applied everywhere it appears.
 -- ===========================================================================
 
-CREATE DATABASE IF NOT EXISTS identity   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS catalog    CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS content    CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS progress   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS assessment CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS `search`   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS analytics  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE DATABASE IF NOT EXISTS platform   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+-- Nothing here creates a database. Every migration runs against whichever
+-- database the connection already points at, which is what makes the schema
+-- portable to hosting where you cannot issue CREATE DATABASE at all: on
+-- cPanel the database is created through the control panel, arrives with an
+-- account prefix (noshadal_learning), and the name only ever appears in the
+-- connection string.
+--
+-- scripts/reset.sh creates it for local development.
 
 -- The migration ledger. scripts/migrate.sh records a checksum per applied file
 -- and refuses to run if a file that already ran has changed.
-CREATE TABLE IF NOT EXISTS platform.schema_migrations (
+CREATE TABLE IF NOT EXISTS platform_schema_migrations (
   filename   VARCHAR(255) CHARACTER SET ascii NOT NULL PRIMARY KEY,
   checksum   CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   applied_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3))

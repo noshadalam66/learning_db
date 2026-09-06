@@ -12,7 +12,7 @@
 -- courses.
 -- ===========================================================================
 
-INSERT INTO catalog.tags (id, slug, name) VALUES
+INSERT INTO catalog_tags (id, slug, name) VALUES
   ('bbbbbbb1-0000-4000-8000-00000000000b', 'css',    'CSS'),
   ('bbbbbbb1-0000-4000-8000-00000000000c', 'layout', 'Layout'),
   ('bbbbbbb1-0000-4000-8000-00000000000d', 'design', 'Design Systems')
@@ -21,7 +21,7 @@ ON DUPLICATE KEY UPDATE name = VALUES(name);
 -- ---------------------------------------------------------------------------
 -- The course
 -- ---------------------------------------------------------------------------
-INSERT INTO catalog.courses
+INSERT INTO catalog_courses
   (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
@@ -29,7 +29,7 @@ VALUES
    'css-from-basics-to-expert',
    'CSS: From Basics to Expert',
    'Four levels, twelve lessons, every example runnable in the browser',
-   -- Plain text, like every other description. Only content.articles is
+   -- Plain text, like every other description. Only content_articles is
    -- rendered as Markdown; asterisks here would reach the page as asterisks.
    'A complete path through CSS in four levels. Level 1, Basic, covers the three things every rule depends on: how a selector wins, how a box is measured, and which unit to reach for. Level 2, Intermediate, is layout - Flexbox for one dimension, Grid for two, and how to build a page that adapts without a single media query. Level 3, Advanced, moves to custom properties and theming, the positioning and stacking rules that decide what covers what, and motion that respects the people who do not want it. Level 4, Expert, finishes with cascade layers, container queries, and the CSS that decides how fast a page paints.
 
@@ -50,7 +50,7 @@ ON DUPLICATE KEY UPDATE
   title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
-INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
+INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000005', 'bbbbbbb1-0000-4000-8000-00000000000b'),
   ('c0000001-0000-4000-8000-000000000005', 'bbbbbbb1-0000-4000-8000-00000000000c'),
   ('c0000001-0000-4000-8000-000000000005', 'bbbbbbb1-0000-4000-8000-00000000000d'),
@@ -60,7 +60,7 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 -- ---------------------------------------------------------------------------
 -- The four levels
 -- ---------------------------------------------------------------------------
-INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
+INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-00000000000c', 'c0000001-0000-4000-8000-000000000005',
    'Level 1 - Basic',
    'Which rule wins, how a box is measured, and which unit to reach for.', 1),
@@ -78,7 +78,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 -- ---------------------------------------------------------------------------
 -- Twelve lessons, three per level.
 -- ---------------------------------------------------------------------------
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -142,7 +142,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `posit
 -- ---------------------------------------------------------------------------
 -- Level 1 - Basic
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -521,12 +521,12 @@ feeling goes away.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 2 - Intermediate
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1001,12 +1001,12 @@ container queries are for, and they are waiting in level four.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 3 - Advanced
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1551,12 +1551,12 @@ is always wrong for someone.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 4 - Expert
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -2041,10 +2041,10 @@ still the highest-value change on most sites.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Refresh the denormalised counters and re-index for search.
 -- ---------------------------------------------------------------------------
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000005');
-CALL `search`.reindex_all();
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000005');
+CALL search_reindex_all();

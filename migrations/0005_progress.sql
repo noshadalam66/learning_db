@@ -3,13 +3,13 @@
 -- Enrolments, per-lesson progress and resume points.
 -- ===========================================================================
 
-CREATE TABLE progress.enrolments (
+CREATE TABLE progress_enrolments (
   id                CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
-  -- identity.users.id and catalog.courses.id - deliberately not foreign keys.
+  -- identity_users.id and catalog_courses.id - deliberately not foreign keys.
   user_id           CHAR(36) CHARACTER SET ascii NOT NULL,
   course_id         CHAR(36) CHARACTER SET ascii NOT NULL,
   state             ENUM('active','completed','expired','cancelled') NOT NULL DEFAULT 'active',
-  -- Denormalised; refreshed by progress.refresh_enrolment_rollup().
+  -- Denormalised; refreshed by progress_refresh_enrolment_rollup().
   progress_percent  DECIMAL(5,2) NOT NULL DEFAULT 0,
   lessons_completed INT NOT NULL DEFAULT 0,
   lessons_total     INT NOT NULL DEFAULT 0,
@@ -39,12 +39,12 @@ CREATE TABLE progress.enrolments (
 -- the first accumulates, the second is the resume point and moves backwards
 -- when someone rewinds.
 -- ---------------------------------------------------------------------------
-CREATE TABLE progress.lesson_progress (
+CREATE TABLE progress_lesson_progress (
   id                    CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   enrolment_id          CHAR(36) CHARACTER SET ascii NOT NULL,
   user_id               CHAR(36) CHARACTER SET ascii NOT NULL,
   course_id             CHAR(36) CHARACTER SET ascii NOT NULL,
-  -- catalog.lessons.id - deliberately not a foreign key.
+  -- catalog_lessons.id - deliberately not a foreign key.
   lesson_id             CHAR(36) CHARACTER SET ascii NOT NULL,
   state                 ENUM('not_started','in_progress','completed') NOT NULL DEFAULT 'not_started',
   seconds_watched       INT NOT NULL DEFAULT 0,
@@ -61,14 +61,14 @@ CREATE TABLE progress.lesson_progress (
   KEY ix_progress_completed (course_id, state, completed_at),
 
   CONSTRAINT fk_progress_enrolment FOREIGN KEY (enrolment_id)
-    REFERENCES progress.enrolments (id) ON DELETE CASCADE,
+    REFERENCES progress_enrolments (id) ON DELETE CASCADE,
   CONSTRAINT ck_progress_seconds_positive CHECK (seconds_watched >= 0),
   CONSTRAINT ck_progress_position_positive CHECK (last_position_seconds >= 0),
   CONSTRAINT ck_progress_completed_has_date
     CHECK (state <> 'completed' OR completed_at IS NOT NULL)
 ) ENGINE=InnoDB;
 
-CREATE TABLE progress.lesson_notes (
+CREATE TABLE progress_lesson_notes (
   id         CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   user_id    CHAR(36) CHARACTER SET ascii NOT NULL,
   lesson_id  CHAR(36) CHARACTER SET ascii NOT NULL,
@@ -85,7 +85,7 @@ CREATE TABLE progress.lesson_notes (
   CONSTRAINT ck_notes_body_not_blank CHECK (TRIM(body) <> '')
 ) ENGINE=InnoDB;
 
-CREATE TABLE progress.certificates (
+CREATE TABLE progress_certificates (
   id              CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   enrolment_id    CHAR(36) CHARACTER SET ascii NOT NULL,
   user_id         CHAR(36) CHARACTER SET ascii NOT NULL,
@@ -102,13 +102,13 @@ CREATE TABLE progress.certificates (
   KEY ix_certificates_user (user_id, issued_at DESC),
 
   CONSTRAINT fk_certificate_enrolment FOREIGN KEY (enrolment_id)
-    REFERENCES progress.enrolments (id) ON DELETE CASCADE
+    REFERENCES progress_enrolments (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 DELIMITER $$
 
-CREATE TRIGGER progress.trg_notes_touch
-  BEFORE UPDATE ON progress.lesson_notes FOR EACH ROW
+CREATE TRIGGER trg_notes_touch
+  BEFORE UPDATE ON progress_lesson_notes FOR EACH ROW
 BEGIN SET NEW.updated_at = UTC_TIMESTAMP(3); END$$
 
 -- ---------------------------------------------------------------------------
@@ -119,7 +119,8 @@ BEGIN SET NEW.updated_at = UTC_TIMESTAMP(3); END$$
 -- matter which code path did the write - and tests/verify.sql checks they
 -- have not.
 -- ---------------------------------------------------------------------------
-CREATE PROCEDURE progress.refresh_enrolment_rollup(IN p_enrolment_id CHAR(36))
+CREATE PROCEDURE progress_refresh_enrolment_rollup(IN p_enrolment_id CHAR(36))
+  SQL SECURITY INVOKER
 MODIFIES SQL DATA
 BEGIN
   DECLARE v_done  INT DEFAULT 0;
@@ -130,7 +131,7 @@ BEGIN
     SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END),
     COUNT(*)
     INTO v_done, v_rows
-    FROM progress.lesson_progress
+    FROM progress_lesson_progress
    WHERE enrolment_id = p_enrolment_id;
 
   SET v_done = IFNULL(v_done, 0);
@@ -139,9 +140,9 @@ BEGIN
   -- the denominator; never let it fall below the number of rows we actually
   -- have, or the percentage could exceed 100.
   SELECT GREATEST(lessons_total, v_rows) INTO v_total
-    FROM progress.enrolments WHERE id = p_enrolment_id;
+    FROM progress_enrolments WHERE id = p_enrolment_id;
 
-  UPDATE progress.enrolments
+  UPDATE progress_enrolments
      SET lessons_completed = v_done,
          lessons_total     = v_total,
          progress_percent  = CASE WHEN v_total = 0 THEN 0

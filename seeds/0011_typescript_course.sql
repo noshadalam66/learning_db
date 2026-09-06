@@ -10,7 +10,7 @@
 -- include an error on purpose and say so.
 -- ===========================================================================
 
-INSERT INTO catalog.courses
+INSERT INTO catalog_courses
   (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
@@ -37,13 +37,13 @@ ON DUPLICATE KEY UPDATE
   title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
-INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
+INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000007', 'bbbbbbb1-0000-4000-8000-00000000000f'),
   ('c0000001-0000-4000-8000-000000000007', 'bbbbbbb1-0000-4000-8000-00000000000e'),
   ('c0000001-0000-4000-8000-000000000007', 'bbbbbbb1-0000-4000-8000-00000000000a')
 ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
-INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
+INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000014', 'c0000001-0000-4000-8000-000000000007',
    'Level 1 - Basic', 'What the type system is for, and the annotations you will write every day.', 1),
   ('d0000001-0000-4000-8000-000000000015', 'c0000001-0000-4000-8000-000000000007',
@@ -54,7 +54,7 @@ INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
    'Level 4 - Expert', 'Conditional and mapped types, template literal types, and declaration files.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -130,7 +130,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `posit
 -- ---------------------------------------------------------------------------
 -- Level 1 - Basic
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -435,12 +435,12 @@ where you validated the data.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 2 - Intermediate
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -785,12 +785,12 @@ the shape most useful generics have.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 3 - Advanced
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1144,12 +1144,12 @@ This is one the compiler cannot save you from.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 4 - Expert
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1505,6 +1505,6 @@ intentions at the boundary; guards enforce them.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content.articles.revision + 1;
+  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
 
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000007');
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000007');

@@ -6,7 +6,7 @@
 -- opposite - the Markdown or HTML source is the thing we store.
 -- ===========================================================================
 
-INSERT INTO content.lesson_videos
+INSERT INTO content_lesson_videos
   (lesson_id, provider, provider_asset_id, video_url, hls_url, thumbnail_url,
    captions_url, duration_seconds, width, height, transcript)
 VALUES
@@ -63,7 +63,7 @@ VALUES
    'A CSRF token proves the request came from a page you rendered. Put it in the session, put it in a hidden field, and compare the two with hash_equals so the comparison is not timing dependent. Cookies need HttpOnly, Secure and SameSite=Lax at minimum.')
 ON DUPLICATE KEY UPDATE video_url = VALUES(video_url);
 
-INSERT INTO content.lesson_attachments (lesson_id, title, file_url, mime_type, size_bytes, `position`) VALUES
+INSERT INTO content_lesson_attachments (lesson_id, title, file_url, mime_type, size_bytes, `position`) VALUES
   ('e0000001-0000-4000-8000-000000000004', 'Slides: the route layer',
    'https://files.example-cdn.test/slides/route-layer.pdf', 'application/pdf', 482113, 1),
   ('e0000001-0000-4000-8000-000000000006', 'Repository starter code',
@@ -86,7 +86,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title);
 -- seeded by hand or synced from a CMS is served correctly without anyone
 -- having to pre-render it.
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -134,7 +134,7 @@ writer edits prose. Different people, different release cadence.
 
 Two honest costs:
 
-1. **No foreign keys across services.** `catalog.courses.instructor_id` points
+1. **No foreign keys across services.** `catalog_courses.instructor_id` points
    at a user, and InnoDB would happily enforce that across databases - MySQL
    supports cross-database foreign keys. We leave it out anyway, because a
    foreign key there means the two services can never be moved onto separate
@@ -241,8 +241,8 @@ knowing:
   36. Foreign key columns must repeat the same charset, or InnoDB refuses the
   constraint outright.
 
-Both key styles appear in this schema on purpose. Compare `analytics.events`
-with `catalog.courses`.
+Both key styles appear in this schema on purpose. Compare `analytics_events`
+with `catalog_courses`.
 
 ## Write the CHECK constraint
 
@@ -294,11 +294,11 @@ The workaround is to park every position in the negative range first, where it
 cannot collide with any target value, then write the final numbers:
 
 ```sql
-UPDATE catalog.lessons SET position = -position WHERE module_id = ?;
+UPDATE catalog_lessons SET position = -position WHERE module_id = ?;
 -- now write 1..n
 ```
 
-That is what `catalog.reorder_lessons()` does.
+That is what `catalog_reorder_lessons()` does.
 
 ## The one to remember
 
@@ -330,7 +330,7 @@ SELECT d.*,
      + MATCH(subtitle)  AGAINST(? IN NATURAL LANGUAGE MODE) * 2
      + MATCH(body)      AGAINST(? IN NATURAL LANGUAGE MODE) * 1
      + MATCH(tags_text) AGAINST(? IN NATURAL LANGUAGE MODE) AS score
-  FROM search.documents d
+  FROM search_documents d
  WHERE MATCH(title, subtitle, body, tags_text) AGAINST(? IN NATURAL LANGUAGE MODE)
  ORDER BY score DESC;
 ```
@@ -345,7 +345,7 @@ weighting every match is equal and your results feel random.
 at all, so a search for `js` or `ci` finds nothing no matter how many documents
 contain them. Changing it requires rebuilding every FULLTEXT index. The cheaper
 fix is a synonym table that rewrites `js` to `javascript` before the query is
-built - which is what `search.synonyms` is for.
+built - which is what `search_synonyms` is for.
 
 **Boolean mode does not rank.** `IN BOOLEAN MODE` gives you operators (`+`, `-`,
 `*`) but relevance scores that are not comparable to natural-language mode.
@@ -363,7 +363,7 @@ What works instead, in order of usefulness:
    `microservics` becomes `microserv*`, which matches. This catches a typo in
    the *tail* of a word and nothing else.
 2. **Edit distance for ranking.** There is no built-in Levenshtein either, so
-   `search.levenshtein()` in this schema is a stored function. It is
+   `search_levenshtein()` in this schema is a stored function. It is
    O(len(a) x len(b)) per call, so it only ever runs over the small candidate
    set a prefix match already narrowed down - never across the table.
 3. **SOUNDEX** for phonetic near-misses. Cheap, and blunt.
@@ -387,7 +387,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title);
 -- authored in a rich-text editor or synced from a headless CMS. This one also
 -- carries a pre-rendered body_html, so both cache states are represented.
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, body_html, excerpt, reading_time_minutes,
    word_count, author_id, status, external_source, external_id, published_at)
 VALUES

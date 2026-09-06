@@ -19,7 +19,7 @@ remembered.
 - [Quick start](#quick-start)
 - [The ERD](#the-erd)
   - [The spine](#the-spine) · [Where the foreign keys stop](#where-the-foreign-keys-stop) · [The learner's side](#the-learners-side)
-- [The eight databases](#the-eight-databases)
+- [The table groups](#the-table-groups)
 - [Reading the tables below](#reading-the-tables-below)
 - [Data dictionary](#data-dictionary)
   - [`identity`](#identity--user-service) · [`catalog`](#catalog--course-service) · [`content`](#content--content-service) · [`progress`](#progress--progress-service) · [`assessment`](#assessment--quiz-service) · [`search`](#search--search-service) · [`analytics`](#analytics--analytics-service)
@@ -77,7 +77,7 @@ erDiagram
         char36 id PK
         varchar slug UK
         varchar title
-        char36 instructor_id "identity.users - no FK"
+        char36 instructor_id "identity_users - no FK"
         enum status "draft|in_review|published|archived"
         int lesson_count "cached"
         int duration_minutes "cached"
@@ -138,8 +138,10 @@ Three things worth noticing:
 
 ### Where the foreign keys stop
 
-In MySQL a schema *is* a database, so the per-service split is seven databases
-on one server, plus `platform` for the shared read views.
+Everything lives in one database. The per-service split is carried by a prefix
+on the table name — `catalog_`, `identity_`, and so on — rather than by a
+database boundary the server enforces. The grouping below is that convention,
+not something MySQL is checking.
 
 ```mermaid
 flowchart TB
@@ -266,18 +268,24 @@ erDiagram
 
 ---
 
-## The eight databases
+## The table groups
 
-| Database | Owning service | Tables | Holds |
+One database, 32 tables, and a prefix on each that says which service owns it.
+The database is named only in the connection string, so it can be whatever the
+host calls it — on cPanel that is the account prefix plus your name,
+`noshadal_learning`.
+
+| Prefix | Owning service | Tables | Holds |
 |---|---|---|---|
-| `identity` | User Service | 5 | Accounts, password hashes, roles, session and verification tokens |
-| `catalog` | Course Service | 7 | Courses, modules, lessons, categories, tags, reviews |
-| `content` | Content Service | 4 | Article bodies, article history, video URL metadata, attachments |
-| `progress` | Progress Service | 4 | Enrolments, per-lesson progress, notes, certificates |
-| `assessment` | Quiz Service | 5 | Quizzes, questions, options, attempts, answers |
-| `search` | Search Service | 3 | Denormalised search documents, query log, synonyms |
-| `analytics` | Analytics Service | 3 | Behaviour events (partitioned), two daily rollups |
-| `platform` | — | 0 | Only the three cross-service read views and `schema_migrations` |
+| `identity_` | User Service | 5 | Accounts, password hashes, roles, session and verification tokens |
+| `catalog_` | Course Service | 7 | Courses, modules, lessons, categories, tags, reviews |
+| `content_` | Content Service | 4 | Article bodies, article history, video URL metadata, attachments |
+| `progress_` | Progress Service | 4 | Enrolments, per-lesson progress, notes, certificates |
+| `assessment_` | Quiz Service | 5 | Quizzes, questions, options, attempts, answers |
+| `search_` | Search Service | 3 | Denormalised search documents, query log, synonyms |
+| `analytics_` | Analytics Service | 3 | Behaviour events (partitioned), two daily rollups |
+| `v_` | — | 3 views | The cross-service read views; owned by nobody |
+| `platform_` | — | 1 | `schema_migrations`, the migration ledger |
 
 Each service is the **only writer** to its own database. Cross-service reads go
 through the views in `platform`, or over HTTP. Migration `0009` creates a MySQL
@@ -320,7 +328,7 @@ The three views in `platform`:
 Accounts, credentials and roles. 5 tables.
 
 
-#### `identity.refresh_tokens`
+#### `identity_refresh_tokens`
 
 One row per live session. Only digests are stored.
 
@@ -328,7 +336,7 @@ One row per live session. Only digests are stored.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `user_id` | `char(36)` | no | **FK** → `identity.users` | Whose session this is. Real foreign key, cascading. |
+| `user_id` | `char(36)` | no | **FK** → `identity_users` | Whose session this is. Real foreign key, cascading. |
 | `token_hash` | `char(64)` | no | — | SHA-256 of the token, never the token itself — a database leak hands nobody a usable session. `ascii_bin` so comparison is byte-exact. |
 | `user_agent` | `varchar(500)` | yes | — | Browser string, so a person can recognise a session in the list. |
 | `ip_address` | `varbinary(16)` | yes | — | `VARBINARY(16)` written with `INET6_ATON()`; holds IPv4 and IPv6 alike. MySQL's stand-in for PostgreSQL's `inet`. |
@@ -339,7 +347,7 @@ One row per live session. Only digests are stored.
 **Unique** `(token_hash)`
 
 
-#### `identity.roles`
+#### `identity_roles`
 
 Three rows in practice — `student`, `instructor`, `admin` — but a table rather than an enum so a role can be added without a migration.
 
@@ -353,19 +361,19 @@ Three rows in practice — `student`, `instructor`, `admin` — but a table rath
 **Unique** `(name)`
 
 
-#### `identity.user_roles`
+#### `identity_user_roles`
 
 Many-to-many. A person can be both an instructor and an admin.
 
 
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
-| `user_id` | `char(36)` | no | **PK** **FK** → `identity.users` | Half of the composite primary key. Real foreign key, cascading on delete. |
-| `role_id` | `smallint unsigned` | no | **PK** **FK** → `identity.roles` | The other half. Real foreign key. |
+| `user_id` | `char(36)` | no | **PK** **FK** → `identity_users` | Half of the composite primary key. Real foreign key, cascading on delete. |
+| `role_id` | `smallint unsigned` | no | **PK** **FK** → `identity_roles` | The other half. Real foreign key. |
 | `granted_at` | `datetime(3)` | no | — | When the role was assigned. |
-| `granted_by` | `char(36)` | yes | **FK** → `identity.users` | Which admin assigned it. `SET NULL` if that admin is deleted, so the grant survives. |
+| `granted_by` | `char(36)` | yes | **FK** → `identity_users` | Which admin assigned it. `SET NULL` if that admin is deleted, so the grant survives. |
 
-#### `identity.users`
+#### `identity_users`
 
 The account. Everything else in the platform points here, mostly without a foreign key.
 
@@ -390,7 +398,7 @@ The account. Everything else in the platform points here, mostly without a forei
 **Unique** `(email)`
 
 
-#### `identity.verification_tokens`
+#### `identity_verification_tokens`
 
 Single-use tokens for e-mail verification and password reset.
 
@@ -398,7 +406,7 @@ Single-use tokens for e-mail verification and password reset.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `user_id` | `char(36)` | no | **FK** → `identity.users` | Whose token. Real foreign key, cascading. |
+| `user_id` | `char(36)` | no | **FK** → `identity_users` | Whose token. Real foreign key, cascading. |
 | `purpose` | `enum('email_verify','password_reset')` | no | — | `email_verify` or `password_reset`. The consume path matches on it, so a reset token cannot verify an address. |
 | `token_hash` | `char(64)` | no | — | SHA-256 digest, as above. |
 | `expires_at` | `datetime(3)` | no | — | Short-lived: 60 minutes for a reset, 24 hours for a verification. |
@@ -413,7 +421,7 @@ Single-use tokens for e-mail verification and password reset.
 The spine: courses, modules and lessons. 7 tables.
 
 
-#### `catalog.categories`
+#### `catalog_categories`
 
 The subject taxonomy. Self-referencing, so sub-categories are possible.
 
@@ -421,7 +429,7 @@ The subject taxonomy. Self-referencing, so sub-categories are possible.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `parent_id` | `char(36)` | yes | **FK** → `catalog.categories` | Self-reference for a sub-category. `SET NULL` on delete. Cannot equal `id` — enforced by a trigger, because MySQL forbids a `CHECK` on a column carrying a referential action. |
+| `parent_id` | `char(36)` | yes | **FK** → `catalog_categories` | Self-reference for a sub-category. `SET NULL` on delete. Cannot equal `id` — enforced by a trigger, because MySQL forbids a `CHECK` on a column carrying a referential action. |
 | `slug` | `varchar(120)` | no | — | URL segment. A `CHECK` enforces lowercase-hyphenated. |
 | `name` | `varchar(150)` | no | — | Display name. |
 | `description` | `varchar(1000)` | no | — | Shown on the category landing page. |
@@ -431,7 +439,7 @@ The subject taxonomy. Self-referencing, so sub-categories are possible.
 **Unique** `(slug)`
 
 
-#### `catalog.course_reviews`
+#### `catalog_course_reviews`
 
 One rating per learner per course. The source of the two cached rating columns.
 
@@ -439,7 +447,7 @@ One rating per learner per course. The source of the two cached rating columns.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `course_id` | `char(36)` | no | **FK** → `catalog.courses` | Reviewed course. Real foreign key, cascading. |
+| `course_id` | `char(36)` | no | **FK** → `catalog_courses` | Reviewed course. Real foreign key, cascading. |
 | `user_id` | `char(36)` | no | — | Reviewer. No foreign key. Unique with `course_id` — one review per person per course. |
 | `rating` | `tinyint unsigned` | no | — | 1 to 5, enforced by a `CHECK`. |
 | `comment` | `text` | no | — | Free text. May be empty; the rating is the required part. |
@@ -449,17 +457,17 @@ One rating per learner per course. The source of the two cached rating columns.
 **Unique** `(course_id,user_id)`
 
 
-#### `catalog.course_tags`
+#### `catalog_course_tags`
 
 Many-to-many between courses and tags.
 
 
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
-| `course_id` | `char(36)` | no | **PK** **FK** → `catalog.courses` | Half of the composite key. Real foreign key, cascading. |
-| `tag_id` | `char(36)` | no | **PK** **FK** → `catalog.tags` | The other half. Real foreign key, cascading. |
+| `course_id` | `char(36)` | no | **PK** **FK** → `catalog_courses` | Half of the composite key. Real foreign key, cascading. |
+| `tag_id` | `char(36)` | no | **PK** **FK** → `catalog_tags` | The other half. Real foreign key, cascading. |
 
-#### `catalog.courses`
+#### `catalog_courses`
 
 The course itself. Four columns here are caches — marked below.
 
@@ -471,8 +479,8 @@ The course itself. Four columns here are caches — marked below.
 | `title` | `varchar(200)` | no | — | Course title. |
 | `subtitle` | `varchar(300)` | no | — | One-line pitch on the card and the hero. |
 | `description` | `text` | no | — | Full prose description. |
-| `category_id` | `char(36)` | yes | **FK** → `catalog.categories` | Real foreign key to `catalog.categories`. `SET NULL` so deleting a category does not delete courses. |
-| `instructor_id` | `char(36)` | no | — | Who teaches it. Points at `identity.users.id` with **no** foreign key — the deliberate service boundary. |
+| `category_id` | `char(36)` | yes | **FK** → `catalog_categories` | Real foreign key to `catalog_categories`. `SET NULL` so deleting a category does not delete courses. |
+| `instructor_id` | `char(36)` | no | — | Who teaches it. Points at `identity_users.id` with **no** foreign key — the deliberate service boundary. |
 | `level` | `enum('beginner','intermediate','advanced','expert')` | no | — | `beginner` · `intermediate` · `advanced` · `expert`. |
 | `language` | `varchar(10)` | no | — | Content language. Backticked in SQL because `language` is a MySQL keyword. |
 | `status` | `enum('draft','in_review','published','archived')` | no | — | `draft` · `in_review` · `published` · `archived`. Only `published` appears in the catalogue. |
@@ -480,9 +488,9 @@ The course itself. Four columns here are caches — marked below.
 | `promo_video_url` | `varchar(2000)` | yes | — | Optional trailer. |
 | `price_cents` | `int` | no | — | Integer minor units — never a float, because money and binary fractions do not mix. `0` means free. |
 | `currency` | `char(3)` | no | — | ISO 4217 code for `price_cents`. |
-| `duration_minutes` | `int` | no | — | **Cached.** Sum of published lesson durations. Refreshed by `catalog.refresh_course_rollup()`. |
+| `duration_minutes` | `int` | no | — | **Cached.** Sum of published lesson durations. Refreshed by `catalog_refresh_course_rollup()`. |
 | `lesson_count` | `int` | no | — | **Cached.** Number of published lessons. Same procedure. |
-| `rating_average` | `decimal(3,2)` | no | — | **Cached.** Mean of `course_reviews.rating`. Refreshed by `catalog.refresh_course_rating()`. |
+| `rating_average` | `decimal(3,2)` | no | — | **Cached.** Mean of `course_reviews.rating`. Refreshed by `catalog_refresh_course_rating()`. |
 | `rating_count` | `int` | no | — | **Cached.** How many reviews that mean is over. |
 | `learning_outcomes` | `json` | no | — | JSON array of "you will be able to…" strings. MySQL has no array type; a `CHECK` requires `JSON_TYPE = 'ARRAY'`. |
 | `requirements` | `json` | no | — | JSON array of prerequisites. |
@@ -493,7 +501,7 @@ The course itself. Four columns here are caches — marked below.
 **Unique** `(slug)` · **FULLTEXT** `(title)`
 
 
-#### `catalog.lessons`
+#### `catalog_lessons`
 
 The unit a learner actually opens. **`kind` decides which body table holds its content.**
 
@@ -501,8 +509,8 @@ The unit a learner actually opens. **`kind` decides which body table holds its c
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `module_id` | `char(36)` | no | **FK** → `catalog.modules` | Owning chapter. Real foreign key, cascading. |
-| `course_id` | `char(36)` | no | **FK** → `catalog.courses` | **Denormalised** — reachable via `module_id`, carried anyway so "every lesson of this course, in order" needs no join. A trigger rejects any row where the two disagree. |
+| `module_id` | `char(36)` | no | **FK** → `catalog_modules` | Owning chapter. Real foreign key, cascading. |
+| `course_id` | `char(36)` | no | **FK** → `catalog_courses` | **Denormalised** — reachable via `module_id`, carried anyway so "every lesson of this course, in order" needs no join. A trigger rejects any row where the two disagree. |
 | `slug` | `varchar(120)` | no | — | URL identifier, unique within the course. |
 | `title` | `varchar(200)` | no | — | Lesson title. |
 | `summary` | `varchar(2000)` | no | — | One-line description in the curriculum list. |
@@ -517,7 +525,7 @@ The unit a learner actually opens. **`kind` decides which body table holds its c
 **Unique** `(module_id,position)` · **Unique** `(course_id,slug)`
 
 
-#### `catalog.modules`
+#### `catalog_modules`
 
 A chapter within a course. Ordered.
 
@@ -525,7 +533,7 @@ A chapter within a course. Ordered.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `course_id` | `char(36)` | no | **FK** → `catalog.courses` | Owning course. Real foreign key, cascading. |
+| `course_id` | `char(36)` | no | **FK** → `catalog_courses` | Owning course. Real foreign key, cascading. |
 | `title` | `varchar(200)` | no | — | Chapter title. |
 | `summary` | `varchar(2000)` | no | — | Optional blurb under the chapter heading. |
 | `position` | `int` | no | — | Order within the course. Unique per course — which is why reordering needs the staging trick. |
@@ -535,7 +543,7 @@ A chapter within a course. Ordered.
 **Unique** `(course_id,position)`
 
 
-#### `catalog.tags`
+#### `catalog_tags`
 
 Free-form topics, independent of the category tree.
 
@@ -554,7 +562,7 @@ Free-form topics, independent of the category tree.
 Lesson bodies — article text and video pointers. 4 tables.
 
 
-#### `content.article_revisions`
+#### `content_article_revisions`
 
 Append-only history, written by a `BEFORE UPDATE` trigger on `articles`.
 
@@ -562,7 +570,7 @@ Append-only history, written by a `BEFORE UPDATE` trigger on `articles`.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `article_id` | `char(36)` | no | **FK** → `content.articles` | Which article. Real foreign key, cascading. |
+| `article_id` | `char(36)` | no | **FK** → `content_articles` | Which article. Real foreign key, cascading. |
 | `revision` | `int` | no | — | The version number this snapshot replaced. Unique per article. |
 | `format` | `enum('markdown','html')` | no | — | The format at that revision — an article can switch between Markdown and HTML. |
 | `title` | `varchar(300)` | no | — | The title at that revision. |
@@ -573,7 +581,7 @@ Append-only history, written by a `BEFORE UPDATE` trigger on `articles`.
 **Unique** `(article_id,revision)`
 
 
-#### `content.articles`
+#### `content_articles`
 
 The written body of a lesson, as Markdown or HTML.
 
@@ -590,7 +598,7 @@ The written body of a lesson, as Markdown or HTML.
 | `reading_time_minutes` | `int` | no | — | Derived from the word count at ~220 wpm. |
 | `word_count` | `int` | no | — | Words in the rendered text, markup excluded. |
 | `revision` | `int` | no | — | Incremented by the snapshot trigger on every body or title change. Never set by hand. |
-| `author_id` | `char(36)` | yes | — | Who wrote it. Points at `identity.users.id`, no foreign key. |
+| `author_id` | `char(36)` | yes | — | Who wrote it. Points at `identity_users.id`, no foreign key. |
 | `status` | `enum('draft','in_review','published','archived')` | no | — | `draft` · `in_review` · `published` · `archived`. |
 | `external_source` | `varchar(100)` | yes | — | Name of the headless CMS this was synced from, or `NULL` for a locally authored article. **A row with this set is read-only locally** — editing it would be overwritten by the next sync. |
 | `external_id` | `varchar(200)` | yes | — | The entry id in that CMS. |
@@ -601,7 +609,7 @@ The written body of a lesson, as Markdown or HTML.
 **Unique** `(lesson_id)`
 
 
-#### `content.lesson_attachments`
+#### `content_lesson_attachments`
 
 Downloadable extras. URLs again, never bytes.
 
@@ -620,7 +628,7 @@ Downloadable extras. URLs again, never bytes.
 **Unique** `(lesson_id,file_url)`
 
 
-#### `content.lesson_videos`
+#### `content_lesson_videos`
 
 A pointer to externally hosted video. **No media is stored in this database** — the verify suite fails the build if a binary column appears here.
 
@@ -651,7 +659,7 @@ A pointer to externally hosted video. **No media is stored in this database** �
 Each learner's relationship to the spine. 4 tables.
 
 
-#### `progress.certificates`
+#### `progress_certificates`
 
 Issued once, on the transition into `completed`.
 
@@ -659,7 +667,7 @@ Issued once, on the transition into `completed`.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `enrolment_id` | `char(36)` | no | **FK** → `progress.enrolments` | Which enrolment earned it. Unique and a real foreign key — one certificate per enrolment. |
+| `enrolment_id` | `char(36)` | no | **FK** → `progress_enrolments` | Which enrolment earned it. Unique and a real foreign key — one certificate per enrolment. |
 | `user_id` | `char(36)` | no | — | Denormalised so "my certificates" needs no join. |
 | `course_id` | `char(36)` | no | — | Denormalised for display. |
 | `serial` | `varchar(64)` | no | — | Public identifier, **random rather than sequential** — a sequential serial leaks how many the platform has issued and lets anyone guess another. |
@@ -669,7 +677,7 @@ Issued once, on the transition into `completed`.
 **Unique** `(enrolment_id)` · **Unique** `(serial)`
 
 
-#### `progress.enrolments`
+#### `progress_enrolments`
 
 A learner registered on a course, plus the rolled-up completion figures.
 
@@ -680,7 +688,7 @@ A learner registered on a course, plus the rolled-up completion figures.
 | `user_id` | `char(36)` | no | — | The learner. Unique with `course_id` — one enrolment per person per course. No foreign key. |
 | `course_id` | `char(36)` | no | — | The course. No foreign key. |
 | `state` | `enum('active','completed','expired','cancelled')` | no | — | `active` · `completed` · `expired` · `cancelled`. Set by the rollup procedure, not by hand. |
-| `progress_percent` | `decimal(5,2)` | no | — | **Cached.** `lessons_completed / lessons_total`, recomputed by `progress.refresh_enrolment_rollup()`. |
+| `progress_percent` | `decimal(5,2)` | no | — | **Cached.** `lessons_completed / lessons_total`, recomputed by `progress_refresh_enrolment_rollup()`. |
 | `lessons_completed` | `int` | no | — | **Cached.** Count of completed detail rows. |
 | `lessons_total` | `int` | no | — | The denominator, supplied by the Course Service at enrolment time. Kept at least as large as the number of detail rows, so the percentage can never exceed 100. |
 | `last_lesson_id` | `char(36)` | yes | — | Powers "continue where you left off". |
@@ -692,7 +700,7 @@ A learner registered on a course, plus the rolled-up completion figures.
 **Unique** `(user_id,course_id)`
 
 
-#### `progress.lesson_notes`
+#### `progress_lesson_notes`
 
 Personal notes, optionally pinned to a moment in a video.
 
@@ -708,7 +716,7 @@ Personal notes, optionally pinned to a moment in a video.
 | `created_at` | `datetime(3)` | no | — | When the row was inserted (UTC). |
 | `updated_at` | `datetime(3)` | no | — | Last modification (UTC), maintained by a trigger. |
 
-#### `progress.lesson_progress`
+#### `progress_lesson_progress`
 
 The detail rows the enrolment summarises. One per learner per lesson.
 
@@ -716,7 +724,7 @@ The detail rows the enrolment summarises. One per learner per lesson.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `enrolment_id` | `char(36)` | no | **FK** → `progress.enrolments` | Owning enrolment. **The one real foreign key here**, cascading — deleting an enrolment removes its detail. |
+| `enrolment_id` | `char(36)` | no | **FK** → `progress_enrolments` | Owning enrolment. **The one real foreign key here**, cascading — deleting an enrolment removes its detail. |
 | `user_id` | `char(36)` | no | — | Denormalised from the enrolment so "my progress on this lesson" needs no join. Unique with `lesson_id`. |
 | `course_id` | `char(36)` | no | — | Denormalised for the same reason. |
 | `lesson_id` | `char(36)` | no | — | Which lesson. No foreign key. |
@@ -736,7 +744,7 @@ The detail rows the enrolment summarises. One per learner per lesson.
 Questions, attempts and grading. 5 tables.
 
 
-#### `assessment.attempt_answers`
+#### `assessment_attempt_answers`
 
 What was answered, and what it scored after `grade_attempt()` ran.
 
@@ -744,8 +752,8 @@ What was answered, and what it scored after `grade_attempt()` ran.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `attempt_id` | `char(36)` | no | **FK** → `assessment.quiz_attempts` | Which sitting. Real foreign key, cascading. |
-| `question_id` | `char(36)` | no | **FK** → `assessment.questions` | Which question. Real foreign key. Unique with `attempt_id` — one answer per question per attempt. |
+| `attempt_id` | `char(36)` | no | **FK** → `assessment_quiz_attempts` | Which sitting. Real foreign key, cascading. |
+| `question_id` | `char(36)` | no | **FK** → `assessment_questions` | Which question. Real foreign key. Unique with `attempt_id` — one answer per question per attempt. |
 | `selected_option_ids` | `json` | no | — | JSON array of chosen option ids. Choice grading is **all-or-nothing**: this set must equal the correct set exactly, or selecting every option would score. |
 | `text_answer` | `varchar(500)` | yes | — | The typed answer for a `short_text` question. Compared case- and whitespace-insensitively. |
 | `is_correct` | `tinyint(1)` | no | — | Set by `grade_attempt()`, not by the client. |
@@ -755,7 +763,7 @@ What was answered, and what it scored after `grade_attempt()` ran.
 **Unique** `(attempt_id,question_id)`
 
 
-#### `assessment.question_options`
+#### `assessment_question_options`
 
 Choices for a choice question. `is_correct` is the column the take-path query deliberately does not select.
 
@@ -763,7 +771,7 @@ Choices for a choice question. `is_correct` is the column the take-path query de
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `question_id` | `char(36)` | no | **FK** → `assessment.questions` | Owning question. Real foreign key, cascading. |
+| `question_id` | `char(36)` | no | **FK** → `assessment_questions` | Owning question. Real foreign key, cascading. |
 | `body` | `varchar(1000)` | no | — | The option text. |
 | `is_correct` | `tinyint(1)` | no | — | **Never sent to a learner before submission.** The take-path query does not select this column at all. |
 | `position` | `int` | no | — | Display order. Unique per question. |
@@ -771,7 +779,7 @@ Choices for a choice question. `is_correct` is the column the take-path query de
 **Unique** `(question_id,position)`
 
 
-#### `assessment.questions`
+#### `assessment_questions`
 
 Ordered questions. The `explanation` column never reaches an open attempt.
 
@@ -779,7 +787,7 @@ Ordered questions. The `explanation` column never reaches an open attempt.
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `quiz_id` | `char(36)` | no | **FK** → `assessment.quizzes` | Owning quiz. Real foreign key, cascading. |
+| `quiz_id` | `char(36)` | no | **FK** → `assessment_quizzes` | Owning quiz. Real foreign key, cascading. |
 | `kind` | `enum('single_choice','multiple_choice','true_false','short_text')` | no | — | `single_choice` · `multiple_choice` · `true_false` · `short_text`. |
 | `prompt` | `text` | no | — | The question text. |
 | `explanation` | `text` | no | — | Why the answer is what it is. **Shown only after submission**, and never selected by the take-path query. |
@@ -792,7 +800,7 @@ Ordered questions. The `explanation` column never reaches an open attempt.
 **Unique** `(quiz_id,position)`
 
 
-#### `assessment.quiz_attempts`
+#### `assessment_quiz_attempts`
 
 One sitting. The generated `open_attempt_key` is what limits a learner to one open attempt.
 
@@ -800,12 +808,12 @@ One sitting. The generated `open_attempt_key` is what limits a learner to one op
 | Column | Type | Null | Key | Meaning |
 |---|---|---|---|---|
 | `id` | `char(36)` | no | **PK** | Primary key. A uuid, so a service can mint one without a round trip. |
-| `quiz_id` | `char(36)` | no | **FK** → `assessment.quizzes` | Which quiz. Real foreign key, cascading. |
+| `quiz_id` | `char(36)` | no | **FK** → `assessment_quizzes` | Which quiz. Real foreign key, cascading. |
 | `user_id` | `char(36)` | no | — | Who sat it. No foreign key. |
 | `course_id` | `char(36)` | no | — | Denormalised so analytics can group by course without a join. |
 | `attempt_no` | `smallint unsigned` | no | — | 1, 2, 3… Unique per quiz and learner, derived inside the `INSERT` so two concurrent starts cannot claim the same number. |
 | `state` | `enum('in_progress','submitted','graded','abandoned')` | no | — | `in_progress` · `submitted` · `graded` · `abandoned`. |
-| `points_earned` | `int` | no | — | Written by `assessment.grade_attempt()`. |
+| `points_earned` | `int` | no | — | Written by `assessment_grade_attempt()`. |
 | `points_possible` | `int` | no | — | Total available, **including unanswered questions** — skipping still costs you. |
 | `score_percent` | `decimal(5,2)` | no | — | Earned over possible. |
 | `passed` | `tinyint(1)` | no | — | Whether `score_percent` reached the quiz's `pass_percent`. |
@@ -817,7 +825,7 @@ One sitting. The generated `open_attempt_key` is what limits a learner to one op
 **Unique** `(quiz_id,user_id,attempt_no)` · **Unique** `(open_attempt_key)`
 
 
-#### `assessment.quizzes`
+#### `assessment_quizzes`
 
 A quiz attached to a lesson, or a course-level exam when `lesson_id` is `NULL`.
 
@@ -847,9 +855,9 @@ A quiz attached to a lesson, or a course-level exam when `lesson_id` is `NULL`.
 A denormalised copy, rebuilt on demand. 3 tables.
 
 
-#### `search.documents`
+#### `search_documents`
 
-One flat row per course, lesson and article, rebuilt by `search.reindex_all()`. Five FULLTEXT indexes, because MySQL cannot weight fields inside one.
+One flat row per course, lesson and article, rebuilt by `search_reindex_all()`. Five FULLTEXT indexes, because MySQL cannot weight fields inside one.
 
 
 | Column | Type | Null | Key | Meaning |
@@ -872,7 +880,7 @@ One flat row per course, lesson and article, rebuilt by `search.reindex_all()`. 
 **Unique** `(entity_type,entity_id)` · **FULLTEXT** `(title,subtitle,body,tags_text)` · **FULLTEXT** `(body)` · **FULLTEXT** `(subtitle)` · **FULLTEXT** `(tags_text)` · **FULLTEXT** `(title)`
 
 
-#### `search.query_log`
+#### `search_query_log`
 
 What people actually typed. Feeds autocomplete and the content-gap report.
 
@@ -886,7 +894,7 @@ What people actually typed. Feeds autocomplete and the content-gap report.
 | `clicked_entity_id` | `char(36)` | yes | — | Which result was opened, if any. Attributed to the most recent matching search. |
 | `searched_at` | `datetime(3)` | no | — | When (UTC). |
 
-#### `search.synonyms`
+#### `search_synonyms`
 
 Editor-curated expansions applied before the query reaches `MATCH()`.
 
@@ -905,7 +913,7 @@ Editor-curated expansions applied before the query reaches `MATCH()`.
 Behaviour events and daily rollups. 3 tables.
 
 
-#### `analytics.daily_course_stats`
+#### `analytics_daily_course_stats`
 
 Per-course daily rollup. Recomputed one day at a time.
 
@@ -923,7 +931,7 @@ Per-course daily rollup. Recomputed one day at a time.
 | `quiz_pass_rate` | `decimal(5,2)` | no | — | **Read from `assessment`, not from the event stream** — events can be lost, and a report built on lossy data invents cliffs that are not there. |
 | `computed_at` | `datetime(3)` | no | — | When the rollup last ran for this day. |
 
-#### `analytics.daily_platform_stats`
+#### `analytics_daily_platform_stats`
 
 Platform-wide daily rollup.
 
@@ -932,14 +940,14 @@ Platform-wide daily rollup.
 |---|---|---|---|---|
 | `day` | `date` | no | **PK** | The UTC date. Primary key. |
 | `active_users` | `int` | no | — | Distinct users with any event that day. |
-| `new_users` | `int` | no | — | Accounts created, read from `identity.users`. |
+| `new_users` | `int` | no | — | Accounts created, read from `identity_users`. |
 | `lessons_started` | `int` | no | — | `lesson_started` events. |
 | `lessons_completed` | `int` | no | — | `lesson_completed` events. |
 | `searches` | `int` | no | — | `search_performed` events. |
 | `watch_seconds` | `bigint` | no | — | Total watch time across the platform. |
 | `computed_at` | `datetime(3)` | no | — | When the rollup last ran. |
 
-#### `analytics.events`
+#### `analytics_events`
 
 The append-only behaviour stream. Partitioned monthly; the only table expected to reach hundreds of millions of rows.
 
@@ -969,17 +977,17 @@ a result set — the API repositories read row 0 of set 0.
 
 | Routine | Called by | What it does |
 |---|---|---|
-| `catalog.refresh_course_rollup(id)` | Course Service, after any lesson change | Recounts published lessons and sums their duration into `courses` |
-| `catalog.refresh_course_rating(id)` | Course Service, after a review | Recomputes `rating_average` and `rating_count` |
-| `catalog.reorder_lessons(module, json)` | Course Service | Reorders a module's lessons — see below |
-| `progress.refresh_enrolment_rollup(id)` | Progress Service, after every progress write | Recounts completed lessons, recomputes the percentage, flips `state` |
-| `assessment.grade_attempt(id)` | Quiz Service, on submit | Marks every answer and writes the score |
-| `search.reindex_all()` | Search Service, admin-triggered | Rebuilds `search.documents` from `catalog` and `content` |
-| `search.levenshtein(a, b)` | `word_similarity` | Edit distance. O(len × len), so never run across a table |
-| `search.similarity_score(a, b)` | — | `1 − distance / longest`, whole-string |
-| `search.word_similarity(a, b)` | Search Service, fuzzy fallback | Best per-word similarity. **Not** whole-string — see below |
-| `analytics.ensure_month_partition(date)` | Analytics Service, from cron | Splits the catch-all partition into real months |
-| `analytics.rollup_day(date)` | Analytics Service, nightly | Recomputes both daily rollups for one day |
+| `catalog_refresh_course_rollup(id)` | Course Service, after any lesson change | Recounts published lessons and sums their duration into `courses` |
+| `catalog_refresh_course_rating(id)` | Course Service, after a review | Recomputes `rating_average` and `rating_count` |
+| `catalog_reorder_lessons(module, json)` | Course Service | Reorders a module's lessons — see below |
+| `progress_refresh_enrolment_rollup(id)` | Progress Service, after every progress write | Recounts completed lessons, recomputes the percentage, flips `state` |
+| `assessment_grade_attempt(id)` | Quiz Service, on submit | Marks every answer and writes the score |
+| `search_reindex_all()` | Search Service, admin-triggered | Rebuilds `search_documents` from `catalog` and `content` |
+| `search_levenshtein(a, b)` | `word_similarity` | Edit distance. O(len × len), so never run across a table |
+| `search_similarity_score(a, b)` | — | `1 − distance / longest`, whole-string |
+| `search_word_similarity(a, b)` | Search Service, fuzzy fallback | Best per-word similarity. **Not** whole-string — see below |
+| `analytics_ensure_month_partition(date)` | Analytics Service, from cron | Splits the catch-all partition into real months |
+| `analytics_rollup_day(date)` | Analytics Service, nightly | Recomputes both daily rollups for one day |
 
 Three of these exist because of something MySQL does not have:
 
@@ -1018,25 +1026,25 @@ Two worked examples, because the interesting part is which rows move together.
 `PUT /api/progress/courses/{courseId}/lessons/{lessonId}` reaches the Progress
 Service, which does this:
 
-1. **Upsert `progress.lesson_progress`** on `(user_id, lesson_id)`.
+1. **Upsert `progress_lesson_progress`** on `(user_id, lesson_id)`.
    `seconds_watched` increases by the reported delta — an *increment*, not a
    running total, so two devices cannot overwrite each other with a smaller
    absolute number. `last_position_seconds` is overwritten, and `state` becomes
    `completed`. A completed lesson is never demoted by a rewatch.
-2. **Update `progress.enrolments.last_lesson_id`** — the "continue where you
+2. **Update `progress_enrolments.last_lesson_id`** — the "continue where you
    left off" pointer.
-3. **`CALL progress.refresh_enrolment_rollup()`** — recount, recompute the
+3. **`CALL progress_refresh_enrolment_rollup()`** — recount, recompute the
    percentage, flip `state` if everything is done.
 
    Steps 1–3 run in **one transaction**, so no reader ever sees an updated
    detail row beside a stale summary.
-4. **Insert `progress.certificates`**, but only on the transition *into*
+4. **Insert `progress_certificates`**, but only on the transition *into*
    `completed` — on the edge, not every time a finished course is touched.
-5. **Emit to `analytics.events`, without waiting.** A learner finishing a lesson
+5. **Emit to `analytics_events`, without waiting.** A learner finishing a lesson
    must not fail, or even slow down, because the Analytics Service is having a
    bad day. Events can therefore be lost, which is precisely why nothing
    authoritative is ever reconstructed from that stream — the drop-off report
-   reads `progress`, not `analytics.events`.
+   reads `progress`, not `analytics_events`.
 
 ### A lesson page renders
 
@@ -1045,10 +1053,10 @@ network instead of costing the browser four sequential round trips:
 
 | Service | Reads |
 |---|---|
-| Course | `catalog.lessons` + `catalog.modules` + `catalog.courses` (via `platform.v_course_outline`) |
-| Content | `content.articles` and `content.lesson_videos` for that `lesson_id` |
-| Progress | `platform.v_learner_course_progress` + `progress.lesson_progress` |
-| Quiz | `assessment.quizzes` where `lesson_id` matches |
+| Course | `catalog_lessons` + `catalog_modules` + `catalog_courses` (via `v_course_outline`) |
+| Content | `content_articles` and `content_lesson_videos` for that `lesson_id` |
+| Progress | `v_learner_course_progress` + `progress_lesson_progress` |
+| Quiz | `assessment_quizzes` where `lesson_id` matches |
 
 Each part degrades to `null` rather than failing the page, and the response
 names what failed in a `degraded` array — so the front end can say "progress is
@@ -1058,7 +1066,7 @@ temporarily unavailable" instead of quietly showing 0%.
 
 ## Migrations
 
-Applied in filename order, recorded in `platform.schema_migrations` with a
+Applied in filename order, recorded in `platform_schema_migrations` with a
 checksum. **A migration that has run is immutable** — the runner refuses to
 continue if an applied file changed. Add a new file instead.
 
@@ -1067,7 +1075,7 @@ the statements before the failure applied. Each file is kept small enough that
 re-running it by hand after a fix is realistic.
 
 ```
-0001_databases_and_conventions.sql   the eight databases, id and timestamp conventions
+0001_databases_and_conventions.sql   the single-database rule, id and timestamp conventions
 0002_identity.sql                    users, roles, refresh and verification tokens
 0003_catalog.sql                     categories, courses, tags, modules, lessons, reviews
 0004_content.sql                     video URL metadata, articles, revisions, attachments
@@ -1111,5 +1119,5 @@ passed no matter what: a `CONTINUE HANDLER` was swallowing its own assertion.
 - [`docs/ERD.md`](docs/ERD.md) — ten diagrams, one per service, plus a traced write.
 - [`docs/SCHEMA.md`](docs/SCHEMA.md) — the conventions, the caches, and the four
   places MySQL needed a different approach from PostgreSQL.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — why seven databases, what dropping
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — why one database, what dropping
   cross-service foreign keys really costs, and what is deliberately missing.

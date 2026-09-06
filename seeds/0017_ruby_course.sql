@@ -10,11 +10,11 @@
 -- gets broken.
 -- ===========================================================================
 
-INSERT INTO catalog.tags (id, slug, name) VALUES
+INSERT INTO catalog_tags (id, slug, name) VALUES
   ('bbbbbbb1-0000-4000-8000-000000000013', 'ruby', 'Ruby')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
-INSERT INTO catalog.courses
+INSERT INTO catalog_courses
   (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
@@ -41,13 +41,13 @@ ON DUPLICATE KEY UPDATE
   title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
-INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
+INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-00000000000a', 'bbbbbbb1-0000-4000-8000-000000000013'),
   ('c0000001-0000-4000-8000-00000000000a', 'bbbbbbb1-0000-4000-8000-000000000007'),
   ('c0000001-0000-4000-8000-00000000000a', 'bbbbbbb1-0000-4000-8000-000000000006')
 ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
-INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
+INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000020', 'c0000001-0000-4000-8000-00000000000a',
    'Level 1 - Basic', 'Objects all the way down, control flow that returns values, and the two collections.', 1),
   ('d0000001-0000-4000-8000-000000000021', 'c0000001-0000-4000-8000-00000000000a',
@@ -58,7 +58,7 @@ INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
    'Level 4 - Expert', 'Matching on shape, where the time and memory go, and how to arrange it all.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -131,7 +131,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `posit
 -- ---------------------------------------------------------------------------
 -- Values, Types and Objects
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -262,7 +262,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Control Flow and Methods
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -441,7 +441,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Arrays, Hashes and Enumerable
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -615,7 +615,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Strings, Symbols and Time
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -806,7 +806,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Classes, Modules and Mixins
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1055,7 +1055,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Exceptions and Failing Deliberately
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1274,7 +1274,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Blocks, Procs and Lambdas
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1508,7 +1508,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Building Enumerables and Going Lazy
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1726,7 +1726,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Metaprogramming, and When Not To
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1996,7 +1996,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Pattern Matching and Modelling Data
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -2202,7 +2202,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Where the Time and Memory Go
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -2444,7 +2444,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Arranging a Ruby Application
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -2737,5 +2737,5 @@ ON DUPLICATE KEY UPDATE
   reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
   status = VALUES(status);
 
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-00000000000a');
-CALL `search`.reindex_all();
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-00000000000a');
+CALL search_reindex_all();

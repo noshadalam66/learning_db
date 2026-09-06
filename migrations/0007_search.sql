@@ -25,7 +25,7 @@
 --     score near zero.
 -- ===========================================================================
 
-CREATE TABLE `search`.documents (
+CREATE TABLE search_documents (
   id           CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   entity_type  ENUM('course','lesson','article') NOT NULL,
   entity_id    CHAR(36) CHARACTER SET ascii NOT NULL,
@@ -56,11 +56,11 @@ CREATE TABLE `search`.documents (
   FULLTEXT KEY ft_tags (tags_text),
   FULLTEXT KEY ft_all (title, subtitle, body, tags_text)
 ) ENGINE=InnoDB
-  COMMENT='Flattened copy of courses, lessons and articles. Rebuilt by search.reindex_all().';
+  COMMENT='Flattened copy of courses, lessons and articles. Rebuilt by search_reindex_all().';
 
 -- What people actually typed. Feeds autocomplete and the "queries with no
 -- results" report, which is the most direct signal of a content gap.
-CREATE TABLE `search`.query_log (
+CREATE TABLE search_query_log (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id           CHAR(36) CHARACTER SET ascii NULL,
   query_text        VARCHAR(200) NOT NULL,
@@ -76,7 +76,7 @@ CREATE TABLE `search`.query_log (
 
 -- Editor-curated synonyms, applied before the query reaches MATCH(). This is
 -- also how two-letter terms are rescued from innodb_ft_min_token_size.
-CREATE TABLE `search`.synonyms (
+CREATE TABLE search_synonyms (
   id         SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
   term       VARCHAR(100) NOT NULL,
   expands_to JSON NOT NULL,
@@ -96,8 +96,9 @@ DELIMITER $$
 -- the small candidate set that a prefix match already narrowed down - never
 -- across the whole table.
 -- ---------------------------------------------------------------------------
-CREATE FUNCTION `search`.levenshtein(a VARCHAR(255), b VARCHAR(255))
+CREATE FUNCTION search_levenshtein(a VARCHAR(255), b VARCHAR(255))
 RETURNS INT
+  SQL SECURITY INVOKER
 DETERMINISTIC
 NO SQL
 BEGIN
@@ -141,15 +142,16 @@ END$$
 -- A similarity score in 0..1, so the Search Service can apply a threshold the
 -- way it did with pg_trgm's word_similarity.
 -- ---------------------------------------------------------------------------
-CREATE FUNCTION `search`.similarity_score(a VARCHAR(255), b VARCHAR(255))
+CREATE FUNCTION search_similarity_score(a VARCHAR(255), b VARCHAR(255))
 RETURNS DECIMAL(4,3)
+  SQL SECURITY INVOKER
 DETERMINISTIC
 NO SQL
 BEGIN
   DECLARE longest INT;
   SET longest = GREATEST(CHAR_LENGTH(IFNULL(a,'')), CHAR_LENGTH(IFNULL(b,'')));
   IF longest = 0 THEN RETURN 0; END IF;
-  RETURN 1 - (`search`.levenshtein(a, b) / longest);
+  RETURN 1 - (search_levenshtein(a, b) / longest);
 END$$
 
 -- ---------------------------------------------------------------------------
@@ -158,12 +160,13 @@ END$$
 -- Cheap enough to run on a schedule at this catalogue size; the Search Service
 -- also upserts single documents when it receives a change event.
 -- ---------------------------------------------------------------------------
-CREATE PROCEDURE `search`.reindex_all()
+CREATE PROCEDURE search_reindex_all()
+  SQL SECURITY INVOKER
 MODIFIES SQL DATA
 BEGIN
-  DELETE FROM `search`.documents;
+  DELETE FROM search_documents;
 
-  INSERT INTO `search`.documents
+  INSERT INTO search_documents
     (entity_type, entity_id, course_id, title, subtitle, body, tags_text,
      url_path, `language`, level, is_published, popularity)
   SELECT 'course', c.id, c.id, c.title, c.subtitle,
@@ -172,14 +175,14 @@ BEGIN
                      FROM JSON_TABLE(c.learning_outcomes, '$[*]'
                           COLUMNS (v VARCHAR(300) PATH '$')) jt), '')),
          IFNULL((SELECT GROUP_CONCAT(t.name SEPARATOR ' ')
-                   FROM catalog.course_tags ct
-                   JOIN catalog.tags t ON t.id = ct.tag_id
+                   FROM catalog_course_tags ct
+                   JOIN catalog_tags t ON t.id = ct.tag_id
                   WHERE ct.course_id = c.id), ''),
          CONCAT('/course.php?slug=', c.slug),
          c.`language`, c.level, c.status = 'published', c.rating_count
-    FROM catalog.courses c;
+    FROM catalog_courses c;
 
-  INSERT INTO `search`.documents
+  INSERT INTO search_documents
     (entity_type, entity_id, course_id, title, subtitle, body, url_path,
      `language`, is_published)
   SELECT 'lesson', l.id, l.course_id, l.title, l.summary,
@@ -187,21 +190,21 @@ BEGIN
          CONCAT('/lesson.php?course=', c.slug, '&lesson=', l.slug),
          c.`language`,
          (l.status = 'published' AND c.status = 'published')
-    FROM catalog.lessons l
-    JOIN catalog.courses c ON c.id = l.course_id
-    LEFT JOIN content.lesson_videos v ON v.lesson_id = l.id;
+    FROM catalog_lessons l
+    JOIN catalog_courses c ON c.id = l.course_id
+    LEFT JOIN content_lesson_videos v ON v.lesson_id = l.id;
 
-  INSERT INTO `search`.documents
+  INSERT INTO search_documents
     (entity_type, entity_id, course_id, title, subtitle, body, url_path,
      `language`, is_published)
   SELECT 'article', a.id, l.course_id, a.title, a.excerpt, a.body,
          CONCAT('/lesson.php?course=', c.slug, '&lesson=', l.slug),
          c.`language`, a.status = 'published'
-    FROM content.articles a
-    JOIN catalog.lessons l ON l.id = a.lesson_id
-    JOIN catalog.courses c ON c.id = l.course_id;
+    FROM content_articles a
+    JOIN catalog_lessons l ON l.id = a.lesson_id
+    JOIN catalog_courses c ON c.id = l.course_id;
 
-  SELECT COUNT(*) AS documents FROM `search`.documents;
+  SELECT COUNT(*) AS documents FROM search_documents;
 END$$
 
 DELIMITER ;

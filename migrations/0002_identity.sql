@@ -3,7 +3,7 @@
 -- Login, profile and roles.
 -- ===========================================================================
 
-CREATE TABLE identity.users (
+CREATE TABLE identity_users (
   id                CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   -- The default utf8mb4_0900_ai_ci collation is case-insensitive, so the
   -- unique index below makes Ada@x.test and ada@x.test the same account.
@@ -32,7 +32,7 @@ CREATE TABLE identity.users (
     CHECK (avatar_url IS NULL OR REGEXP_LIKE(avatar_url, '^https?://'))
 ) ENGINE=InnoDB COMMENT='One row per human account.';
 
-CREATE TABLE identity.roles (
+CREATE TABLE identity_roles (
   id          SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
   name        VARCHAR(50) NOT NULL,
   description VARCHAR(255) NOT NULL DEFAULT '',
@@ -41,7 +41,7 @@ CREATE TABLE identity.roles (
   UNIQUE KEY uq_roles_name (name)
 ) ENGINE=InnoDB;
 
-CREATE TABLE identity.user_roles (
+CREATE TABLE identity_user_roles (
   user_id    CHAR(36) CHARACTER SET ascii NOT NULL,
   role_id    SMALLINT UNSIGNED NOT NULL,
   granted_at DATETIME(3) NOT NULL DEFAULT (UTC_TIMESTAMP(3)),
@@ -52,18 +52,18 @@ CREATE TABLE identity.user_roles (
   KEY ix_user_roles_granted_by (granted_by),
 
   CONSTRAINT fk_user_roles_user FOREIGN KEY (user_id)
-    REFERENCES identity.users (id) ON DELETE CASCADE,
+    REFERENCES identity_users (id) ON DELETE CASCADE,
   CONSTRAINT fk_user_roles_role FOREIGN KEY (role_id)
-    REFERENCES identity.roles (id) ON DELETE CASCADE,
+    REFERENCES identity_roles (id) ON DELETE CASCADE,
   CONSTRAINT fk_user_roles_granted_by FOREIGN KEY (granted_by)
-    REFERENCES identity.users (id) ON DELETE SET NULL
+    REFERENCES identity_users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
 -- Refresh tokens. Only the SHA-256 digest is stored, so a database leak does
 -- not hand an attacker usable sessions. ascii_bin so the comparison is exact.
 -- ---------------------------------------------------------------------------
-CREATE TABLE identity.refresh_tokens (
+CREATE TABLE identity_refresh_tokens (
   id         CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   user_id    CHAR(36) CHARACTER SET ascii NOT NULL,
   token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -81,14 +81,14 @@ CREATE TABLE identity.refresh_tokens (
   KEY ix_refresh_live (expires_at, revoked_at),
 
   CONSTRAINT fk_refresh_user FOREIGN KEY (user_id)
-    REFERENCES identity.users (id) ON DELETE CASCADE,
+    REFERENCES identity_users (id) ON DELETE CASCADE,
   CONSTRAINT ck_refresh_expiry_after_issue CHECK (expires_at > issued_at)
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
 -- Single-use tokens for "verify your e-mail" and "reset your password".
 -- ---------------------------------------------------------------------------
-CREATE TABLE identity.verification_tokens (
+CREATE TABLE identity_verification_tokens (
   id          CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
   user_id     CHAR(36) CHARACTER SET ascii NOT NULL,
   purpose     ENUM('email_verify','password_reset') NOT NULL,
@@ -102,7 +102,7 @@ CREATE TABLE identity.verification_tokens (
   KEY ix_verification_user_purpose (user_id, purpose, consumed_at),
 
   CONSTRAINT fk_verification_user FOREIGN KEY (user_id)
-    REFERENCES identity.users (id) ON DELETE CASCADE
+    REFERENCES identity_users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
@@ -112,8 +112,8 @@ CREATE TABLE identity.verification_tokens (
 -- not have that problem, and only a trigger can call it on update.
 -- ---------------------------------------------------------------------------
 DELIMITER $$
-CREATE TRIGGER identity.trg_users_touch
-  BEFORE UPDATE ON identity.users FOR EACH ROW
+CREATE TRIGGER trg_users_touch
+  BEFORE UPDATE ON identity_users FOR EACH ROW
 BEGIN
   SET NEW.updated_at = UTC_TIMESTAMP(3);
 END$$

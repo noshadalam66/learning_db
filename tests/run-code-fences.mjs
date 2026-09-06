@@ -38,8 +38,8 @@ const COURSES = [
 
 function fencesFor(courseId, fence) {
   const sql =
-    `SELECT l.slug, a.body FROM catalog.lessons l ` +
-    `JOIN content.articles a ON a.lesson_id = l.id ` +
+    `SELECT l.slug, a.body FROM catalog_lessons l ` +
+    `JOIN content_articles a ON a.lesson_id = l.id ` +
     `WHERE l.course_id = '${courseId}' ORDER BY l.slug\\G`;
   // Resolved from the repository root, so the test runs from anywhere.
   const out = execFileSync(path.join(ROOT, 'scripts/console.sh'),

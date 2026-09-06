@@ -10,11 +10,11 @@
 -- and doubling those by hand is how a seed gets broken.
 -- ===========================================================================
 
-INSERT INTO catalog.tags (id, slug, name) VALUES
+INSERT INTO catalog_tags (id, slug, name) VALUES
   ('bbbbbbb1-0000-4000-8000-000000000011', 'python', 'Python')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
-INSERT INTO catalog.courses
+INSERT INTO catalog_courses
   (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
@@ -41,13 +41,13 @@ ON DUPLICATE KEY UPDATE
   title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
-INSERT INTO catalog.course_tags (course_id, tag_id) VALUES
+INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000008', 'bbbbbbb1-0000-4000-8000-000000000011'),
   ('c0000001-0000-4000-8000-000000000008', 'bbbbbbb1-0000-4000-8000-000000000007'),
   ('c0000001-0000-4000-8000-000000000008', 'bbbbbbb1-0000-4000-8000-00000000000a')
 ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
-INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
+INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000018', 'c0000001-0000-4000-8000-000000000008',
    'Level 1 - Basic', 'Names and values, the flow of control, and functions that take arguments well.', 1),
   ('d0000001-0000-4000-8000-000000000019', 'c0000001-0000-4000-8000-000000000008',
@@ -58,7 +58,7 @@ INSERT INTO catalog.modules (id, course_id, title, summary, `position`) VALUES
    'Level 4 - Expert', 'Decorators, generators, and the type hints that describe a boundary.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
-INSERT INTO catalog.lessons
+INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
@@ -131,7 +131,7 @@ ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `posit
 -- ---------------------------------------------------------------------------
 -- Values, Names and Types
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -246,7 +246,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Making Decisions and Repeating Work
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -398,7 +398,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Functions, Arguments and Return Values
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -537,7 +537,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Lists, Tuples and Slicing
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -657,7 +657,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Dictionaries and Sets
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -780,7 +780,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Strings and Formatting
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -891,7 +891,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Comprehensions and the Iterator Protocol
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1012,7 +1012,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Classes, dataclasses and Dunder Methods
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1177,7 +1177,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Exceptions and Context Managers
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1331,7 +1331,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Decorators and Closures
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1478,7 +1478,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Generators, Laziness and itertools
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1621,7 +1621,7 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 -- Type Hints and Modern Python
 -- ---------------------------------------------------------------------------
-INSERT INTO content.articles
+INSERT INTO content_articles
   (lesson_id, title, format, body, excerpt, reading_time_minutes, word_count,
    author_id, status, published_at)
 VALUES
@@ -1758,5 +1758,5 @@ ON DUPLICATE KEY UPDATE
   reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
   status = VALUES(status);
 
-CALL catalog.refresh_course_rollup('c0000001-0000-4000-8000-000000000008');
-CALL `search`.reindex_all();
+CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000008');
+CALL search_reindex_all();
