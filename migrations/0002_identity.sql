@@ -5,7 +5,7 @@
 
 CREATE TABLE identity_users (
   id                CHAR(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID()),
-  -- The default utf8mb4_0900_ai_ci collation is case-insensitive, so the
+  -- The default utf8mb4 collation is case-insensitive on both engines, so the
   -- unique index below makes Ada@x.test and ada@x.test the same account.
   email             VARCHAR(320) NOT NULL,
   -- bcrypt/argon2 digest. NULL means the account is SSO-only.
@@ -29,7 +29,7 @@ CREATE TABLE identity_users (
 
   CONSTRAINT ck_users_name_not_blank CHECK (TRIM(full_name) <> ''),
   CONSTRAINT ck_users_avatar_is_http
-    CHECK (avatar_url IS NULL OR REGEXP_LIKE(avatar_url, '^https?://'))
+    CHECK (avatar_url IS NULL OR avatar_url REGEXP '^https?://')
 ) ENGINE=InnoDB COMMENT='One row per human account.';
 
 CREATE TABLE identity_roles (

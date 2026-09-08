@@ -37,11 +37,11 @@ CREATE TABLE content_lesson_videos (
   UNIQUE KEY uq_video_lesson (lesson_id),
   KEY ix_video_provider (provider),
 
-  CONSTRAINT ck_video_url_is_http CHECK (REGEXP_LIKE(video_url, '^https?://')),
+  CONSTRAINT ck_video_url_is_http CHECK (video_url REGEXP '^https?://'),
   CONSTRAINT ck_video_hls_is_http
-    CHECK (hls_url IS NULL OR REGEXP_LIKE(hls_url, '^https?://')),
+    CHECK (hls_url IS NULL OR hls_url REGEXP '^https?://'),
   CONSTRAINT ck_video_thumb_is_http
-    CHECK (thumbnail_url IS NULL OR REGEXP_LIKE(thumbnail_url, '^https?://')),
+    CHECK (thumbnail_url IS NULL OR thumbnail_url REGEXP '^https?://'),
   CONSTRAINT ck_video_duration_positive CHECK (duration_seconds >= 0)
 ) ENGINE=InnoDB
   COMMENT='Pointers to externally hosted video. No media is stored in this database.';
@@ -127,7 +127,7 @@ CREATE TABLE content_lesson_attachments (
   UNIQUE KEY uq_attachment_url (lesson_id, file_url(255)),
   KEY ix_attachments_lesson (lesson_id, `position`),
 
-  CONSTRAINT ck_attachment_url_is_http CHECK (REGEXP_LIKE(file_url, '^https?://')),
+  CONSTRAINT ck_attachment_url_is_http CHECK (file_url REGEXP '^https?://'),
   CONSTRAINT ck_attachment_size_positive CHECK (size_bytes IS NULL OR size_bytes >= 0)
 ) ENGINE=InnoDB;
 

@@ -23,7 +23,7 @@ CREATE TABLE catalog_categories (
   -- (ON DELETE SET NULL, above). It is enforced by a trigger at the end of this
   -- migration instead.
   CONSTRAINT ck_categories_slug_shape
-    CHECK (REGEXP_LIKE(slug, '^[a-z0-9]+(-[a-z0-9]+)*$'))
+    CHECK (slug REGEXP '^[a-z0-9]+(-[a-z0-9]+)*$')
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ CREATE TABLE catalog_courses (
   CONSTRAINT fk_courses_category FOREIGN KEY (category_id)
     REFERENCES catalog_categories (id) ON DELETE SET NULL,
   CONSTRAINT ck_courses_slug_shape
-    CHECK (REGEXP_LIKE(slug, '^[a-z0-9]+(-[a-z0-9]+)*$')),
+    CHECK (slug REGEXP '^[a-z0-9]+(-[a-z0-9]+)*$'),
   CONSTRAINT ck_courses_price_positive CHECK (price_cents >= 0),
   CONSTRAINT ck_courses_rating_range CHECK (rating_average BETWEEN 0 AND 5),
   CONSTRAINT ck_courses_outcomes_is_array CHECK (JSON_TYPE(learning_outcomes) = 'ARRAY'),
@@ -164,7 +164,7 @@ CREATE TABLE catalog_lessons (
   CONSTRAINT fk_lessons_course FOREIGN KEY (course_id)
     REFERENCES catalog_courses (id) ON DELETE CASCADE,
   CONSTRAINT ck_lessons_slug_shape
-    CHECK (REGEXP_LIKE(slug, '^[a-z0-9]+(-[a-z0-9]+)*$')),
+    CHECK (slug REGEXP '^[a-z0-9]+(-[a-z0-9]+)*$'),
   CONSTRAINT ck_lessons_position_positive CHECK (`position` <> 0),
   CONSTRAINT ck_lessons_duration_positive CHECK (duration_seconds >= 0)
 ) ENGINE=InnoDB;

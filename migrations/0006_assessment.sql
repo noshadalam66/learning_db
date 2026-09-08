@@ -104,10 +104,17 @@ CREATE TABLE assessment_quiz_attempts (
   -- VIRTUAL, not STORED: MySQL refuses a cascading foreign key on a column
   -- that a *stored* generated column reads, and quiz_id needs both. A virtual
   -- column can still carry a unique index, so the rule is enforced either way.
-  open_attempt_key VARCHAR(80) CHARACTER SET ascii
-    GENERATED ALWAYS AS (
-      CASE WHEN state = 'in_progress' THEN CONCAT(quiz_id, ':', user_id) END
-    ) VIRTUAL,
+  -- Holds quiz_id:user_id while an attempt is open, NULL once it is not, so
+  -- the unique index below permits one open attempt per learner per quiz and
+  -- any number of finished ones.
+  --
+  -- Maintained by triggers rather than declared GENERATED, because MariaDB
+  -- refuses to index a generated column whose expression reads a column with
+  -- an explicit character set - and every id here is CHARACTER SET ascii. The
+  -- index is what enforces the rule either way; the triggers only compute the
+  -- value, so the guarantee is still the server's rather than the
+  -- application's.
+  open_attempt_key VARCHAR(80) CHARACTER SET ascii NULL,
 
   PRIMARY KEY (id),
   UNIQUE KEY uq_attempt_no (quiz_id, user_id, attempt_no),
@@ -148,6 +155,20 @@ CREATE TABLE assessment_attempt_answers (
 ) ENGINE=InnoDB;
 
 DELIMITER $$
+
+-- open_attempt_key is what uq_one_open_attempt indexes. Both triggers set it,
+-- because an attempt can be opened by an INSERT and closed by an UPDATE.
+CREATE TRIGGER trg_attempts_open_key_ins
+BEFORE INSERT ON assessment_quiz_attempts FOR EACH ROW
+  SET NEW.open_attempt_key =
+    CASE WHEN NEW.state = 'in_progress'
+         THEN CONCAT(NEW.quiz_id, ':', NEW.user_id) END$$
+
+CREATE TRIGGER trg_attempts_open_key_upd
+BEFORE UPDATE ON assessment_quiz_attempts FOR EACH ROW
+  SET NEW.open_attempt_key =
+    CASE WHEN NEW.state = 'in_progress'
+         THEN CONCAT(NEW.quiz_id, ':', NEW.user_id) END$$
 
 CREATE TRIGGER trg_quizzes_touch
   BEFORE UPDATE ON assessment_quizzes FOR EACH ROW
@@ -198,20 +219,23 @@ BEGIN
              WHEN 'short_text' THEN
                LOWER(TRIM(IFNULL(ans.text_answer, ''))) = LOWER(TRIM(IFNULL(q.correct_text, '')))
              ELSE
-               -- Sorted JSON arrays compared as text: the selected set must
-               -- equal the correct set exactly.
-               (
-                 SELECT IFNULL(JSON_ARRAYAGG(o.id), JSON_ARRAY())
-                   FROM (SELECT id FROM assessment_question_options
-                          WHERE question_id = q.id AND is_correct = 1
-                          ORDER BY id) o
-               ) = (
-                 SELECT IFNULL(JSON_ARRAYAGG(s.v), JSON_ARRAY())
-                   FROM (SELECT jt.v AS v
-                           FROM JSON_TABLE(ans.selected_option_ids, '$[*]'
-                                COLUMNS (v CHAR(36) CHARACTER SET ascii PATH '$')) jt
-                          ORDER BY jt.v) s
-               )
+                 -- Set equality without JSON_TABLE, which MariaDB cannot use
+                 -- against a column of the outer query. The selected set equals
+                 -- the correct set when it is the same size and every correct
+                 -- option appears in it - duplicates in the answer make the
+                 -- sizes agree but the second count fall short, so they fail.
+                 JSON_LENGTH(ans.selected_option_ids) = (
+                   SELECT COUNT(*) FROM assessment_question_options o
+                    WHERE o.question_id = q.id AND o.is_correct = 1
+                 )
+                 AND (
+                   SELECT COUNT(*) FROM assessment_question_options o
+                    WHERE o.question_id = q.id AND o.is_correct = 1
+                      AND JSON_CONTAINS(ans.selected_option_ids, JSON_QUOTE(o.id))
+                 ) = (
+                   SELECT COUNT(*) FROM assessment_question_options o
+                    WHERE o.question_id = q.id AND o.is_correct = 1
+                 )
            END
          ),
          ans.points_awarded = (
@@ -221,17 +245,22 @@ BEGIN
                  WHEN 'short_text' THEN
                    LOWER(TRIM(IFNULL(ans.text_answer, ''))) = LOWER(TRIM(IFNULL(q.correct_text, '')))
                  ELSE
-                   (
-                     SELECT IFNULL(JSON_ARRAYAGG(o.id), JSON_ARRAY())
-                       FROM (SELECT id FROM assessment_question_options
-                              WHERE question_id = q.id AND is_correct = 1
-                              ORDER BY id) o
+                 -- Set equality without JSON_TABLE, which MariaDB cannot use
+                   -- against a column of the outer query. The selected set equals
+                   -- the correct set when it is the same size and every correct
+                   -- option appears in it - duplicates in the answer make the
+                   -- sizes agree but the second count fall short, so they fail.
+                   JSON_LENGTH(ans.selected_option_ids) = (
+                     SELECT COUNT(*) FROM assessment_question_options o
+                      WHERE o.question_id = q.id AND o.is_correct = 1
+                   )
+                   AND (
+                     SELECT COUNT(*) FROM assessment_question_options o
+                      WHERE o.question_id = q.id AND o.is_correct = 1
+                        AND JSON_CONTAINS(ans.selected_option_ids, JSON_QUOTE(o.id))
                    ) = (
-                     SELECT IFNULL(JSON_ARRAYAGG(s.v), JSON_ARRAY())
-                       FROM (SELECT jt.v AS v
-                               FROM JSON_TABLE(ans.selected_option_ids, '$[*]'
-                                    COLUMNS (v CHAR(36) CHARACTER SET ascii PATH '$')) jt
-                              ORDER BY jt.v) s
+                     SELECT COUNT(*) FROM assessment_question_options o
+                      WHERE o.question_id = q.id AND o.is_correct = 1
                    )
                END
              ) THEN q.points

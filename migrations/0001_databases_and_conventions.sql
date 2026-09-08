@@ -63,10 +63,15 @@
 --    Clients should still connect with time_zone='+00:00'. The defaults above
 --    mean forgetting is not corrupting.
 --
--- 3. TEXT COLUMNS are utf8mb4 with the server default collation
---    (utf8mb4_0900_ai_ci), which is case- and accent-insensitive. That is what
---    makes identity_users.email behave like PostgreSQL's citext for free:
---    Ada@x.test and ada@x.test collide on the unique index.
+-- 3. TEXT COLUMNS are utf8mb4 with the server default collation, which is
+--    case- and accent-insensitive on both engines this has to run on
+--    (utf8mb4_0900_ai_ci on MySQL 8, utf8mb4_general_ci or uca1400 on
+--    MariaDB). Nothing here names a collation, so the database's own default
+--    wins. That is what makes identity_users.email behave like PostgreSQL's
+--    citext for free: Ada@x.test and ada@x.test collide on the unique index.
+--
+--    The engines are not interchangeable in general - see the portability
+--    notes in docs/DECISIONS.md for what had to change to satisfy both.
 --
 --    Columns holding a digest or a token are the exception - they are declared
 --    ascii/ascii_bin so comparison is exact and byte-for-byte.

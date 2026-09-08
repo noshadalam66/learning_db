@@ -58,6 +58,48 @@ later is still a deployment change rather than a schema rewrite — the rule tha
 made that true was never the database boundary, it was the discipline about who
 writes what.
 
+## Running on MariaDB as well as MySQL 8
+
+The schema was written against MySQL 8 and CI still runs it there, but the
+deployment target turned out to be MariaDB 11.4 on shared hosting. Four things
+MySQL accepts were rejected outright, and each is a genuine difference rather
+than a version lag.
+
+**`REGEXP_LIKE()` does not exist in MariaDB.** It has `REGEXP_INSTR`,
+`REGEXP_REPLACE` and `REGEXP_SUBSTR`, but not this one, so MariaDB parses it as
+a call to a stored function - and stored functions are banned inside a CHECK
+constraint. The eight URL and slug constraints now use the `REGEXP` operator,
+which both engines have and both allow in a CHECK.
+
+**MariaDB will not index a generated column whose expression reads a column
+with an explicit character set.** Every id here is `CHAR(36) CHARACTER SET
+ascii`, and `open_attempt_key` was `GENERATED ALWAYS AS (CASE WHEN state =
+'in_progress' THEN CONCAT(quiz_id, ':', user_id) END)` with a unique index over
+it - the whole point of the column. Making it `PERSISTENT`, converting the
+charset, or collating the expression all fail the same way; only dropping the
+index makes MariaDB accept it, and the index is the rule.
+
+It is now a plain column maintained by two triggers. The guarantee is unchanged
+and still the server's: a unique index, not application code, is what makes a
+second open attempt impossible. Only the way the value gets there moved.
+
+**`JSON_TABLE` cannot read a column of the outer query in MariaDB.** Grading
+compared the correct and selected option sets by unnesting both into sorted
+JSON arrays. It now counts instead: the answer is right when it names as many
+options as there are correct ones and every correct one appears among them.
+Duplicates make the first test pass and the second fail, so they are still
+wrong. The search indexer had the same problem flattening `learning_outcomes`,
+and strips the JSON punctuation instead - that column feeds a FULLTEXT index,
+where only the words matter.
+
+**`utf8mb4_0900_ai_ci` is MySQL-only.** Nothing in the migrations names a
+collation, so this only ever mattered for the generated dump, which now carries
+`utf8mb4_general_ci` - present on both.
+
+What this does not mean is that the two are interchangeable. It means this
+schema installs on both, which is checked: CI runs MySQL 8, and the MariaDB
+side was verified by installing MariaDB and running the full suite against it.
+
 ## No foreign keys across service boundaries
 
 `catalog_courses.instructor_id` holds a user id with no constraint behind it.
