@@ -171,9 +171,12 @@ BEGIN
      url_path, `language`, level, is_published, popularity)
   SELECT 'course', c.id, c.id, c.title, c.subtitle,
          CONCAT_WS(' ', c.description,
-           IFNULL((SELECT GROUP_CONCAT(jt.v SEPARATOR ' ')
-                     FROM JSON_TABLE(c.learning_outcomes, '$[*]'
-                          COLUMNS (v VARCHAR(300) PATH '$')) jt), '')),
+           -- The outcomes flattened to words. Not JSON_TABLE: MariaDB cannot
+           -- use it against a column of the outer query. This is a FULLTEXT
+           -- body, so the separators only have to disappear - stripping the
+           -- brackets, quotes and commas leaves exactly the words to index.
+           REPLACE(REPLACE(REPLACE(REPLACE(
+             IFNULL(c.learning_outcomes, '[]'), '[', ''), ']', ''), '"', ''), ',', ' ')),
          IFNULL((SELECT GROUP_CONCAT(t.name SEPARATOR ' ')
                    FROM catalog_course_tags ct
                    JOIN catalog_tags t ON t.id = ct.tag_id

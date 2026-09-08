@@ -267,15 +267,36 @@ BEGIN
   SELECT 'ok  grading: 5 of 7 points, all-or-nothing respected' AS check_result;
 
   -- --- the partial-unique emulation actually bites -------------------------
-  SELECT COUNT(*) INTO n
-    FROM information_schema.columns
-   WHERE table_schema = DATABASE() AND table_name = 'assessment_quiz_attempts'
-     AND column_name = 'open_attempt_key' AND extra LIKE '%GENERATED%';
+  -- Test the rule, not the mechanism. open_attempt_key was a generated column
+  -- and is now maintained by triggers, because MariaDB will not index a
+  -- generated column that reads an ascii column. What matters either way is
+  -- that a second open attempt is impossible, so open one and try.
+  SELECT id INTO txt FROM assessment_quizzes LIMIT 1;
+  DELETE FROM assessment_quiz_attempts WHERE id LIKE 'deadbeef%';
+
+  INSERT INTO assessment_quiz_attempts
+    (id, quiz_id, user_id, course_id, attempt_no, state)
+  SELECT 'deadbeef-0000-4000-8000-000000000001', q.id,
+         '44444444-4444-4444-8444-444444444444', q.course_id, 90, 'in_progress'
+    FROM assessment_quizzes q WHERE q.id = txt;
+
+  SET n = 0;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR SQLSTATE '23000' SET n = 1;
+    INSERT INTO assessment_quiz_attempts
+      (id, quiz_id, user_id, course_id, attempt_no, state)
+    SELECT 'deadbeef-0000-4000-8000-000000000002', q.id,
+           '44444444-4444-4444-8444-444444444444', q.course_id, 91, 'in_progress'
+      FROM assessment_quizzes q WHERE q.id = txt;
+  END;
+
+  DELETE FROM assessment_quiz_attempts WHERE id LIKE 'deadbeef%';
+
   IF n = 0 THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'quiz_attempts.open_attempt_key is not a generated column';
+      SET MESSAGE_TEXT = 'a second open attempt on the same quiz was allowed';
   END IF;
-  SELECT 'ok  one-open-attempt rule is enforced by a generated column' AS check_result;
+  SELECT 'ok  one-open-attempt rule is enforced by the unique index' AS check_result;
 
   -- --- search --------------------------------------------------------------
   SELECT COUNT(*) INTO n FROM search_documents;
