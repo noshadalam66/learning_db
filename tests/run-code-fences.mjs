@@ -30,6 +30,11 @@ const SITE = (process.env.SITE_URL || 'http://localhost:8080').replace(/\/$/, ''
 // Only the languages whose examples are meant to run standalone. The HTML and
 // CSS courses render documents rather than printing, so "did it error" is not
 // a question their fences answer.
+//
+// Dart is absent for a different reason: the playground has no Dart runner, so
+// there is nothing here to run its fences in. They are checked against the real
+// SDK instead, before the seed is generated - see the header of
+// seeds/0020_dart_course.sql.
 const COURSES = [
   { id: 'c0000001-0000-4000-8000-000000000008', fence: 'python', example: 'py-basics' },
   { id: 'c0000001-0000-4000-8000-000000000009', fence: 'php', example: 'php-basics' },
