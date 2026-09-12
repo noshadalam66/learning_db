@@ -31,10 +31,11 @@ const SITE = (process.env.SITE_URL || 'http://localhost:8080').replace(/\/$/, ''
 // CSS courses render documents rather than printing, so "did it error" is not
 // a question their fences answer.
 //
-// Dart and Java are absent for a different reason: the playground has no runner
-// for either, so there is nothing here to run their fences in. They are checked
-// against the real toolchain instead, before the seed is generated - see the
-// headers of seeds/0020_dart_course.sql and seeds/0022_java_course.sql.
+// Dart, Java, C#, Go and Rust are absent for a different reason: the playground
+// has no runner for any of them, so there is nothing here to run their fences
+// in. They are checked against the real toolchain instead, before the seed is
+// generated - see the header of each of those courses' seeds, from
+// seeds/0020_dart_course.sql onwards.
 const COURSES = [
   { id: 'c0000001-0000-4000-8000-000000000008', fence: 'python', example: 'py-basics' },
   { id: 'c0000001-0000-4000-8000-000000000009', fence: 'php', example: 'php-basics' },
