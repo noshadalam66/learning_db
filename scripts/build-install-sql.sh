@@ -57,6 +57,30 @@ mkdir -p dist
 --   The last statements record every migration as applied, so running
 --   scripts/migrate.sh later against this database is correctly a no-op
 --   rather than an attempt to create everything twice.
+--
+-- RE-IMPORTING AFTER DROPPING THE TABLES
+--
+--   Dropping every table does NOT drop the stored routines. They live beside
+--   the tables, on their own tab in phpMyAdmin, and they survive - so the
+--   next import of this file used to stop at the first one:
+--
+--     #1304 - PROCEDURE progress_refresh_enrolment_rollup already exists
+--
+--   This file now drops them itself, first, so a table-drop is enough to
+--   start over. Triggers go with their tables, and the views are CREATE OR
+--   REPLACE, but both are dropped here too rather than relying on that.
+--
+--   Tables are NOT dropped. If they still exist, the check at the top of this
+--   file stops the import and says so in words - much better than a file that
+--   silently deletes a database somebody still needed.
+--
+-- A NOTE ON PHPMYADMIN'S "STATIC ANALYSIS" WARNINGS
+--
+--   phpMyAdmin reports "Unrecognized statement type (near DECLARE)" for every
+--   stored routine in this file. Its parser does not follow DELIMITER into a
+--   BEGIN ... END body. The warnings are advisory - it hands the statements to
+--   MySQL anyway, and MySQL parses them correctly. Ignore them; only messages
+--   prefixed "MySQL said" are real.
 -- ===========================================================================
 
 SET NAMES utf8mb4;
@@ -64,6 +88,92 @@ SET time_zone = '+00:00';
 SET sql_mode = 'STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
 
 HEADER
+
+  # Stop, in words, if this is not an empty database.
+  #
+  # Without this the import stops on the first CREATE TABLE with "#1050 - Table
+  # 'identity_users' already exists", which says what happened but not what to
+  # do about it. A failed import leaves tables behind, so this is the state
+  # somebody lands in twice in a row while trying to recover from the first
+  # failure.
+  #
+  # platform_schema_migrations is excluded: it is the one table created with
+  # IF NOT EXISTS, so a database holding only the ledger still installs.
+  # MESSAGE_TEXT is capped at 128 characters. MySQL 8 rejects a longer one
+  # outright - "ERROR 1648: Data too long for condition item 'MESSAGE_TEXT'" -
+  # while MariaDB takes it, so this is a limit you can pass locally and fail on
+  # the server. Asserted here rather than trusted, because the whole point of
+  # the message is to be read by somebody whose import just stopped.
+  refusal='install.sql needs an EMPTY database - drop every table first. To add courses to a database you are keeping, use content.sql.'
+  if [ "${#refusal}" -gt 128 ]; then
+    echo "error: the refusal message is ${#refusal} characters; SIGNAL allows 128" >&2
+    exit 1
+  fi
+
+  # Quoted heredoc, and the message substituted afterwards. An unquoted one
+  # would expand the DELIMITER $$ markers below into the shell's PID, which
+  # produces a file that looks right until MySQL refuses the whole routine.
+  cat <<'PRECHECK' | sed "s|__REFUSAL__|$refusal|"
+
+-- ###########################################################################
+-- Refuse to run against a database that still has tables.
+--
+-- If this stops your import, the database is not empty. In phpMyAdmin: the
+-- Structure tab, Check all, With selected: Drop - then import this file again.
+-- It clears the stored routines, triggers and views itself; those survive a
+-- table-drop, which is what made the last attempt fail with
+-- "#1304 PROCEDURE ... already exists".
+--
+-- To ADD courses to a database you want to keep, import content.sql instead.
+-- ###########################################################################
+
+DROP PROCEDURE IF EXISTS install_precheck;
+
+DELIMITER $$
+
+CREATE PROCEDURE install_precheck()
+BEGIN
+  DECLARE v_tables INT DEFAULT 0;
+
+  SELECT COUNT(*) INTO v_tables
+    FROM information_schema.tables
+   WHERE table_schema = DATABASE()
+     AND table_type = 'BASE TABLE'
+     AND table_name <> 'platform_schema_migrations';
+
+  -- The long version is the comment above this block: MESSAGE_TEXT stops at
+  -- 128 characters, so the detail lives where there is room for it.
+  IF v_tables > 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '__REFUSAL__';
+  END IF;
+END$$
+
+DELIMITER ;
+
+CALL install_precheck();
+DROP PROCEDURE install_precheck;
+PRECHECK
+
+  # Everything the migrations below create that is NOT a table, dropped first.
+  #
+  # Read out of the migrations rather than listed here, because a list written
+  # by hand is one routine behind the first time somebody adds one. Names are
+  # deduplicated: 0011 replaces a procedure 0008 created, so it appears twice.
+  #
+  # These are plain statements, emitted before the first DELIMITER block, so
+  # there is no delimiter juggling to get wrong.
+  printf '\n-- ###########################################################################\n'
+  printf -- '-- Clear what a table-drop leaves behind. See RE-IMPORTING above.\n'
+  printf -- '-- ###########################################################################\n\n'
+
+  grep -hoE '^CREATE PROCEDURE [a-z_]+' migrations/*.sql | awk '{print $3}' | sort -u \
+    | while IFS= read -r name; do printf 'DROP PROCEDURE IF EXISTS %s;\n' "$name"; done
+  grep -hoE '^CREATE FUNCTION [a-z_]+' migrations/*.sql | awk '{print $3}' | sort -u \
+    | while IFS= read -r name; do printf 'DROP FUNCTION IF EXISTS %s;\n' "$name"; done
+  grep -hoE '^CREATE TRIGGER [a-z_]+' migrations/*.sql | awk '{print $3}' | sort -u \
+    | while IFS= read -r name; do printf 'DROP TRIGGER IF EXISTS %s;\n' "$name"; done
+  grep -hoE '^CREATE OR REPLACE .*VIEW [a-z_]+' migrations/*.sql | awk '{print $NF}' | sort -u \
+    | while IFS= read -r name; do printf 'DROP VIEW IF EXISTS %s;\n' "$name"; done
 
   for file in migrations/*.sql; do
     printf '\n-- ###########################################################################\n'
