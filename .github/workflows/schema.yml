@@ -99,9 +99,16 @@ jobs:
           my install_probe < dist/install.sql
           courses=$(count "SELECT COUNT(*) FROM catalog_courses")
           routines=$(count "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema='install_probe'")
-          echo "courses=$courses routines=$routines"
+
+          # Counted from the migrations, not written down. The first version of
+          # this assertion hard-coded 11 and went red the moment 0012 added the
+          # three quiet procedures - a number in a test is a number that goes
+          # stale, same as one in a comment.
+          expected=$(grep -hoE '^CREATE (PROCEDURE|FUNCTION) [a-z_]+' migrations/*.sql | awk '{print $3}' | sort -u | wc -l)
+
+          echo "courses=$courses routines=$routines (expected $expected)"
           [ "$courses" -eq 15 ] || { echo "::error::expected 15 courses, got $courses"; exit 1; }
-          [ "$routines" -eq 11 ] || { echo "::error::expected 11 routines, got $routines"; exit 1; }
+          [ "$routines" -eq "$expected" ] || { echo "::error::expected $expected routines, got $routines"; exit 1; }
           ./scripts/verify.sh
 
           echo "--- a database that still has tables is refused, and keeps its data"
