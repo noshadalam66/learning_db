@@ -76,3 +76,55 @@ jobs:
 
       - name: Verify
         run: ./scripts/verify.sh
+
+      - name: install.sql imports into an empty database, twice over
+        # The file a cPanel user actually imports, which until now nothing here
+        # touched: the steps above run migrate.sh and seed.sh instead, so two
+        # bugs in install.sql reached a real server. The second was a leftover
+        # stored routine surviving a table-drop, which is what the last third of
+        # this step reproduces.
+        #
+        # A second database, so none of this can disturb the one verified above.
+        env:
+          MYSQL_DATABASE: install_probe
+        run: |
+          set -euo pipefail
+          my() { mysql -h127.0.0.1 -uroot -proot --default-character-set=utf8mb4 "$@"; }
+          count() { my -N -B install_probe -e "$1"; }
+
+          ./scripts/build-install-sql.sh
+          my -e "CREATE DATABASE install_probe CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+
+          echo "--- into an empty database"
+          my install_probe < dist/install.sql
+          courses=$(count "SELECT COUNT(*) FROM catalog_courses")
+          routines=$(count "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema='install_probe'")
+          echo "courses=$courses routines=$routines"
+          [ "$courses" -eq 15 ] || { echo "::error::expected 15 courses, got $courses"; exit 1; }
+          [ "$routines" -eq 11 ] || { echo "::error::expected 11 routines, got $routines"; exit 1; }
+          ./scripts/verify.sh
+
+          echo "--- a database that still has tables is refused, and keeps its data"
+          if my install_probe < dist/install.sql 2>/tmp/refused; then
+            echo "::error::install.sql ran against a database that still had tables"
+            exit 1
+          fi
+          grep -q "install.sql is for an EMPTY database" /tmp/refused || {
+            echo "::error::refused, but not with the message that says what to do:"
+            cat /tmp/refused
+            exit 1
+          }
+          still=$(count "SELECT COUNT(*) FROM catalog_courses")
+          [ "$still" -eq 15 ] || { echo "::error::the refusal destroyed data: $still courses left"; exit 1; }
+
+          echo "--- drop every table and import again; the routines survive a table-drop"
+          tables=$(count "SELECT GROUP_CONCAT(CONCAT('\`',table_name,'\`')) FROM information_schema.tables WHERE table_schema='install_probe' AND table_type='BASE TABLE'")
+          my install_probe -e "SET FOREIGN_KEY_CHECKS=0; DROP TABLE $tables; SET FOREIGN_KEY_CHECKS=1;"
+          left=$(count "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema='install_probe'")
+          echo "routines left behind by the table-drop: $left"
+          [ "$left" -gt 0 ] || { echo "::error::nothing left behind - this step is no longer testing anything"; exit 1; }
+
+          my install_probe < dist/install.sql
+          courses=$(count "SELECT COUNT(*) FROM catalog_courses")
+          [ "$courses" -eq 15 ] || { echo "::error::re-import produced $courses courses"; exit 1; }
+          ./scripts/verify.sh
