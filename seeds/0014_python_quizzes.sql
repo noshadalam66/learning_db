@@ -151,14 +151,17 @@ ON DUPLICATE KEY UPDATE
   prompt = VALUES(prompt), explanation = VALUES(explanation),
   points = VALUES(points), correct_text = VALUES(correct_text);
 
-DELETE FROM assessment_question_options
- WHERE question_id IN (
-   SELECT id FROM assessment_questions
-    WHERE quiz_id IN ('f0000001-0000-4000-8000-000000000014',
-                      'f0000001-0000-4000-8000-000000000015',
-                      'f0000001-0000-4000-8000-000000000016',
-                      'f0000001-0000-4000-8000-000000000017'));
-
+-- Options upsert on uq_option_position (question_id, position) rather than
+-- being deleted and re-inserted, and that matters more than it looks. An
+-- option's id is a uuid generated at insert time, and a learner's attempt
+-- records the options they chose as a JSON array of those ids - there is no
+-- foreign key to keep them honest. Deleting and re-inserting would hand every
+-- option a new id and quietly turn every past attempt on this quiz into a
+-- review that resolves nothing.
+--
+-- The trade: a question later edited to have FEWER options would leave the
+-- last one behind, where the delete would have taken it. That has never
+-- happened; the broken history happened on every single re-import.
 INSERT INTO assessment_question_options (question_id, body, is_correct, `position`)
 SELECT v.question_id, v.body, v.is_correct, v.pos
   FROM (
@@ -248,7 +251,9 @@ SELECT v.question_id, v.body, v.is_correct, v.pos
 
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000235', 'True', 0, 1
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000235', 'False', 1, 2
-  ) v;
+  ) v
+ON DUPLICATE KEY UPDATE
+  body = VALUES(body), is_correct = VALUES(is_correct);
 
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000008');
 CALL search_reindex_all();
