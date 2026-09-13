@@ -152,14 +152,17 @@ ON DUPLICATE KEY UPDATE
   prompt = VALUES(prompt), explanation = VALUES(explanation),
   points = VALUES(points), `position` = VALUES(`position`);
 
-DELETE FROM assessment_question_options
- WHERE question_id IN (
-   SELECT id FROM assessment_questions
-    WHERE quiz_id IN ('f0000001-0000-4000-8000-00000000002c',
-                      'f0000001-0000-4000-8000-00000000002d',
-                      'f0000001-0000-4000-8000-00000000002e',
-                      'f0000001-0000-4000-8000-00000000002f'));
-
+-- Options upsert on uq_option_position (question_id, position) rather than
+-- being deleted and re-inserted, and that matters more than it looks. An
+-- option's id is a uuid generated at insert time, and a learner's attempt
+-- records the options they chose as a JSON array of those ids - there is no
+-- foreign key to keep them honest. Deleting and re-inserting would hand every
+-- option a new id and quietly turn every past attempt on this quiz into a
+-- review that resolves nothing.
+--
+-- The trade: a question later edited to have FEWER options would leave the
+-- last one behind, where the delete would have taken it. That has never
+-- happened; the broken history happened on every single re-import.
 INSERT INTO assessment_question_options (question_id, body, is_correct, `position`)
 SELECT v.question_id, v.body, v.is_correct, v.pos
   FROM (
@@ -258,7 +261,9 @@ SELECT v.question_id, v.body, v.is_correct, v.pos
     UNION ALL SELECT 'a1000001-0000-4000-8000-0000000002e4', 'Table-driven tests with t.Run, so a new case is one line', 1, 2
     UNION ALL SELECT 'a1000001-0000-4000-8000-0000000002e4', 'gofmt, go vet and go test -race enforced in CI', 1, 3
     UNION ALL SELECT 'a1000001-0000-4000-8000-0000000002e4', 'Packages call time.Now() and open their own connections directly', 0, 4
-  ) v;
+  ) v
+ON DUPLICATE KEY UPDATE
+  body = VALUES(body), is_correct = VALUES(is_correct);
 
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-00000000000e');
 CALL search_reindex_all();

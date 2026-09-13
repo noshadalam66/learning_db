@@ -348,21 +348,20 @@ ON DUPLICATE KEY UPDATE
 -- Options.
 --
 -- short_text questions carry their answer in questions.correct_text and get
--- no rows here. Options are re-inserted rather than updated, so editing a
--- distractor above and re-running the seed cannot leave the old one behind.
+-- no rows here.
+--
+-- These upsert on uq_option_position (question_id, position) rather than being
+-- deleted and re-inserted, and that matters more than it looks. An option's id
+-- is a uuid generated at insert time, and a learner's attempt records the
+-- options they chose as a JSON array of those ids - there is no foreign key to
+-- keep them honest. Deleting and re-inserting would hand every option a new id
+-- and quietly turn every past attempt on this quiz into a review that resolves
+-- nothing.
+--
+-- The trade: a question later edited to have FEWER options would leave the last
+-- one behind, where the delete would have taken it. That has never happened;
+-- the broken history happened on every single re-import.
 -- ---------------------------------------------------------------------------
-DELETE FROM assessment_question_options
- WHERE question_id IN (
-   SELECT id FROM assessment_questions
-    WHERE quiz_id IN ('f0000001-0000-4000-8000-000000000004',
-                      'f0000001-0000-4000-8000-000000000005',
-                      'f0000001-0000-4000-8000-000000000006',
-                      'f0000001-0000-4000-8000-000000000007',
-                      'f0000001-0000-4000-8000-000000000008',
-                      'f0000001-0000-4000-8000-000000000009',
-                      'f0000001-0000-4000-8000-00000000000a',
-                      'f0000001-0000-4000-8000-00000000000b'));
-
 INSERT INTO assessment_question_options (question_id, body, is_correct, `position`)
 SELECT v.question_id, v.body, v.is_correct, v.pos
   FROM (
@@ -575,7 +574,9 @@ SELECT v.question_id, v.body, v.is_correct, v.pos
     -- CSS L4 Q5: will-change (true/false)
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000175', 'True', 0, 1
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000175', 'False', 1, 2
-  ) v;
+  ) v
+ON DUPLICATE KEY UPDATE
+  body = VALUES(body), is_correct = VALUES(is_correct);
 
 -- ---------------------------------------------------------------------------
 -- The lesson counts changed, so the rollups have to be refreshed.

@@ -46,8 +46,13 @@ mkdir -p dist
 --
 -- WHAT YOU GET
 --
---   32 tables, 3 views, 11 stored routines, 13 triggers, and the demo
---   content: 10 courses, 227 searchable documents, one demo learner.
+--   The whole schema, and every course in seeds/, plus one demo learner.
+--
+--   There used to be exact counts here - "10 courses, 227 searchable
+--   documents". They were written by hand and were five courses out of date
+--   by the time anyone noticed. A count that cannot be derived from the
+--   sources does not belong in a generated file; the seed list below is the
+--   answer, and it cannot go stale.
 --
 --   The last statements record every migration as applied, so running
 --   scripts/migrate.sh later against this database is correctly a no-op

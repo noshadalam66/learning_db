@@ -1089,6 +1089,55 @@ re-running it by hand after a fix is realistic.
 
 ---
 
+## Getting content onto a live server
+
+Two generated files, for two different occasions. Both land in `dist/`, which
+is gitignored — a committed copy goes stale the moment a seed changes, so they
+are built on demand and thrown away.
+
+| | Build with | Import when |
+| --- | --- | --- |
+| `dist/install.sql` | `./scripts/build-install-sql.sh` | the database is **empty** — first install |
+| `dist/content.sql` | `./scripts/build-content-sql.sh [from] [to]` | the database is **already live** — adding a course |
+
+```bash
+./scripts/build-content-sql.sh 0020 0029   # just the Dart..Rust courses
+./scripts/build-content-sql.sh             # every seed
+```
+
+Then in phpMyAdmin: select the database, Import, choose the file, Go.
+
+**Why `install.sql` is the wrong file for a running site.** It re-runs every
+migration and re-seeds everything, including the demo learner. `content.sql`
+carries seeds only: no `CREATE TABLE`, no migration, and the builder refuses to
+write the file at all if any seed it includes contains a `DROP`, `TRUNCATE` or
+`DELETE FROM`. Enrolments, attempts and progress are untouched.
+
+Nothing to run afterwards. Each course seed ends by calling
+`catalog_refresh_course_rollup` and `search_reindex_all`, so the catalogue
+counts and the search index are correct the moment the import finishes.
+
+### Re-importing is safe, and one thing had to change to make it so
+
+Every seed upserts, so importing the same file twice is a no-op the second
+time. The quiz seeds used to be the exception: they deleted a quiz's options
+and re-inserted them, which is a reasonable way to make a table with no natural
+key idempotent — except that `assessment_question_options.id` is a uuid
+generated at insert time, and a learner's attempt records the options they
+chose as a **JSON array of those ids**, with no foreign key to keep them
+honest.
+
+So every re-import handed every option a new id and quietly turned every past
+attempt on that quiz into a review that resolves nothing. The options now
+upsert on `uq_option_position (question_id, position)` instead, and the ids
+stay put.
+
+The trade: a question later edited to have *fewer* options leaves the last one
+behind, where the delete would have taken it. That has never happened; the
+broken history happened on every single re-import.
+
+---
+
 ## Verification
 
 `./scripts/verify.sh` runs `tests/verify.sql` against a live database rather
