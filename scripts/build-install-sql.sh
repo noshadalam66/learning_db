@@ -99,10 +99,32 @@ HEADER
   #
   # platform_schema_migrations is excluded: it is the one table created with
   # IF NOT EXISTS, so a database holding only the ledger still installs.
-  cat <<'PRECHECK'
+  # MESSAGE_TEXT is capped at 128 characters. MySQL 8 rejects a longer one
+  # outright - "ERROR 1648: Data too long for condition item 'MESSAGE_TEXT'" -
+  # while MariaDB takes it, so this is a limit you can pass locally and fail on
+  # the server. Asserted here rather than trusted, because the whole point of
+  # the message is to be read by somebody whose import just stopped.
+  refusal='install.sql needs an EMPTY database - drop every table first. To add courses to a database you are keeping, use content.sql.'
+  if [ "${#refusal}" -gt 128 ]; then
+    echo "error: the refusal message is ${#refusal} characters; SIGNAL allows 128" >&2
+    exit 1
+  fi
+
+  # Quoted heredoc, and the message substituted afterwards. An unquoted one
+  # would expand the DELIMITER $$ markers below into the shell's PID, which
+  # produces a file that looks right until MySQL refuses the whole routine.
+  cat <<'PRECHECK' | sed "s|__REFUSAL__|$refusal|"
 
 -- ###########################################################################
 -- Refuse to run against a database that still has tables.
+--
+-- If this stops your import, the database is not empty. In phpMyAdmin: the
+-- Structure tab, Check all, With selected: Drop - then import this file again.
+-- It clears the stored routines, triggers and views itself; those survive a
+-- table-drop, which is what made the last attempt fail with
+-- "#1304 PROCEDURE ... already exists".
+--
+-- To ADD courses to a database you want to keep, import content.sql instead.
 -- ###########################################################################
 
 DROP PROCEDURE IF EXISTS install_precheck;
@@ -119,9 +141,10 @@ BEGIN
      AND table_type = 'BASE TABLE'
      AND table_name <> 'platform_schema_migrations';
 
+  -- The long version is the comment above this block: MESSAGE_TEXT stops at
+  -- 128 characters, so the detail lives where there is room for it.
   IF v_tables > 0 THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT =
-      'install.sql is for an EMPTY database. This one still has tables. In phpMyAdmin: Structure tab, Check all, With selected: Drop - then import this file again. It clears the stored routines itself. To ADD courses to a database you want to keep, import content.sql instead.';
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '__REFUSAL__';
   END IF;
 END$$
 

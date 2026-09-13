@@ -109,7 +109,7 @@ jobs:
             echo "::error::install.sql ran against a database that still had tables"
             exit 1
           fi
-          grep -q "install.sql is for an EMPTY database" /tmp/refused || {
+          grep -q "install.sql needs an EMPTY database" /tmp/refused || {
             echo "::error::refused, but not with the message that says what to do:"
             cat /tmp/refused
             exit 1

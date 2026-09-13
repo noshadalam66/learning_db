@@ -1156,14 +1156,17 @@ tables really is enough. And if you forget, it stops before touching anything
 and tells you what to do:
 
 ```
-install.sql is for an EMPTY database. This one still has tables. In phpMyAdmin:
-Structure tab, Check all, With selected: Drop - then import this file again. It
-clears the stored routines itself. To ADD courses to a database you want to
-keep, import content.sql instead.
+ERROR 1644 (45000): install.sql needs an EMPTY database - drop every table
+first. To add courses to a database you are keeping, use content.sql.
 ```
 
 That refusal is a `SIGNAL` from a procedure that runs first and deletes itself
-afterwards. It replaces `#1050 - Table 'identity_users' already exists`, which
+afterwards. Its wording is that terse because `SIGNAL … SET MESSAGE_TEXT` is
+capped at **128 characters** — MySQL 8 rejects a longer one outright with
+`#1648 Data too long for condition item 'MESSAGE_TEXT'`, while MariaDB accepts
+it, so it is a limit you can pass locally and fail on the server. The builder
+asserts the length rather than trusting it, and the long version lives in a
+comment directly above the check, where there is room. It replaces `#1050 - Table 'identity_users' already exists`, which
 is what a second attempt used to produce — a failed import leaves tables behind,
 so that is the state you land in while trying to recover from the first failure.
 
