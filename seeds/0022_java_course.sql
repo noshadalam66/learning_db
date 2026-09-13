@@ -2781,4 +2781,4 @@ ON DUPLICATE KEY UPDATE
   status = VALUES(status);
 
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-00000000000c');
-CALL search_reindex_all();
+CALL search_reindex_all_quiet();

@@ -583,4 +583,4 @@ ON DUPLICATE KEY UPDATE
 -- ---------------------------------------------------------------------------
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000004');
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000005');
-CALL search_reindex_all();
+CALL search_reindex_all_quiet();

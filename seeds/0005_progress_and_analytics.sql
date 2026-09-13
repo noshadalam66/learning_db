@@ -119,14 +119,14 @@ SELECT 'a2000001-0000-4000-8000-000000000001', v.question_id,
   ) v
 ON DUPLICATE KEY UPDATE selected_option_ids = VALUES(selected_option_ids);
 
-CALL assessment_grade_attempt('a2000001-0000-4000-8000-000000000001');
+CALL assessment_grade_attempt_quiet('a2000001-0000-4000-8000-000000000001');
 
 -- ---------------------------------------------------------------------------
 -- Behaviour events across the last two weeks, then the rollups.
 -- ---------------------------------------------------------------------------
-CALL analytics_ensure_month_partition(DATE(UTC_TIMESTAMP()));
-CALL analytics_ensure_month_partition(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
-CALL analytics_ensure_month_partition(DATE_ADD(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
+CALL analytics_ensure_month_partition_quiet(DATE(UTC_TIMESTAMP()));
+CALL analytics_ensure_month_partition_quiet(DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
+CALL analytics_ensure_month_partition_quiet(DATE_ADD(DATE(UTC_TIMESTAMP()), INTERVAL 1 MONTH));
 
 -- MySQL has no generate_series, so the day range comes from a small derived
 -- table of digits. 14 days x 2 learners x 3 event kinds.
@@ -198,7 +198,7 @@ INSERT INTO search_synonyms (term, expands_to) VALUES
   ('sql',   JSON_ARRAY('mysql', 'query'))
 ON DUPLICATE KEY UPDATE expands_to = VALUES(expands_to);
 
-CALL search_reindex_all();
+CALL search_reindex_all_quiet();
 
 -- Roll up the last eight days.
 CALL analytics_rollup_day(DATE(UTC_TIMESTAMP()));
