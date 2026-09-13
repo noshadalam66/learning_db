@@ -1141,6 +1141,41 @@ Nothing to run afterwards. Each course seed ends by calling
 `catalog_refresh_course_rollup` and `search_reindex_all`, so the catalogue
 counts and the search index are correct the moment the import finishes.
 
+### Starting over: dropping the tables is not enough
+
+Dropping every table leaves the **stored routines** behind. They are not tables,
+they sit on their own tab in phpMyAdmin, and they survive — so the next import
+of `install.sql` used to stop at the first one:
+
+```
+#1304 - PROCEDURE progress_refresh_enrolment_rollup already exists
+```
+
+`install.sql` now drops the routines, triggers and views itself, so dropping the
+tables really is enough. And if you forget, it stops before touching anything
+and tells you what to do:
+
+```
+install.sql is for an EMPTY database. This one still has tables. In phpMyAdmin:
+Structure tab, Check all, With selected: Drop - then import this file again. It
+clears the stored routines itself. To ADD courses to a database you want to
+keep, import content.sql instead.
+```
+
+That refusal is a `SIGNAL` from a procedure that runs first and deletes itself
+afterwards. It replaces `#1050 - Table 'identity_users' already exists`, which
+is what a second attempt used to produce — a failed import leaves tables behind,
+so that is the state you land in while trying to recover from the first failure.
+
+Tables are deliberately *not* dropped for you. An installer that silently
+deletes a database somebody still needed is worse than one that stops.
+
+**phpMyAdmin's "static analysis" warnings on this file are noise.** It reports
+`Unrecognized statement type (near "DECLARE")` for every stored routine, because
+its parser does not follow `DELIMITER` into a `BEGIN … END` body. It hands the
+statements to MySQL anyway and MySQL parses them correctly. Only messages
+prefixed **MySQL said** are real.
+
 ### Re-importing is safe, and one thing had to change to make it so
 
 Every seed upserts, so importing the same file twice is a no-op the second
