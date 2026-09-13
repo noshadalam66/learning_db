@@ -9,7 +9,7 @@
 # re-run every migration and re-seed everything, which is not what you want
 # when people have enrolments and quiz attempts in there.
 #
-#   ./scripts/build-content-sql.sh                 every seed
+#   ./scripts/build-content-sql.sh                 every content seed
 #   ./scripts/build-content-sql.sh 0020 0029       just those, inclusive
 #
 # Either is safe against a live database, and that is not a promise made
@@ -18,12 +18,16 @@
 #   * Every seed inserts with ON DUPLICATE KEY UPDATE, so re-importing one
 #     already applied rewrites the same rows rather than failing on a
 #     duplicate key or creating a second copy.
-#   * No seed contains DROP, TRUNCATE or DELETE. The check below refuses to
-#     write the file if one ever does, because this script's whole promise is
-#     that importing it cannot lose anything.
-#   * Learner data - users, enrolments, attempts, progress - is written by
-#     seed 0019 alone, and only for the demo account. Nothing here touches a
-#     real learner's rows.
+#   * No seed contains DROP, TRUNCATE or DELETE FROM. The check below refuses
+#     to write the file if one ever does, because this script's whole promise
+#     is that importing it cannot lose anything.
+#   * FIXTURE SEEDS ARE LEFT OUT. Some seeds exist to give a development
+#     database people to look at: demo users, their enrolments, their progress,
+#     a graded quiz attempt, a month of analytics events. None of that belongs
+#     in a production database, and the first version of this script would have
+#     carried all of it there - it excluded 0019 only by accident, because 0019
+#     happened to contain a DELETE, while 0001 and 0005 went straight through.
+#     They are now recognised by the tables they write to, and skipped.
 #   * Each course seed ends by calling catalog_refresh_course_rollup and
 #     search_reindex_all, so the counts on the catalogue page and the search
 #     index are correct the moment the import finishes. No extra step.
@@ -44,18 +48,45 @@ fi
 # Collect the seeds in range. The numeric prefix is the order they must be
 # applied in, and it is also how a range is expressed, so it is read straight
 # off the filename rather than kept in a list that would drift.
+#
+# Rows that belong to a person, rather than to a course. A seed that writes any
+# of these is a fixture for development, not content, and is skipped.
+#
+# identity_user_roles is deliberately NOT in this list: 0006 uses it to grant
+# the instructor role to the demo author a course is attributed to, matched by
+# e-mail, so on a database without her it inserts nothing at all. Excluding
+# every table whose name starts with identity_ would have thrown out the HTML
+# course with her.
+FIXTURE_TABLES='identity_users|progress_[a-z_]+|assessment_quiz_attempts|assessment_attempt_answers|analytics_[a-z_]+'
+
+is_fixture() {
+  sed 's/--.*//' "$1" \
+    | grep -qE "^[[:space:]]*(INSERT INTO|REPLACE INTO|UPDATE|DELETE FROM)[[:space:]]+($FIXTURE_TABLES)\b"
+}
+
 files=()
+skipped=""
 for file in seeds/*.sql; do
   number="$(basename "$file" | cut -d_ -f1)"
   if [ -n "$FROM" ]; then
     # String comparison is safe: every prefix is four digits, zero-padded.
     [[ "$number" < "$FROM" || "$number" > "$TO" ]] && continue
   fi
+  if is_fixture "$file"; then
+    skipped="$skipped $(basename "$file")"
+    continue
+  fi
   files+=("$file")
 done
 
+if [ -n "$skipped" ]; then
+  echo "skipping demo fixtures, which do not belong in a live database:" >&2
+  for name in $skipped; do echo "  $name" >&2; done
+fi
+
 if [ ${#files[@]} -eq 0 ]; then
-  echo "error: no seed files matched${FROM:+ $FROM..$TO}" >&2
+  echo "error: no content seeds matched${FROM:+ $FROM..$TO}" >&2
+  [ -n "$skipped" ] && echo "Everything in that range is a demo fixture." >&2
   exit 1
 fi
 
