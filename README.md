@@ -1102,7 +1102,7 @@ are built on demand and thrown away.
 
 ```bash
 ./scripts/build-content-sql.sh 0020 0029   # just the Dart..Rust courses
-./scripts/build-content-sql.sh             # every seed
+./scripts/build-content-sql.sh             # every content seed
 ```
 
 Then in phpMyAdmin: select the database, Import, choose the file, Go.
@@ -1112,6 +1112,30 @@ migration and re-seeds everything, including the demo learner. `content.sql`
 carries seeds only: no `CREATE TABLE`, no migration, and the builder refuses to
 write the file at all if any seed it includes contains a `DROP`, `TRUNCATE` or
 `DELETE FROM`. Enrolments, attempts and progress are untouched.
+
+**Fixture seeds are left out, and this is the part worth knowing.** Some seeds
+exist to give a development database people to look at — demo users, their
+enrolments and progress, a graded quiz attempt, a month of analytics events.
+None of that belongs in production. The builder recognises them by the tables
+they write to and skips them, naming each one as it goes:
+
+```
+skipping demo fixtures, which do not belong in a live database:
+  0001_roles_and_users.sql
+  0005_progress_and_analytics.sql
+  0019_demo_quiz_attempt.sql
+```
+
+The first version of this script did not do that. It excluded `0019` only by
+accident — `0019` happened to contain a `DELETE` and tripped the destructive
+check — while `0001` and `0005` went straight through, so a no-argument build
+would have carried five demo accounts and their history into a live database.
+
+`identity_user_roles` is deliberately not treated as a fixture table: `0006`
+uses it to grant the instructor role to the demo author its course is
+attributed to, matched by e-mail, so on a database without her it inserts
+nothing. Excluding every `identity_` table would have thrown out the HTML
+course along with her.
 
 Nothing to run afterwards. Each course seed ends by calling
 `catalog_refresh_course_rollup` and `search_reindex_all`, so the catalogue

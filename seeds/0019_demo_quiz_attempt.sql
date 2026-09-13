@@ -33,9 +33,12 @@ ON DUPLICATE KEY UPDATE
 
 -- Two of five right, worth 3 of 10 points: below the 60% pass mark, so the
 -- profile has a genuinely failed row to render.
-DELETE FROM assessment_attempt_answers
- WHERE attempt_id = 'a2000001-0000-4000-8000-000000000002';
-
+--
+-- Upserts on uq_answer_one_per_question (attempt_id, question_id) rather than
+-- deleting the attempt's answers first. Deleting worked, but it put a DELETE
+-- FROM a learner-data table into the seed corpus, and scripts/build-content-sql.sh
+-- refuses to build a file for a live database out of any seed that contains
+-- one - correctly, since it cannot tell a scoped delete from a broad one.
 INSERT INTO assessment_attempt_answers (attempt_id, question_id, selected_option_ids, text_answer)
 SELECT 'a2000001-0000-4000-8000-000000000002', v.question_id,
        IFNULL(
@@ -56,7 +59,10 @@ SELECT 'a2000001-0000-4000-8000-000000000002', v.question_id,
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000104', 1, NULL
     -- Wrong: a short_text answer that is not the expected one.
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000105', NULL, 'target'
-  ) v;
+  ) v
+ON DUPLICATE KEY UPDATE
+  selected_option_ids = VALUES(selected_option_ids),
+  text_answer = VALUES(text_answer);
 
 -- Graded by the same procedure the Quiz Service calls, so the stored score is
 -- one the application would actually produce.
