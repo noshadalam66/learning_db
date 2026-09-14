@@ -1141,6 +1141,36 @@ Nothing to run afterwards. Each course seed ends by calling
 `catalog_refresh_course_rollup` and `search_reindex_all`, so the catalogue
 counts and the search index are correct the moment the import finishes.
 
+### Why a CALL can take an import down
+
+Three procedures end with a bare `SELECT`, because a MySQL procedure has no
+`RETURN` and a result set is the only way to hand a value back:
+`search_reindex_all` (the document count), `assessment_grade_attempt` (the
+score) and `analytics_ensure_month_partition` (the partition it made). The
+seeds call all three.
+
+Through the `mysql` client that is invisible — it drains result sets for you.
+Through phpMyAdmin it is fatal: mysqli leaves the connection with rows pending
+and the **next** statement dies with
+
+```
+#2014 - Commands out of sync; you can't run this command now
+```
+
+which took down both `install.sql` and `content.sql` on a real cPanel import,
+past a CI job that was green the whole time — because CI used the client too.
+
+Migration `0012` moves each body into a silent `<name>_quiet` procedure and
+leaves the original name as a thin wrapper that produces the same result set as
+before. The seeds call the quiet variants; `learning_apis` is untouched, which
+matters because `assessment_grade_attempt` is the quiz grading path and the
+Quiz Service reads that row.
+
+`tests/import-as-phpmyadmin.php` now drives a file through mysqli one statement
+at a time, without `next_result()`, and CI runs it over both generated files.
+It fails against the seeds as they were before `0012`, which is the only reason
+to trust it.
+
 ### Starting over: dropping the tables is not enough
 
 Dropping every table leaves the **stored routines** behind. They are not tables,

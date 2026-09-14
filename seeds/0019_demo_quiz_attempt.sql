@@ -66,4 +66,4 @@ ON DUPLICATE KEY UPDATE
 
 -- Graded by the same procedure the Quiz Service calls, so the stored score is
 -- one the application would actually produce.
-CALL assessment_grade_attempt('a2000001-0000-4000-8000-000000000002');
+CALL assessment_grade_attempt_quiet('a2000001-0000-4000-8000-000000000002');

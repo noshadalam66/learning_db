@@ -99,9 +99,16 @@ jobs:
           my install_probe < dist/install.sql
           courses=$(count "SELECT COUNT(*) FROM catalog_courses")
           routines=$(count "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema='install_probe'")
-          echo "courses=$courses routines=$routines"
+
+          # Counted from the migrations, not written down. The first version of
+          # this assertion hard-coded 11 and went red the moment 0012 added the
+          # three quiet procedures - a number in a test is a number that goes
+          # stale, same as one in a comment.
+          expected=$(grep -hoE '^CREATE (PROCEDURE|FUNCTION) [a-z_]+' migrations/*.sql | awk '{print $3}' | sort -u | wc -l)
+
+          echo "courses=$courses routines=$routines (expected $expected)"
           [ "$courses" -eq 15 ] || { echo "::error::expected 15 courses, got $courses"; exit 1; }
-          [ "$routines" -eq 11 ] || { echo "::error::expected 11 routines, got $routines"; exit 1; }
+          [ "$routines" -eq "$expected" ] || { echo "::error::expected $expected routines, got $routines"; exit 1; }
           ./scripts/verify.sh
 
           echo "--- a database that still has tables is refused, and keeps its data"
@@ -128,3 +135,38 @@ jobs:
           courses=$(count "SELECT COUNT(*) FROM catalog_courses")
           [ "$courses" -eq 15 ] || { echo "::error::re-import produced $courses courses"; exit 1; }
           ./scripts/verify.sh
+
+      - name: install.sql and content.sql import through phpMyAdmin
+        # Every step above uses the mysql client, which is how a developer
+        # loads this schema and is not how it is installed on shared hosting.
+        # The client drains the result sets a CALL leaves behind; mysqli, which
+        # is what phpMyAdmin uses, does not - so a procedure ending in a bare
+        # SELECT imports fine here and dies there with
+        #
+        #   #2014 - Commands out of sync; you can't run this command now
+        #
+        # That reached a real cPanel import twice, past a green CI. This step
+        # drives both files through mysqli exactly as phpMyAdmin does.
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+        run: |
+          set -euo pipefail
+          my() { mysql -h127.0.0.1 -uroot -proot --default-character-set=utf8mb4 "$@"; }
+
+          my -e "DROP DATABASE IF EXISTS pma_probe; CREATE DATABASE pma_probe CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+
+          echo "--- install.sql, into an empty database"
+          ./scripts/build-install-sql.sh
+          php tests/import-as-phpmyadmin.php dist/install.sql pma_probe
+
+          courses=$(my -N -B pma_probe -e "SELECT COUNT(*) FROM catalog_courses")
+          [ "$courses" -eq 15 ] || { echo "::error::phpMyAdmin import produced $courses courses"; exit 1; }
+
+          echo "--- content.sql, over the database that import just created"
+          ./scripts/build-content-sql.sh
+          php tests/import-as-phpmyadmin.php dist/content.sql pma_probe
+
+          MYSQL_DATABASE=pma_probe ./scripts/verify.sh
