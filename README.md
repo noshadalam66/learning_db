@@ -1097,7 +1097,7 @@ are built on demand and thrown away.
 
 | | Build with | Import when |
 | --- | --- | --- |
-| `dist/install.sql` | `./scripts/build-install-sql.sh` | the database is **empty** — first install |
+| `dist/install.sql` | `./scripts/build-install-sql.sh` | first install, or a **retry** after one failed — replaces everything |
 | `dist/content.sql` | `./scripts/build-content-sql.sh [from] [to]` | the database is **already live** — adding a course |
 
 ```bash
@@ -1171,24 +1171,58 @@ at a time, without `next_result()`, and CI runs it over both generated files.
 It fails against the seeds as they were before `0012`, which is the only reason
 to trust it.
 
-### Starting over: dropping the tables is not enough
+### Starting over, and importing over a mess
 
-Dropping every table leaves the **stored routines** behind. They are not tables,
-they sit on their own tab in phpMyAdmin, and they survive — so the next import
-of `install.sql` used to stop at the first one:
+`install.sql` installs into whatever it finds. It drops every table, view,
+stored routine and trigger it is about to create, then creates them, then
+seeds them — so an import that failed halfway, which leaves a database full of
+half-made tables, is fixed by importing the same file again. Nothing has to be
+dropped by hand.
 
-```
-#1304 - PROCEDURE progress_refresh_enrolment_rollup already exists
-```
-
-`install.sql` now drops the routines, triggers and views itself, so dropping the
-tables really is enough. And if you forget, it stops before touching anything
-and tells you what to do:
+That is a change, and it is worth knowing why. The file used to refuse any
+database that still had tables:
 
 ```
 ERROR 1644 (45000): install.sql needs an EMPTY database - drop every table
 first. To add courses to a database you are keeping, use content.sql.
 ```
+
+The intent was good and the effect was backwards. The state somebody is
+actually in when they import this file is *the last import failed*, and
+refusing that made the file unable to fix the one problem it was most needed
+for. Worse, the way out — dropping 32 tables by hand in phpMyAdmin — is the
+step most likely to go wrong, and it does not even clear the stored routines:
+
+```
+#1304 - PROCEDURE progress_refresh_enrolment_rollup already exists
+```
+
+Routines are not tables. They sit on their own tab, they survive a table-drop,
+and they used to stop the next attempt at the first `CREATE PROCEDURE`. Now
+the file drops them, the triggers and the views itself, along with the tables,
+in one block with `FOREIGN_KEY_CHECKS` off around it so no hand-chosen drop
+order can go stale as the schema grows. Checks go back on before a single row
+is inserted, so every seed is still enforced.
+
+The drop list is read out of `migrations/` at build time — every
+`CREATE TABLE`, `CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE TRIGGER` and
+`CREATE OR REPLACE VIEW` — because a list written by hand is one object behind
+the first time somebody adds one. The builder refuses to write a file whose
+table list came out empty.
+
+**One thing still stops the import**, and it is the thing that actually
+matters: an account that did not come from the seeds.
+
+```
+ERROR 1644 (45000): install.sql REPLACES this database and it has real
+accounts in it. To add courses, import content.sql instead.
+```
+
+Every seeded account is `@learning.test`. One address that is not is somebody
+who registered through the site, and their database must not be replaced by
+the seeds. The check is the first statement in the file, so when it fires
+nothing has been touched. Demo data alone never trips it, which is what lets a
+retry work.
 
 That refusal is a `SIGNAL` from a procedure that runs first and deletes itself
 afterwards. Its wording is that terse because `SIGNAL … SET MESSAGE_TEXT` is
@@ -1196,12 +1230,22 @@ capped at **128 characters** — MySQL 8 rejects a longer one outright with
 `#1648 Data too long for condition item 'MESSAGE_TEXT'`, while MariaDB accepts
 it, so it is a limit you can pass locally and fail on the server. The builder
 asserts the length rather than trusting it, and the long version lives in a
-comment directly above the check, where there is room. It replaces `#1050 - Table 'identity_users' already exists`, which
-is what a second attempt used to produce — a failed import leaves tables behind,
-so that is the state you land in while trying to recover from the first failure.
+comment directly above the check, where there is room.
 
-Tables are deliberately *not* dropped for you. An installer that silently
-deletes a database somebody still needed is worse than one that stops.
+The procedure reads `identity_users`, which does not exist in an empty
+database — and a procedure naming a missing table fails when it is called
+rather than passing. So the statement before it is a
+`CREATE TABLE IF NOT EXISTS identity_users` with two columns: a no-op on any
+database that has been installed before, a stand-in on an empty one that the
+drop block removes a moment later. A prepared statement inside the procedure
+would have done the same job; this is duller, and duller is what you want in
+the first statement of a file that runs on somebody else's shared hosting.
+
+CI imports the file into an empty database, then over the database it just
+installed, then over the wreckage of a half-finished import, then against a
+database with one registered account — asserting that the first three end with
+15 courses and a passing `verify.sh`, and that the fourth is refused with both
+the courses and the account still there.
 
 **phpMyAdmin's "static analysis" warnings on this file are noise.** It reports
 `Unrecognized statement type (near "DECLARE")` for every stored routine, because

@@ -77,12 +77,16 @@ jobs:
       - name: Verify
         run: ./scripts/verify.sh
 
-      - name: install.sql imports into an empty database, twice over
-        # The file a cPanel user actually imports, which until now nothing here
-        # touched: the steps above run migrate.sh and seed.sh instead, so two
-        # bugs in install.sql reached a real server. The second was a leftover
-        # stored routine surviving a table-drop, which is what the last third of
-        # this step reproduces.
+      - name: install.sql installs from any starting state
+        # The file a cPanel user actually imports, which for a long time
+        # nothing here touched: the steps above run migrate.sh and seed.sh
+        # instead, so three bugs in install.sql reached a real server.
+        #
+        # The one this step exists for is the state a person is actually in
+        # when they import it: the LAST import failed and left a database full
+        # of half-made tables. install.sql has to fix that, because that is
+        # when it is needed most - so it drops everything it is about to
+        # create, and the cases below are the states it has to survive.
         #
         # A second database, so none of this can disturb the one verified above.
         env:
@@ -111,30 +115,51 @@ jobs:
           [ "$routines" -eq "$expected" ] || { echo "::error::expected $expected routines, got $routines"; exit 1; }
           ./scripts/verify.sh
 
-          echo "--- a database that still has tables is refused, and keeps its data"
+          echo "--- over the database it just installed"
+          my install_probe < dist/install.sql
+          courses=$(count "SELECT COUNT(*) FROM catalog_courses")
+          tables=$(count "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='install_probe' AND table_type='BASE TABLE'")
+          [ "$courses" -eq 15 ] || { echo "::error::re-import produced $courses courses"; exit 1; }
+          echo "courses=$courses tables=$tables"
+          ./scripts/verify.sh
+
+          echo "--- over the wreckage of an import that stopped halfway"
+          # Some tables gone, some still there, every stored routine left
+          # behind - a table-drop does not take them with it, which is what
+          # used to stop the next import with "#1304 PROCEDURE ... already
+          # exists" before this file dropped them itself.
+          my install_probe -e "SET FOREIGN_KEY_CHECKS=0;
+            DROP TABLE search_documents, analytics_events, catalog_lessons, progress_enrolments;
+            SET FOREIGN_KEY_CHECKS=1;"
+          left=$(count "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema='install_probe'")
+          [ "$left" -gt 0 ] || { echo "::error::nothing left behind - this case is no longer testing anything"; exit 1; }
+          echo "routines left behind by the table-drop: $left"
+
+          my install_probe < dist/install.sql
+          courses=$(count "SELECT COUNT(*) FROM catalog_courses")
+          [ "$courses" -eq 15 ] || { echo "::error::import over wreckage produced $courses courses"; exit 1; }
+          ./scripts/verify.sh
+
+          echo "--- a database with a real account is refused, and keeps its data"
+          # The one thing that stops this file. Every seeded account is
+          # @learning.test; anything else is somebody who registered through
+          # the site, and their database must not be replaced by the seeds.
+          my install_probe -e "INSERT INTO identity_users (id, email, password_hash, full_name, status)
+            VALUES ('99999999-9999-4999-8999-999999999999','someone@example.com','x','A Real Learner','active')"
+
           if my install_probe < dist/install.sql 2>/tmp/refused; then
-            echo "::error::install.sql ran against a database that still had tables"
+            echo "::error::install.sql ran against a database with a real account in it"
             exit 1
           fi
-          grep -q "install.sql needs an EMPTY database" /tmp/refused || {
+          grep -q "install.sql REPLACES this database" /tmp/refused || {
             echo "::error::refused, but not with the message that says what to do:"
             cat /tmp/refused
             exit 1
           }
           still=$(count "SELECT COUNT(*) FROM catalog_courses")
+          real=$(count "SELECT COUNT(*) FROM identity_users WHERE email='someone@example.com'")
           [ "$still" -eq 15 ] || { echo "::error::the refusal destroyed data: $still courses left"; exit 1; }
-
-          echo "--- drop every table and import again; the routines survive a table-drop"
-          tables=$(count "SELECT GROUP_CONCAT(CONCAT('\`',table_name,'\`')) FROM information_schema.tables WHERE table_schema='install_probe' AND table_type='BASE TABLE'")
-          my install_probe -e "SET FOREIGN_KEY_CHECKS=0; DROP TABLE $tables; SET FOREIGN_KEY_CHECKS=1;"
-          left=$(count "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema='install_probe'")
-          echo "routines left behind by the table-drop: $left"
-          [ "$left" -gt 0 ] || { echo "::error::nothing left behind - this step is no longer testing anything"; exit 1; }
-
-          my install_probe < dist/install.sql
-          courses=$(count "SELECT COUNT(*) FROM catalog_courses")
-          [ "$courses" -eq 15 ] || { echo "::error::re-import produced $courses courses"; exit 1; }
-          ./scripts/verify.sh
+          [ "$real" -eq 1 ] || { echo "::error::the refusal deleted the account it was protecting"; exit 1; }
 
       - name: install.sql and content.sql import through phpMyAdmin
         # Every step above uses the mysql client, which is how a developer
