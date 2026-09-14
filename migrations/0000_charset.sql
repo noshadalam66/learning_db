@@ -1,0 +1,65 @@
+-- ===========================================================================
+-- 0000 - the database speaks utf8mb4
+--
+-- WHY THIS RUNS BEFORE EVERYTHING ELSE
+--
+-- Not one CREATE TABLE in this directory names a character set, so every text
+-- column inherits the table default, which inherits the DATABASE default. That
+-- made the schema quietly dependent on how somebody's database was created -
+-- and on cPanel, a database created through the control panel is latin1.
+--
+-- The result was an import that ran for 275 statements and then stopped on a
+-- Python lesson that prints 世界:
+--
+--   #1366 - Incorrect string value: '\xE4\xB8\x96\xE7\x95\x8C...'
+--           for column `..`.`content_articles`.`body` at row 1
+--
+-- Three bytes of UTF-8 arriving at a one-byte column. Nothing in the file was
+-- wrong; the database it landed in could not hold it. Every test this repo had
+-- created its database as utf8mb4 first, so nothing ever noticed.
+--
+-- This file is numbered 0000 because it is only useful before the tables
+-- exist: it sets the default, and the CREATE TABLE statements that follow
+-- inherit it. On a database that is already utf8mb4 it is a no-op.
+--
+-- WHY IT DOES NOT CONVERT EXISTING TABLES
+--
+-- ALTER TABLE ... CONVERT TO CHARACTER SET utf8mb4 would convert *every*
+-- character column, including the CHAR(36) ids and the CHAR(64) token hashes
+-- that are deliberately `CHARACTER SET ascii COLLATE ascii_bin`. That would
+-- quadruple the bytes in every index that carries an id, and it would make
+-- token-hash comparison case- and accent-insensitive, which is not a thing to
+-- do to a session token. install.sql drops and recreates the tables, so it
+-- does not need the conversion; a database that already installed cleanly is
+-- already utf8mb4.
+--
+-- The collation is pinned rather than left to the default, because the
+-- default differs by engine: utf8mb4_0900_ai_ci on MySQL 8, utf8mb4_general_ci
+-- on MariaDB. utf8mb4_unicode_ci exists on both.
+--
+-- ALTER DATABASE with no name applies to the current database - which is the
+-- only form that can work here, since nothing in this schema knows what the
+-- database is called. It needs the ALTER privilege on that database, which is
+-- included in the ALL PRIVILEGES a cPanel account is granted on its own.
+-- ===========================================================================
+
+ALTER DATABASE CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- A RULE THIS FILE DOES NOT ENFORCE
+--
+-- On a database installed before this migration existed, the tables were
+-- created with whatever collation the database had then - utf8mb4_general_ci,
+-- usually - and this file does not touch them, on purpose (see above). The
+-- default is now utf8mb4_unicode_ci, so a NEW table created there by a future
+-- migration would differ from its neighbours, and a join between them raises
+-- "Illegal mix of collations".
+--
+-- So: every CREATE TABLE added from here on should end
+--
+--   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+--
+-- and name its own charset rather than inheriting one. tests/verify.sql
+-- checks the charset of every column, which is the half that loses data; the
+-- collation half is this comment, and a line in the README.
+-- ---------------------------------------------------------------------------

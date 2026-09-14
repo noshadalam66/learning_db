@@ -1247,6 +1247,62 @@ database with one registered account — asserting that the first three end with
 15 courses and a passing `verify.sh`, and that the fourth is refused with both
 the courses and the account still there.
 
+### The database's own character set decides whether the text survives
+
+Not one `CREATE TABLE` in `migrations/` names a character set. Every text
+column inherits the table default, which inherits the **database** default —
+so the schema has always depended on how somebody's database was created, and
+nothing said so.
+
+Every database in every test in this repo was created `utf8mb4`. cPanel's
+control panel creates them `latin1`. The schema built there perfectly and then
+stopped 275 statements into the seeds, on a Python lesson that prints `世界`:
+
+```
+#1366 - Incorrect string value: '\xE4\xB8\x96\xE7\x95\x8C...'
+        for column `..`.`content_articles`.`body` at row 1
+```
+
+Three bytes of UTF-8 arriving at a one-byte column. Nothing in the file was
+wrong; the database could not hold it.
+
+Migration `0000_charset.sql` runs before every other migration and sets the
+database default:
+
+```sql
+ALTER DATABASE CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+```
+
+`ALTER DATABASE` with no name applies to the current database — the only form
+that can work here, since nothing in this schema knows what the database is
+called. It needs the `ALTER` privilege on that database, which is part of the
+`ALL PRIVILEGES` a cPanel account holds on its own. The collation is pinned
+because the default for `utf8mb4` differs by engine: `utf8mb4_0900_ai_ci` on
+MySQL 8, `utf8mb4_general_ci` on MariaDB.
+
+**It does not convert existing tables**, and that is deliberate.
+`ALTER TABLE … CONVERT TO CHARACTER SET utf8mb4` converts *every* character
+column, including the `CHAR(36)` ids and `CHAR(64)` token hashes that are
+`CHARACTER SET ascii COLLATE ascii_bin` on purpose. That would quadruple the
+bytes in every index carrying an id, and make token-hash comparison case- and
+accent-insensitive — not a thing to do to a session token. `install.sql` drops
+and recreates the tables anyway, and a database that installed cleanly is
+already utf8mb4.
+
+`tests/verify.sql` checks the character set of **every column in the schema**,
+allowing only `utf8mb4` and `ascii`, and names the offenders when it fails —
+111 of them on a latin1 database. CI installs into a database created
+`latin1 COLLATE latin1_swedish_ci` through the phpMyAdmin harness and asserts
+at byte level that the CJK and the emoji came back as themselves and that
+nothing is double-encoded.
+
+One rule follows from all this: **a new `CREATE TABLE` should name its own
+charset**, `) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`
+rather than inheriting one. On a database installed before `0000` existed the
+tables are `utf8mb4_general_ci` while the default is now `utf8mb4_unicode_ci`,
+and a new table that inherits would differ from its neighbours — which is an
+`Illegal mix of collations` on the first join.
+
 **phpMyAdmin's "static analysis" warnings on this file are noise.** It reports
 `Unrecognized statement type (near "DECLARE")` for every stored routine, because
 its parser does not follow `DELIMITER` into a `BEGIN … END` body. It hands the
