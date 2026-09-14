@@ -161,6 +161,56 @@ jobs:
           [ "$still" -eq 15 ] || { echo "::error::the refusal destroyed data: $still courses left"; exit 1; }
           [ "$real" -eq 1 ] || { echo "::error::the refusal deleted the account it was protecting"; exit 1; }
 
+      - name: install.sql into a latin1 database, the way cPanel makes one
+        # Not one CREATE TABLE in migrations/ names a character set, so every
+        # text column inherits the DATABASE default - and every database in
+        # every step above was created utf8mb4 by this workflow. cPanel's
+        # control panel creates them latin1.
+        #
+        # So the schema built perfectly on a real server and then stopped 275
+        # statements in, on a Python lesson that prints CJK:
+        #
+        #   #1366 Incorrect string value: '\xE4\xB8\x96\xE7\x95\x8C...'
+        #          for column `...`.`content_articles`.`body` at row 1
+        #
+        # This step is that database. Through mysqli, because that combination
+        # - latin1 database, phpMyAdmin import - is the one that actually
+        # happens.
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: latin1_probe
+        run: |
+          set -euo pipefail
+          my() { mysql -h127.0.0.1 -uroot -proot --default-character-set=utf8mb4 "$@"; }
+          count() { my -N -B latin1_probe -e "$1"; }
+
+          ./scripts/build-install-sql.sh
+          my -e "DROP DATABASE IF EXISTS latin1_probe;
+                 CREATE DATABASE latin1_probe CHARACTER SET latin1 COLLATE latin1_swedish_ci"
+
+          php tests/import-as-phpmyadmin.php dist/install.sql latin1_probe
+
+          # The bytes, not the rendering. A latin1 connection would have stored
+          # these double-encoded and every string comparison would still have
+          # looked right in a terminal.
+          courses=$(count "SELECT COUNT(*) FROM catalog_courses")
+          cjk=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%E4B896E7958C%'")
+          emoji=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%F09F918D%'")
+          doubled=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%C383C2%'")
+
+          echo "courses=$courses cjk=$cjk emoji=$emoji double-encoded=$doubled"
+          [ "$courses" -eq 15 ] || { echo "::error::latin1 install produced $courses courses"; exit 1; }
+          [ "$cjk" -ge 1 ] || { echo "::error::the CJK lesson did not survive the import"; exit 1; }
+          [ "$emoji" -ge 1 ] || { echo "::error::the emoji did not survive the import"; exit 1; }
+          [ "$doubled" -eq 0 ] || { echo "::error::$doubled row(s) are double-encoded UTF-8"; exit 1; }
+
+          # verify.sh includes the column-charset check, which is what fails
+          # when this regresses: it names every column that cannot hold utf8mb4.
+          ./scripts/verify.sh
+
       - name: install.sql and content.sql import through phpMyAdmin
         # Every step above uses the mysql client, which is how a developer
         # loads this schema and is not how it is installed on shared hosting.

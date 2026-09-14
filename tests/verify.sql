@@ -84,6 +84,38 @@ BEGIN
   END IF;
   SELECT 'ok  every uuid column is ascii' AS check_result;
 
+  -- --- every text column can hold a character ------------------------------
+  -- Not one CREATE TABLE in migrations/ names a character set, so every text
+  -- column inherits the database default. On a database created as latin1 -
+  -- which is what cPanel's control panel makes - the schema builds perfectly
+  -- and then refuses the first lesson containing 世界:
+  --
+  --   #1366 Incorrect string value: '\xE4\xB8\x96\xE7\x95\x8C...'
+  --
+  -- Migration 0000 sets the database default before any table is created.
+  -- This is the check that says it worked, and it is deliberately about the
+  -- COLUMNS rather than the database setting: what matters is what the
+  -- columns can hold, and a database altered after its tables were built
+  -- would pass a check on the setting and still lose the text.
+  --
+  -- ascii is allowed and expected: the uuids, token hashes and currency codes
+  -- are ascii on purpose.
+  SELECT COUNT(*), GROUP_CONCAT(CONCAT(table_name, '.', column_name,
+                                       ' (', character_set_name, ')')
+                                ORDER BY table_name, column_name SEPARATOR ', ')
+    INTO n, txt
+    FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND character_set_name IS NOT NULL
+     AND character_set_name NOT IN ('utf8mb4', 'ascii');
+
+  IF n > 0 THEN
+    SET @msg = CONCAT(n, ' column(s) cannot hold utf8mb4: ', LEFT(txt, 100));
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = @msg;
+  END IF;
+  SELECT 'ok  every text column is utf8mb4 (ids and hashes ascii by design)'
+    AS check_result;
+
   -- --- seed data landed ----------------------------------------------------
   SELECT COUNT(*) INTO n FROM identity_users;
   IF n < 5 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'expected at least 5 seeded users'; END IF;
