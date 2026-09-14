@@ -58,21 +58,24 @@ mkdir -p dist
 --   scripts/migrate.sh later against this database is correctly a no-op
 --   rather than an attempt to create everything twice.
 --
--- RE-IMPORTING AFTER DROPPING THE TABLES
+-- RE-IMPORTING, AND WHAT THIS FILE DELETES
 --
---   Dropping every table does NOT drop the stored routines. They live beside
---   the tables, on their own tab in phpMyAdmin, and they survive - so the
---   next import of this file used to stop at the first one:
+--   This file makes the database BE the learning platform, whatever state it
+--   was in before. It drops every table, view, routine and trigger it is
+--   about to create, then creates them, then seeds them. So an import that
+--   failed halfway - which leaves a database full of half-made tables - is
+--   fixed by importing this file again. Nothing has to be dropped by hand.
 --
---     #1304 - PROCEDURE progress_refresh_enrolment_rollup already exists
+--   That also means it DELETES whatever those tables held. Enrolments, quiz
+--   attempts, progress, registered accounts: gone, replaced by the seeds.
 --
---   This file now drops them itself, first, so a table-drop is enough to
---   start over. Triggers go with their tables, and the views are CREATE OR
---   REPLACE, but both are dropped here too rather than relying on that.
+--   To ADD COURSES to a database you are keeping, this is the wrong file.
+--   Use content.sql - it inserts and updates only, and never drops anything.
 --
---   Tables are NOT dropped. If they still exist, the check at the top of this
---   file stops the import and says so in words - much better than a file that
---   silently deletes a database somebody still needed.
+--   One thing stops this file: an account that did not come from the seeds.
+--   Every seeded account is @learning.test, so a single real registration is
+--   enough for the check at the top to refuse the import and leave the
+--   database untouched, saying so in words.
 --
 -- A NOTE ON PHPMYADMIN'S "STATIC ANALYSIS" WARNINGS
 --
@@ -89,22 +92,26 @@ SET sql_mode = 'STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUT
 
 HEADER
 
-  # Stop, in words, if this is not an empty database.
+  # Stop, in words, if a real person has an account in this database.
   #
-  # Without this the import stops on the first CREATE TABLE with "#1050 - Table
-  # 'identity_users' already exists", which says what happened but not what to
-  # do about it. A failed import leaves tables behind, so this is the state
-  # somebody lands in twice in a row while trying to recover from the first
-  # failure.
+  # The older version of this check refused any database that still had
+  # tables. It was well meant and it was wrong: the state somebody is most
+  # often in when they import this file is "the last import failed and left a
+  # mess", and refusing that made the file unable to fix the one problem it
+  # was most needed for. The drops below deal with the mess; this check is
+  # left to do the only thing that actually matters, which is to not delete a
+  # database that has real learners in it.
   #
-  # platform_schema_migrations is excluded: it is the one table created with
-  # IF NOT EXISTS, so a database holding only the ledger still installs.
+  # Every account the seeds create is @learning.test. One address that is not
+  # is somebody who registered through the site, and that is a database this
+  # file must not touch.
+  #
   # MESSAGE_TEXT is capped at 128 characters. MySQL 8 rejects a longer one
   # outright - "ERROR 1648: Data too long for condition item 'MESSAGE_TEXT'" -
   # while MariaDB takes it, so this is a limit you can pass locally and fail on
   # the server. Asserted here rather than trusted, because the whole point of
   # the message is to be read by somebody whose import just stopped.
-  refusal='install.sql needs an EMPTY database - drop every table first. To add courses to a database you are keeping, use content.sql.'
+  refusal='install.sql REPLACES this database and it has real accounts in it. To add courses, import content.sql instead.'
   if [ "${#refusal}" -gt 128 ]; then
     echo "error: the refusal message is ${#refusal} characters; SIGNAL allows 128" >&2
     exit 1
@@ -116,34 +123,50 @@ HEADER
   cat <<'PRECHECK' | sed "s|__REFUSAL__|$refusal|"
 
 -- ###########################################################################
--- Refuse to run against a database that still has tables.
+-- Refuse to run against a database that has real accounts in it.
 --
--- If this stops your import, the database is not empty. In phpMyAdmin: the
--- Structure tab, Check all, With selected: Drop - then import this file again.
--- It clears the stored routines, triggers and views itself; those survive a
--- table-drop, which is what made the last attempt fail with
--- "#1304 PROCEDURE ... already exists".
+-- If this stops your import, somebody has registered on this site and this
+-- file would delete them. To add courses to a database you are keeping,
+-- import content.sql instead - it only inserts and updates.
 --
--- To ADD courses to a database you want to keep, import content.sql instead.
+-- Nothing has been changed when this message appears: this is the first
+-- statement in the file, and it stops everything after it.
 -- ###########################################################################
 
 DROP PROCEDURE IF EXISTS install_precheck;
+
+-- identity_users does not exist in an empty database, and a procedure naming
+-- a table that is not there fails when it is called - "#1146 table doesn't
+-- exist" - rather than passing. So: make sure there is something to look at.
+--
+-- On any database that has been installed before, this does nothing at all
+-- (MySQL answers CREATE TABLE IF NOT EXISTS with a warning and leaves the real
+-- table alone). On an empty one it makes a two-column stand-in, which the DROP
+-- TABLE block below removes a moment later, before the migrations create the
+-- real thing.
+--
+-- The alternative was a prepared statement inside the procedure. This is
+-- duller, and duller is what you want in the first statement of a file that
+-- has to run on somebody else's shared hosting.
+CREATE TABLE IF NOT EXISTS identity_users (
+  id CHAR(36) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DELIMITER $$
 
 CREATE PROCEDURE install_precheck()
 BEGIN
-  DECLARE v_tables INT DEFAULT 0;
+  DECLARE v_strangers INT DEFAULT 0;
 
-  SELECT COUNT(*) INTO v_tables
-    FROM information_schema.tables
-   WHERE table_schema = DATABASE()
-     AND table_type = 'BASE TABLE'
-     AND table_name <> 'platform_schema_migrations';
+  SELECT COUNT(*) INTO v_strangers
+    FROM identity_users
+   WHERE email NOT LIKE '%@learning.test';
 
   -- The long version is the comment above this block: MESSAGE_TEXT stops at
   -- 128 characters, so the detail lives where there is room for it.
-  IF v_tables > 0 THEN
+  IF v_strangers > 0 THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '__REFUSAL__';
   END IF;
 END$$
@@ -154,16 +177,22 @@ CALL install_precheck();
 DROP PROCEDURE install_precheck;
 PRECHECK
 
-  # Everything the migrations below create that is NOT a table, dropped first.
+  # Everything the migrations below create, dropped first, so that importing
+  # this file works from any starting state: an empty database, a database
+  # this file already installed, or the half-made wreckage of an import that
+  # stopped in the middle.
   #
-  # Read out of the migrations rather than listed here, because a list written
-  # by hand is one routine behind the first time somebody adds one. Names are
-  # deduplicated: 0011 replaces a procedure 0008 created, so it appears twice.
+  # All of it is read out of the migrations rather than listed here, because a
+  # list written by hand is one object behind the first time somebody adds
+  # one. Names are deduplicated: 0011 replaces a procedure 0008 created, so it
+  # appears twice.
   #
-  # These are plain statements, emitted before the first DELIMITER block, so
-  # there is no delimiter juggling to get wrong.
+  # Routines, views and triggers come first and are plain statements, emitted
+  # before the first DELIMITER block, so there is no delimiter juggling to get
+  # wrong. Triggers die with their tables anyway; they are dropped here too
+  # rather than relying on that.
   printf '\n-- ###########################################################################\n'
-  printf -- '-- Clear what a table-drop leaves behind. See RE-IMPORTING above.\n'
+  printf -- '-- Clear anything already here. See "WHAT THIS FILE DELETES" above.\n'
   printf -- '-- ###########################################################################\n\n'
 
   grep -hoE '^CREATE PROCEDURE [a-z_]+' migrations/*.sql | awk '{print $3}' | sort -u \
@@ -174,6 +203,25 @@ PRECHECK
     | while IFS= read -r name; do printf 'DROP TRIGGER IF EXISTS %s;\n' "$name"; done
   grep -hoE '^CREATE OR REPLACE .*VIEW [a-z_]+' migrations/*.sql | awk '{print $NF}' | sort -u \
     | while IFS= read -r name; do printf 'DROP VIEW IF EXISTS %s;\n' "$name"; done
+
+  # The tables. FOREIGN_KEY_CHECKS is off around them so the order does not
+  # matter - with 32 tables and foreign keys in both directions between the
+  # catalogue and progress, any hand-chosen order is a bug waiting for the
+  # next migration. It is switched back on immediately afterwards, before a
+  # single row is inserted, so every seed below is still checked.
+  tables="$(grep -hoE '^CREATE TABLE( IF NOT EXISTS)? [a-z_]+' migrations/*.sql \
+    | awk '{print $NF}' | sort -u)"
+
+  if [ -z "$tables" ]; then
+    echo "error: no CREATE TABLE found in migrations/ - refusing to write a file that drops nothing" >&2
+    exit 1
+  fi
+
+  printf '\nSET FOREIGN_KEY_CHECKS = 0;\n'
+  printf '%s\n' "$tables" | while IFS= read -r name; do
+    printf 'DROP TABLE IF EXISTS %s;\n' "$name"
+  done
+  printf 'SET FOREIGN_KEY_CHECKS = 1;\n'
 
   for file in migrations/*.sql; do
     printf '\n-- ###########################################################################\n'
