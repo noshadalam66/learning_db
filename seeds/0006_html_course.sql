@@ -44,7 +44,13 @@ VALUES
    -- Asterisks here would reach the page as literal asterisks.
    'A complete path through HTML in four levels. Level 1, Basic, gets a valid document on screen and teaches the elements you will use every day. Level 2, Intermediate, covers the two hard parts of real pages: tables that actually communicate data, and forms that validate themselves. Level 3, Advanced, moves to semantic layout, accessible components and the metadata that decides how your page looks when someone shares it. Level 4, Expert, finishes with templates, custom elements, loading performance and progressive enhancement.
 
-Every lesson ships a complete, professional code example. None of them are fragments: each one is a document you can paste into a file and open. Press the "Try yourself!" button under any example and it opens in the playground, where you can edit it on the left and watch the rendered result on the right.',
+This course assumes nothing. If you have never written a tag, Level 1 starts with the nine lines every page begins with and explains what each one is for. If you already write HTML every day, treat Level 1 as half an hour of revision and start properly at Level 3: most working developers have never read the rules on landmarks, labelling or what a screen reader does with a div, and that is where the hours here pay for themselves.
+
+Every level has the same shape: three lessons, then a Level Check quiz drawn from them, and an Expert Exam after Level 4. A lesson is one sitting - a short explanation, a complete example, then the edge cases that bite in real pages. Nothing is a fragment; every example is a whole file you can save and open.
+
+Every lesson ships a complete, professional code example. None of them are fragments: each one is a document you can paste into a file and open. Press the "Try yourself!" button under any example and it opens in the playground, where you can edit it on the left and watch the rendered result on the right.
+
+By the end you will be able to build a page that is valid, accessible and fast without reaching for a framework: tables a screen reader can read aloud, forms that validate before a line of JavaScript runs, metadata that controls how a link previews, and a loading order that does not block the first paint.',
    'aaaaaaa1-0000-4000-8000-000000000003',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -73,16 +79,16 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000008', 'c0000001-0000-4000-8000-000000000004',
    'Level 1 - Basic',
-   'A valid document, the text elements, and the three things every page is made of: words, links and pictures.', 1),
+   'Where every page starts. You will write the document skeleton from memory, learn which text element means what - and why a heading is structure rather than a size - and cover the three things every page is made of: words, links and pictures. By the end of this level you can build a page that validates and reads well with no CSS and no JavaScript at all.', 1),
   ('d0000001-0000-4000-8000-000000000009', 'c0000001-0000-4000-8000-000000000004',
    'Level 2 - Intermediate',
-   'Tables and forms - the two areas where careless markup costs real users the most.', 2),
+   'The two parts of HTML that most often go wrong in real projects, and the one that costs the most bandwidth. Tables first - headers, scope and captions, the markup that decides whether a screen reader reads data or noise - then forms, where the browser will validate for you if you let it, and finally images and media that fit the screen they land on.', 2),
   ('d0000001-0000-4000-8000-00000000000a', 'c0000001-0000-4000-8000-000000000004',
    'Level 3 - Advanced',
-   'Semantic layout, accessible components, and the metadata that lives in the head.', 3),
+   'Markup that carries meaning rather than just shape. Landmarks and sectioning give a page a structure assistive technology can navigate; the components lesson covers the interactive patterns people most often rebuild badly by hand; head metadata decides how the page is indexed, and what it looks like when somebody shares the link.', 3),
   ('d0000001-0000-4000-8000-00000000000b', 'c0000001-0000-4000-8000-000000000004',
    'Level 4 - Expert',
-   'Templates, custom elements, loading performance and progressive enhancement.', 4)
+   'The parts that separate a page which works from one which holds up. Templates and custom elements let you reuse markup with no build step; the performance lesson covers preloading, lazy images and the script attributes that stop the parser blocking; progressive enhancement is how all of it behaves when one piece fails to arrive.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 -- ---------------------------------------------------------------------------

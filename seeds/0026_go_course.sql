@@ -32,9 +32,15 @@ VALUES
    'Four levels, twelve lessons, every example vetted and run on a real toolchain',
    'A complete path through Go in four levels, taught on Go 1.24. Level 1, Basic, covers the zero value that is always usable, the absence of implicit conversions, one loop keyword, and the slice aliasing that surprises everyone exactly once. Level 2, Intermediate, is structs and methods with the receiver decision you make constantly, interfaces satisfied implicitly and declared by the code that consumes them, generics, and errors as ordinary values with wrapping, errors.Is and errors.As. Level 3, Advanced, covers goroutines and channels and the four deadlocks you will actually hit, context and worker pools and pipelines, and the parts of the standard library that turn up in every program. Level 4, Expert, finishes with escape analysis and the leaks a collector cannot prevent, where the time and allocations go, and how to arrange a module so a change stays small.
 
+No Go is assumed. The language is small enough that this course can be genuinely complete, and that is the shape it takes: by the end you will have seen essentially all of Go rather than a working subset. If you come from a language with inheritance or exceptions, the adjustment is in Level 2, and it is a short one.
+
+Each level is three lessons and a Level Check quiz, then an Expert Exam. There is no in-browser Go runner on the site yet, so every example was run through go vet and executed on a real toolchain before publication - install Go from go.dev and run each one with go run main.go, or paste it into the Go playground.
+
 Every example in this course was run through go vet and executed on a real Go toolchain before publication. There is no in-browser Go runner yet, so the code blocks are for reading and for running in your own editor.
 
-There is no in-browser runner for this language on the site, so to follow along install it from go.dev and run each one with go run main.go, or paste it into the Go playground.',
+There is no in-browser runner for this language on the site, so to follow along install it from go.dev and run each one with go run main.go, or paste it into the Go playground.
+
+By the end you will be able to write Go the way the standard library is written: interfaces declared where they are consumed, errors wrapped and inspected rather than swallowed, goroutines that are guaranteed to finish, context threaded through properly, and a module laid out so a change stays small.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -58,13 +64,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000030', 'c0000001-0000-4000-8000-00000000000e',
-   'Level 1 - Basic', 'The zero value, no implicit conversions, and the slice aliasing that surprises everyone.', 1),
+   'Level 1 - Basic',
+   'Go''s starting assumptions, which are different from most languages. The zero value is always usable, so a declared variable is already safe; there are no implicit conversions; there is one loop keyword; and defer runs at the end of the function rather than the block. The level closes on slices and maps, and the aliasing that surprises everyone exactly once.', 1),
   ('d0000001-0000-4000-8000-000000000031', 'c0000001-0000-4000-8000-00000000000e',
-   'Level 2 - Intermediate', 'Structs and methods, implicit interfaces and generics, and errors as values.', 2),
+   'Level 2 - Intermediate',
+   'How Go does the things other languages use classes for. Structs and methods, with the pointer or value receiver decision you will make constantly; interfaces satisfied implicitly and declared by the code that consumes them, plus type switches and generics; and errors as ordinary values, with wrapping, errors.Is and errors.As.', 2),
   ('d0000001-0000-4000-8000-000000000032', 'c0000001-0000-4000-8000-00000000000e',
-   'Level 3 - Advanced', 'Goroutines and channels, context and worker pools, and the standard library.', 3),
+   'Level 3 - Advanced',
+   'Concurrency, which is the reason most people come to Go. Goroutines and channels, including the four deadlocks you will actually hit and how each one looks; context, pipelines and worker pools, which is how cancellation and limits are really done; and a tour of the parts of the standard library that turn up in nearly every program.', 3),
   ('d0000001-0000-4000-8000-000000000033', 'c0000001-0000-4000-8000-00000000000e',
-   'Level 4 - Expert', 'Escape analysis and leaks, where the time goes, and how a module is arranged.', 4)
+   'Level 4 - Expert',
+   'What the compiler and the runtime decide for you. Escape analysis and why a value lands on the heap, with the goroutine leaks a collector cannot prevent; where the time goes, found with pprof rather than intuition; and how to arrange a module, including the internal directory and what a package boundary is for.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

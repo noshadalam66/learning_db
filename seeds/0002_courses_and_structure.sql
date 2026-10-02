@@ -10,7 +10,13 @@ VALUES
    'nodejs-microservices',
    'Node.js Microservices from Scratch',
    'Split a monolith into seven services without losing your weekends',
-   'A hands-on course that takes a single Express application and pulls it apart into independently deployable services. You will build a gateway, wire up service-to-service calls, and learn where a three-layer architecture pays for itself and where it does not.',
+   'A hands-on course that takes a single Express application and pulls it apart into independently deployable services. You will build a gateway, wire up service-to-service calls, and learn where a three-layer architecture pays for itself and where it does not.
+
+It is written for developers who already ship an Express application and are being asked, by a growing team or a slowing deploy, whether it should be several. The first module is deliberately the argument against: most systems that were split should not have been, and the lesson on boundaries is about recognising which case you are in before any code moves.
+
+Three modules, eight items: six lessons, a knowledge check after the first module, and a final exam. The examples are a working system rather than a diagram - the gateway you build routes real requests, propagates a request id across every hop, and degrades to a readable error when a service behind it is down.
+
+By the end you will be able to decide whether a split is justified, draw the boundary where the data actually divides, lay out each service as routes, services and repositories without the layers leaking into each other, and put one front door in front of all of them.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '22222222-2222-4222-8222-222222222222',
    'intermediate', 'published',
@@ -26,7 +32,13 @@ VALUES
    'mysql-for-applications',
    'MySQL for Application Developers',
    'Schema design, indexing and the queries behind a real product',
-   'Most performance problems are schema problems wearing a disguise. This course works through modelling a learning platform in MySQL: normalising the catalogue, choosing indexes InnoDB will actually use, and reaching for FULLTEXT before adding a second datastore.',
+   'Most performance problems are schema problems wearing a disguise. This course works through modelling a learning platform in MySQL: normalising the catalogue, choosing indexes InnoDB will actually use, and reaching for FULLTEXT before adding a second datastore.
+
+It assumes you can already write SQL and have never been entirely sure why one query is fast and the next one is not. The answer is almost always visible in EXPLAIN, and the second module is largely about learning to read it - which is the difference between adding an index and adding the right one.
+
+Two modules and five items, built around a single schema that grows as the course goes on. Every statement is one you can run: the tables, the constraints that keep the data honest, the query plans before and after, and a full-text search that replaces a service most teams add too early.
+
+By the end you will be able to turn a product brief into tables that will not need rewriting, say what a composite index can and cannot serve, read a query plan without guessing, and know when MySQL is enough and when it genuinely is not.',
    'aaaaaaa1-0000-4000-8000-000000000002',
    '33333333-3333-4333-8333-333333333333',
    'beginner', 'published',
@@ -42,7 +54,13 @@ VALUES
    'dynamic-php-frontends',
    'Dynamic PHP Front Ends',
    'Server-rendered pages that talk to a JSON API',
-   'PHP did not go anywhere. This course builds a server-rendered front end on top of a JSON API: templating without a framework, session handling, CSRF protection, and escaping every single thing you echo.',
+   'PHP did not go anywhere. This course builds a server-rendered front end on top of a JSON API: templating without a framework, session handling, CSRF protection, and escaping every single thing you echo.
+
+It is for anyone who has to put a page in front of an API and would rather understand the three mechanisms underneath than adopt a framework to hide them. Nothing here needs Composer, and everything here is what a framework would be doing on your behalf.
+
+Two modules and three lessons, short on purpose. The templating lesson is a layout and a handful of views; the escaping lesson is the one rule that prevents most of the vulnerabilities in server-rendered PHP; and the sessions lesson covers cookies, fixation and the CSRF token that makes a form safe to submit.
+
+By the end you will be able to render a page from an API response without a template engine, escape output in the right place every time rather than most of the time, and handle a session and a form post without leaving either open to the attacks they invite.',
    'aaaaaaa1-0000-4000-8000-000000000003',
    '22222222-2222-4222-8222-222222222222',
    'beginner', 'published',
@@ -52,7 +70,13 @@ VALUES
               'Escape output so user content cannot become markup'),
    JSON_ARRAY('Any programming experience'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 20 DAY))
-ON DUPLICATE KEY UPDATE title = VALUES(title);
+-- Re-importing a seed is how an edit reaches a database that already has the
+-- row, so every field this seed owns has to be listed here. Refreshing only
+-- the title - which is what this said - meant a rewritten description was
+-- silently dropped on every database except an empty one.
+ON DUPLICATE KEY UPDATE
+  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
   ('c0000001-0000-4000-8000-000000000001', 'bbbbbbb1-0000-4000-8000-000000000001'),
@@ -67,20 +91,20 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000001', 'c0000001-0000-4000-8000-000000000001',
-   'Why Split at All', 'The honest case for and against microservices.', 1),
+   'Why Split at All', 'The argument before the architecture. The first lesson is about the monolith you already have, and what is actually wrong with it - which is usually deployment and ownership rather than code. The second is finding boundaries: where the data divides, where a team boundary already exists, and why the wrong line costs more than no line at all.', 1),
   ('d0000001-0000-4000-8000-000000000002', 'c0000001-0000-4000-8000-000000000001',
-   'Three Layers per Service', 'Routes, services, repositories - and what belongs in each.', 2),
+   'Three Layers per Service', 'The inside of a single service, one layer per lesson. Routes and controllers translate HTTP into a call and nothing more; the service layer holds the rules and must not know what a status code is; repositories own the SQL so a query can change without the rules changing. The rule that makes it work is a single import restriction, and this module is about keeping it.', 2),
   ('d0000001-0000-4000-8000-000000000003', 'c0000001-0000-4000-8000-000000000001',
-   'The Gateway', 'One front door, seven services behind it.', 3),
+   'The Gateway', 'What the outside world talks to. The gateway lesson covers routing, the headers that must be stripped and the identity headers that must be set, how a request id survives every hop, and what a service that does not answer should look like to a caller. The final exam covers the whole course.', 3),
   ('d0000001-0000-4000-8000-000000000004', 'c0000001-0000-4000-8000-000000000002',
-   'Modelling the Domain', 'Turning a product brief into tables.', 1),
+   'Modelling the Domain', 'Schema design, which is where performance is decided long before an index is added. The first lesson turns a product brief into tables - what is an entity, what is an attribute, and what is a join table pretending to be neither. The second is the constraints, keys and types that make invalid data impossible to store rather than merely unlikely.', 1),
   ('d0000001-0000-4000-8000-000000000005', 'c0000001-0000-4000-8000-000000000002',
-   'Indexes and Query Plans', 'Making InnoDB do less work.', 2),
+   'Indexes and Query Plans', 'Why a query is slow, answered with evidence. Reading EXPLAIN output comes first, because it is what turns index choice from folklore into a decision; then full-text search with FULLTEXT indexes, which replaces the separate search service a surprising number of applications add before they need it. The module ends with a quiz on indexing.', 2),
   ('d0000001-0000-4000-8000-000000000006', 'c0000001-0000-4000-8000-000000000003',
-   'Rendering Pages', 'Templates, escaping and layout.', 1),
+   'Rendering Pages', 'Rendering a page without a framework. The templating lesson builds a layout and the views that fill it, using nothing but PHP, and shows where the seams go so the pages stay small. The escaping lesson is the single most important habit in server-rendered PHP: escape at output, every time, in the context you are escaping for.', 1),
   ('d0000001-0000-4000-8000-000000000007', 'c0000001-0000-4000-8000-000000000003',
-   'Sessions and Safety', 'Cookies, CSRF and the things that bite.', 2)
-ON DUPLICATE KEY UPDATE title = VALUES(title);
+   'Sessions and Safety', 'The state between two requests, and the attacks that live there. Sessions, how the cookie actually works, what fixation is and how regeneration prevents it, and the CSRF token that makes a form safe to submit - with the check on the server, where it counts, rather than on the page that generated it.', 2)
+ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
@@ -152,7 +176,7 @@ VALUES
    'sessions-and-csrf', 'Sessions and CSRF Tokens',
    'Keeping a login and making sure only your own forms can use it.',
    'video', 'published', 1, 877, 0)
-ON DUPLICATE KEY UPDATE title = VALUES(title);
+ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 -- Refresh the denormalised counters now that lessons exist.
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000001');

@@ -20,7 +20,13 @@ VALUES
    'Four levels, twelve lessons, fully type-checked in the browser',
    'A complete path through TypeScript in four levels. Level 1, Basic, covers what the type system is for, the types you will annotate every day, and why inference means you write fewer of them than you expect. Level 2, Intermediate, is the shapes real code needs: interfaces and type aliases, unions and narrowing, and generics. Level 3, Advanced, covers utility types, the type-level operators they are built from, and how to describe a function precisely. Level 4, Expert, finishes with conditional and mapped types, template literal types, and the declaration files that make untyped libraries usable.
 
-Every example is checked by the real compiler, not stripped. Break a type on purpose and the error appears with its code and line number before the code runs - which is the only way to learn what the compiler is actually telling you.',
+You should be comfortable with JavaScript before starting: TypeScript adds a type system to a language this course assumes you can already write. If you have used TypeScript only as JavaScript with annotations, Level 1 will be quick and Level 3 is where the course begins to tell you things you cannot get from the autocomplete.
+
+Three lessons and a Level Check quiz per level, with an Expert Exam at the end. Every example is checked by the real compiler rather than stripped of its types, so breaking one on purpose shows you the actual error, with its code and its line number, before the code runs - which is the only way to learn what the compiler is telling you.
+
+Every example is checked by the real compiler, not stripped. Break a type on purpose and the error appears with its code and line number before the code runs - which is the only way to learn what the compiler is actually telling you.
+
+By the end you will be able to type a real codebase rather than annotate it: narrow a union so the compiler proves which branch you are in, write a generic that stays readable, derive one type from another instead of maintaining both, and write the declaration file that makes an untyped dependency usable.',
    'aaaaaaa1-0000-4000-8000-000000000003',
    '55555555-5555-4555-8555-555555555555',
    'intermediate', 'published',
@@ -45,13 +51,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000014', 'c0000001-0000-4000-8000-000000000007',
-   'Level 1 - Basic', 'What the type system is for, and the annotations you will write every day.', 1),
+   'Level 1 - Basic',
+   'What the type system is for, and what it costs. The first lesson is honest about the trade - what you get, and the build step and the annotations you pay for it with. Then the types you will write every day, and finally inference, which is the reason you write far fewer annotations than you expect, once you know where the compiler can work it out for itself.', 1),
   ('d0000001-0000-4000-8000-000000000015', 'c0000001-0000-4000-8000-000000000007',
-   'Level 2 - Intermediate', 'Interfaces, unions and narrowing, and your first generics.', 2),
+   'Level 2 - Intermediate',
+   'The shapes real code needs. Interfaces and type aliases, and the question of which to use; unions with the narrowing that proves which case you are in, which is where TypeScript starts catching bugs rather than describing code; and your first generics, written as something readable rather than a wall of single letters.', 2),
   ('d0000001-0000-4000-8000-000000000016', 'c0000001-0000-4000-8000-000000000007',
-   'Level 3 - Advanced', 'Utility types, the operators behind them, and typing functions precisely.', 3),
+   'Level 3 - Advanced',
+   'Describing types in terms of other types. The utility types first, as the tools you reach for; then keyof, typeof and indexed access, which are what those tools are built from, so a type can be derived from a value rather than kept in step with it by hand; and finally typing functions precisely, including overloads and this.', 3),
   ('d0000001-0000-4000-8000-000000000017', 'c0000001-0000-4000-8000-000000000007',
-   'Level 4 - Expert', 'Conditional and mapped types, template literal types, and declaration files.', 4)
+   'Level 4 - Expert',
+   'The type level as a language of its own. Conditional types and mapped types let a type be computed from another; template literal types do the same to strings, which is how a library types event names it has never seen; and declaration files plus compiler configuration are how all of it meets code you did not write.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

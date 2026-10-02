@@ -31,7 +31,13 @@ VALUES
    'Four levels, twelve lessons, every example compiled and run on a real JDK',
    'A complete path through Java in four levels, taught on Java 21. Level 1, Basic, covers the split between primitives and references that explains most of Java''s surprises - why == is not equals, how null stays unannounced, and what the collections framework actually offers. Level 2, Intermediate, is classes and records, validation that makes invalid objects impossible, interfaces and generics including erasure and wildcards, sealed hierarchies, and the three kinds of failure. Level 3, Advanced, covers lambdas and streams, what a data race really costs and how executors and virtual threads answer it, and the pattern matching that makes a missed case a compile error. Level 4, Expert, finishes with reachability and the garbage collector, where the time and memory actually go, and how to arrange an application so a change stays small.
 
-Every example in this course was compiled with javac -Xlint:all and run on a real JDK before publication. There is no in-browser Java runner yet, so the code blocks are for reading and for pasting into your own editor - install a JDK from adoptium.net and run each one with a single command: java Example.java.',
+No Java is assumed, and the course is taught on Java 21 rather than the Java most tutorials still teach. If you learned Java a decade ago, that is the reason to read it: records, sealed types, switch expressions, pattern matching and virtual threads have changed what ordinary code looks like.
+
+Each level is three lessons and a Level Check quiz, with an Expert Exam at the end. There is no in-browser Java runner on the site yet, so every example was compiled with javac -Xlint:all and run on a real JDK before publication, and each one is a single file you can run with one command: java Example.java, once a JDK from adoptium.net is installed.
+
+Every example in this course was compiled with javac -Xlint:all and run on a real JDK before publication. There is no in-browser Java runner yet, so the code blocks are for reading and for pasting into your own editor - install a JDK from adoptium.net and run each one with a single command: java Example.java.
+
+By the end you will be able to write Java that a reviewer will pass without argument: immutable value objects as records, generics with the wildcards in the right places, streams that stay readable, concurrency that does not rely on hope, and a sense of where the time and the garbage actually come from.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -55,13 +61,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000028', 'c0000001-0000-4000-8000-00000000000c',
-   'Level 1 - Basic', 'Primitives against references, the switch that returns a value, and the collections.', 1),
+   'Level 1 - Basic',
+   'The split that explains most of Java''s surprises: primitives are values, everything else is a reference, which is why == is not equals and why null arrives unannounced. Then control flow and methods, including switch as an expression that returns a value; then the collections framework, and which implementation to pick when it matters.', 1),
   ('d0000001-0000-4000-8000-000000000029', 'c0000001-0000-4000-8000-00000000000c',
-   'Level 2 - Intermediate', 'Records and value objects, interfaces, generics and sealed types, and failing on purpose.', 2),
+   'Level 2 - Intermediate',
+   'Designing with types. Records give you a value object in one line, with the validation that makes an invalid instance impossible; interfaces and generics cover erasure and the wildcards people guess at; sealed types let you say exactly which implementations exist; and the last lesson is failure - checked, unchecked and Optional, each used for what it is for.', 2),
   ('d0000001-0000-4000-8000-00000000002a', 'c0000001-0000-4000-8000-00000000000c',
-   'Level 3 - Advanced', 'Lambdas and streams, threads and the virtual ones, and matching on shape.', 3),
+   'Level 3 - Advanced',
+   'The three things modern Java is written with. Lambdas, streams and collectors, with a clear line between where a stream is clearer and where a loop is; threads, executors and the virtual threads that change the arithmetic of blocking code; and pattern matching over sealed hierarchies, which turns a missed case into a compile error instead of a bug.', 3),
   ('d0000001-0000-4000-8000-00000000002b', 'c0000001-0000-4000-8000-00000000000c',
-   'Level 4 - Expert', 'Reachability and the collector, where the time goes, and how to arrange it all.', 4)
+   'Level 4 - Expert',
+   'What the runtime is doing underneath. Reachability and the garbage collector, and the leaks a collector cannot prevent; where the time goes, measured with the tools rather than guessed at from the code; and arranging an application in packages so that a change stays small and the dependencies point one way.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

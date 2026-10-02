@@ -24,7 +24,13 @@ VALUES
    'Four levels, twelve lessons, every example runs in your browser',
    'A complete path through Ruby in four levels. Level 1, Basic, covers the one rule that explains the syntax - everything is an object - along with truthiness, the three kinds of equality, control flow that returns values, and the two collections that carry almost every program. Level 2, Intermediate, is text and time, the class and module machinery including mixins and Comparable, and failing deliberately rather than by accident. Level 3, Advanced, covers blocks as an interface, building your own Enumerable, sequences produced on demand, and the metaprogramming that frameworks are made of. Level 4, Expert, finishes with pattern matching, where the time and memory actually go, and how to arrange an application so a change stays small.
 
-Every example runs in the browser, at the version this course teaches. Nothing is installed and nothing is sent to a server.',
+No Ruby and no previous programming are assumed. If you come from another language, the thing to unlearn is in Level 1: Ruby has no primitives and almost no statements, and once you take the one rule seriously - everything is an object, nearly everything returns a value - the syntax stops looking like a collection of special cases.
+
+Each level is three lessons and a Level Check quiz, finishing with an Expert Exam. Every example runs in the browser at the version this course teaches; press Try yourself and it opens in the compiler, where you edit on the left and read the output on the right. Nothing is installed and nothing is sent to a server.
+
+Every example runs in the browser, at the version this course teaches. Nothing is installed and nothing is sent to a server.
+
+By the end you will be able to read the Ruby that libraries are written in, not just the Ruby that uses them: a method that takes a block and yields to it, an object that is Enumerable because it defines one method, a lazy sequence over something infinite, and the metaprogramming that frameworks use - with a clear view of when not to.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -49,13 +55,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000020', 'c0000001-0000-4000-8000-00000000000a',
-   'Level 1 - Basic', 'Objects all the way down, control flow that returns values, and the two collections.', 1),
+   'Level 1 - Basic',
+   'The one rule that makes the rest of the syntax make sense: everything is an object, and nearly every expression returns a value. From there, truthiness and the three kinds of equality - which is where the surprises are - control flow used as an expression rather than a statement, and the two collections, arrays and hashes, with the Enumerable methods over them.', 1),
   ('d0000001-0000-4000-8000-000000000021', 'c0000001-0000-4000-8000-00000000000a',
-   'Level 2 - Intermediate', 'Text and time, the class and module machinery, and failing on purpose.', 2),
+   'Level 2 - Intermediate',
+   'Text, time and the class machinery. Strings against symbols, and why the difference matters more than it looks; Time and Date without the usual mistakes; classes, modules and mixins, which is how Ruby shares behaviour instead of inheriting it; and raising deliberately, with the exception hierarchy and ensure.', 2),
   ('d0000001-0000-4000-8000-000000000022', 'c0000001-0000-4000-8000-00000000000a',
-   'Level 3 - Advanced', 'Blocks as an interface, sequences produced on demand, and the program rewriting itself.', 3),
+   'Level 3 - Advanced',
+   'The three things that make Ruby libraries feel the way they do. Blocks, procs and lambdas as an interface rather than a trick; building your own Enumerable and going lazy, so a sequence can be infinite and still finish; and metaprogramming, which is honest about both what it buys and when a plain method would have been better.', 3),
   ('d0000001-0000-4000-8000-000000000023', 'c0000001-0000-4000-8000-00000000000a',
-   'Level 4 - Expert', 'Matching on shape, where the time and memory go, and how to arrange it all.', 4)
+   'Level 4 - Expert',
+   'Modelling and measuring. Pattern matching with case/in, which is the modern way to take apart a nested structure; where the time and the memory actually go, found by measurement rather than instinct; and arranging an application so a change stays in one place.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

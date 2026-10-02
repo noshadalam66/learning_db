@@ -26,7 +26,13 @@ VALUES
    'Four levels, twelve lessons, every example runs in your browser',
    'A complete path through JavaScript in four levels. Level 1, Basic, covers values and types, functions and scope, and the two structures everything else is built from. Level 2, Intermediate, is the working vocabulary: the array methods you will use every day, destructuring, and classes. Level 3, Advanced, is where the language gets interesting - closures, promises and async/await, and modules. Level 4, Expert, finishes with the event loop, iterators and generators, and the metaprogramming hooks that make frameworks possible.
 
-Every lesson ships a complete, runnable example. Press the "Try yourself!" button under any of them and it opens in the compiler, where you write on the left and see what it logs on the right. It runs in your browser, not on a server.',
+No previous JavaScript is assumed, though you will move faster if you have written HTML. If you already use the language at work, Level 1 and Level 2 are the vocabulary you probably have; Level 3 and Level 4 are the parts that explain the behaviour you have worked around without ever being told why it happens.
+
+Three lessons and a Level Check quiz per level, then an Expert Exam. Every example is complete and runnable: press Try yourself and it opens in the compiler, where you edit on the left and watch what it logs on the right. It runs in your browser, so there is nothing to install and nothing is sent to a server.
+
+Every lesson ships a complete, runnable example. Press the "Try yourself!" button under any of them and it opens in the compiler, where you write on the left and see what it logs on the right. It runs in your browser, not on a server.
+
+By the end you will be able to read the JavaScript in any codebase and know what it is doing: why a value captured in a closure changed, what order your callbacks will run in, how a framework intercepts a property access, and when a generator is the simple answer rather than the clever one.',
    'aaaaaaa1-0000-4000-8000-000000000003',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -51,13 +57,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000010', 'c0000001-0000-4000-8000-000000000006',
-   'Level 1 - Basic', 'Values, functions and the two structures everything else is built from.', 1),
+   'Level 1 - Basic',
+   'The ground floor, and the three things that cause most early confusion. Values and types covers the two equalities and why one of them is almost always the one you want; functions and scope covers hoisting, let against var, and what this refers to; and the last lesson is arrays and objects, out of which everything else in the language is built.', 1),
   ('d0000001-0000-4000-8000-000000000011', 'c0000001-0000-4000-8000-000000000006',
-   'Level 2 - Intermediate', 'Array methods, destructuring and classes - the everyday vocabulary.', 2),
+   'Level 2 - Intermediate',
+   'The vocabulary you will actually type. The array methods lesson is map, filter, reduce and the ones people reimplement by hand because nobody showed them; destructuring and spread are how modern code moves data about; and classes and prototypes explain what the class keyword is standing in front of.', 2),
   ('d0000001-0000-4000-8000-000000000012', 'c0000001-0000-4000-8000-000000000006',
-   'Level 3 - Advanced', 'Closures, promises and modules.', 3),
+   'Level 3 - Advanced',
+   'Where the language stops being obvious and starts being powerful. Closures explain the captured variable, the counter that keeps counting and the loop that logged the wrong number; promises and async/await cover the error handling people get wrong; and modules are how any of it is split across files without a global.', 3),
   ('d0000001-0000-4000-8000-000000000013', 'c0000001-0000-4000-8000-000000000006',
-   'Level 4 - Expert', 'The event loop, generators, and the hooks frameworks are built on.', 4)
+   'Level 4 - Expert',
+   'The machinery underneath. The event loop lesson answers what runs when, including the difference between a microtask and a timer; iterators and generators show how for...of works and how to make your own lazy sequence; and the last lesson covers the symbols and proxies that frameworks are built on.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons
