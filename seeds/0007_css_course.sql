@@ -33,7 +33,13 @@ VALUES
    -- rendered as Markdown; asterisks here would reach the page as asterisks.
    'A complete path through CSS in four levels. Level 1, Basic, covers the three things every rule depends on: how a selector wins, how a box is measured, and which unit to reach for. Level 2, Intermediate, is layout - Flexbox for one dimension, Grid for two, and how to build a page that adapts without a single media query. Level 3, Advanced, moves to custom properties and theming, the positioning and stacking rules that decide what covers what, and motion that respects the people who do not want it. Level 4, Expert, finishes with cascade layers, container queries, and the CSS that decides how fast a page paints.
 
-Every lesson ships a complete, professional example: an HTML document with its CSS in a style block, so it renders the moment you open it. Press the "Try yourself!" button under any example and it opens in the playground, where you can edit it on the left and watch the result redraw on the right.',
+You need to be able to write HTML to start this course; you do not need to have written any CSS. If you have, the honest test is Level 1: if you cannot say why one rule beats another, or what box-sizing actually changes, start there anyway - almost every CSS bug that takes an afternoon comes back to one of those two answers.
+
+Each level is three lessons and a Level Check quiz, with an Expert Exam at the end. Every example is a complete HTML document with its CSS in a style block, so it renders the moment you open it - and the Try yourself button puts it in the playground, where you can change a value and watch the page redraw beside it.
+
+Every lesson ships a complete, professional example: an HTML document with its CSS in a style block, so it renders the moment you open it. Press the "Try yourself!" button under any example and it opens in the playground, where you can edit it on the left and watch the result redraw on the right.
+
+By the end you will be able to lay out a responsive page without a framework and without guessing: a grid that adapts with no media queries, a theme that switches with a single custom property, overlays that stack in the order you intended, and animation that respects somebody who has asked their system for less of it.',
    'aaaaaaa1-0000-4000-8000-000000000003',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -63,16 +69,16 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-00000000000c', 'c0000001-0000-4000-8000-000000000005',
    'Level 1 - Basic',
-   'Which rule wins, how a box is measured, and which unit to reach for.', 1),
+   'The three questions every CSS rule depends on, answered before anything else. Which selector wins and why specificity is not a popularity contest; how a box is actually measured, and what box-sizing changes about that; and which unit to reach for, which is the difference between a layout that survives a larger font size and one that does not.', 1),
   ('d0000001-0000-4000-8000-00000000000d', 'c0000001-0000-4000-8000-000000000005',
    'Level 2 - Intermediate',
-   'Layout: Flexbox for one dimension, Grid for two, and responsive without breakpoints.', 2),
+   'Layout, which is the part people most often fight. Flexbox handles one dimension at a time and is the right tool far more often than it is used; Grid handles rows and columns together; and the last lesson builds a page that adapts to its space without a single media query, using clamp, minmax and auto-fit.', 2),
   ('d0000001-0000-4000-8000-00000000000e', 'c0000001-0000-4000-8000-000000000005',
    'Level 3 - Advanced',
-   'Theming with custom properties, the stacking rules, and motion done responsibly.', 3),
+   'The CSS that decides what a page looks like, and what covers what. Custom properties make a theme a handful of values rather than a find-and-replace; positioning, stacking contexts and overflow explain the overlay that will not go on top; and the motion lesson covers transitions, keyframes and honouring prefers-reduced-motion.', 3),
   ('d0000001-0000-4000-8000-00000000000f', 'c0000001-0000-4000-8000-000000000005',
    'Level 4 - Expert',
-   'Cascade layers, container queries, and the CSS that decides paint cost.', 4)
+   'The modern cascade, and the cost of what you write. Cascade layers let you control specificity deliberately instead of adding another selector; container queries let a component respond to its own space rather than the viewport; and the last lesson is about what makes a page expensive to paint, which is rarely the property you suspect.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 -- ---------------------------------------------------------------------------

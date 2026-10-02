@@ -32,9 +32,15 @@ VALUES
    'Four levels, twelve lessons, every example compiled and run on .NET',
    'A complete path through C# in four levels, taught on .NET 8 and C# 12. Level 1, Basic, covers the split between value types and references, nullable reference types - the feature that turns a NullReferenceException into a compiler warning - and the collections with LINQ over them. Level 2, Intermediate, is classes, structs and records and when each is right, properties with init and required, interfaces and reified generics, variance, and the three shapes of failure. Level 3, Advanced, covers async and await and what they actually free, LINQ''s deferred execution with the pattern matching that has grown into its own language, and real parallelism with locks, Interlocked and channels. Level 4, Expert, finishes with the garbage collector and the leaks it cannot prevent, where the time and allocations go, and how to arrange an application so a change stays small.
 
+No C# is assumed. The course is taught on .NET 8 and C# 12, so it teaches the language as it is now rather than as it was: nullable reference types, records, pattern matching and channels are treated as ordinary tools, because in current code they are.
+
+Three lessons and a Level Check quiz per level, finishing with an Expert Exam. There is no in-browser C# runner on the site yet, so every example was compiled and run on a real .NET SDK before publication, with the build''s own warnings treated as failures - install the SDK from dotnet.microsoft.com and run each one with dotnet run, or paste it into a scratch project.
+
 Every example in this course was compiled and run on a real .NET SDK before publication, with the build''s own warnings treated as failures. There is no in-browser C# runner yet, so the code blocks are for reading and for running in your own editor.
 
-There is no in-browser runner for this language on the site, so to follow along install the SDK from dotnet.microsoft.com and run each one with dotnet run, or paste it into a scratch project.',
+There is no in-browser runner for this language on the site, so to follow along install the SDK from dotnet.microsoft.com and run each one with dotnet run, or paste it into a scratch project.
+
+By the end you will be able to write C# that holds up under review: nullability annotations the compiler can actually check, records and structs chosen deliberately, LINQ whose execution you can predict, async code that does not deadlock, and disposal that happens even when something throws.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -58,13 +64,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-00000000002c', 'c0000001-0000-4000-8000-00000000000d',
-   'Level 1 - Basic', 'Value types against references, nullable reference types, and LINQ over the collections.', 1),
+   'Level 1 - Basic',
+   'The ground rules. Value types against references, which decides what a copy means; nullable reference types, the feature that turns a NullReferenceException into a compiler warning if you let it; control flow with pattern switches; and the collections, with LINQ over them introduced early because it is how C# code reads.', 1),
   ('d0000001-0000-4000-8000-00000000002d', 'c0000001-0000-4000-8000-00000000000d',
-   'Level 2 - Intermediate', 'Classes, structs and records, interfaces and generics, and failing on purpose.', 2),
+   'Level 2 - Intermediate',
+   'Shaping data and admitting failure. Classes, structs and records, and the question of which is right, with init and required properties; interfaces, reified generics, variance and extension methods; and exceptions, disposal and the using statement, which is the part people skip and then leak a file handle over.', 2),
   ('d0000001-0000-4000-8000-00000000002e', 'c0000001-0000-4000-8000-00000000000d',
-   'Level 3 - Advanced', 'async and await, LINQ in depth with pattern matching, and real parallelism.', 3),
+   'Level 3 - Advanced',
+   'Concurrency and expression. async and await, and what they actually free - which is a thread, not time; LINQ in depth, including deferred execution and the moment a query runs; and real parallelism with locks, Interlocked and channels, where the hard part is never the syntax.', 3),
   ('d0000001-0000-4000-8000-00000000002f', 'c0000001-0000-4000-8000-00000000000d',
-   'Level 4 - Expert', 'The heap and disposal, where the time goes, and how to arrange an application.', 4)
+   'Level 4 - Expert',
+   'The runtime, and the shape of an application. Memory, the heap and disposal, including the leaks a garbage collector cannot prevent; where the time and the allocations go, found by measurement; and how to arrange a solution so that a change stays small and the dependencies run in one direction.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

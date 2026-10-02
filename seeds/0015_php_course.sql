@@ -23,7 +23,13 @@ VALUES
    'Four levels, twelve lessons, every example runs in your browser',
    'A complete path through PHP in four levels. Level 1, Basic, covers how values and types relate, the two kinds of equality, control flow including match, and the array type that serves as both list and map. Level 2, Intermediate, is text and dates, the class machinery - promotion, readonly, interfaces and enums - and failing deliberately rather than by accident. Level 3, Advanced, covers sharing behaviour without inheritance, generators and laziness, and the input handling that separates a working site from a breached one. Level 4, Expert, finishes with attributes and reflection, where time and memory actually go, and how to arrange an application so a change stays small.
 
-Every example runs in the browser, at the version this course teaches. Nothing is installed and nothing is sent to a server.',
+No PHP is assumed, and no other language either. If you learned PHP years ago and have not looked since, this course is largely about what changed: typed properties, enums, match, readonly, constructor promotion and real exceptions have moved the language a long way from the one most people remember.
+
+Three lessons and a Level Check quiz at each level, then an Expert Exam. Every example runs in the browser at the version this course teaches - press Try yourself and it opens in the compiler. Nothing is installed, and nothing is sent to a server, so you can work through the whole course on a machine you are not allowed to install anything on.
+
+Every example runs in the browser, at the version this course teaches. Nothing is installed and nothing is sent to a server.
+
+By the end you will be able to write PHP that is typed, tested and safe at its edges: value objects that cannot be constructed in an invalid state, errors that are exceptions rather than false, input that is validated and output that is escaped, and an application laid out so that a change stays in one place.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -48,13 +54,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-00000000001c', 'c0000001-0000-4000-8000-000000000009',
-   'Level 1 - Basic', 'Values and comparison, the flow of control, and the one data structure.', 1),
+   'Level 1 - Basic',
+   'The parts of PHP you cannot avoid, starting with the two that cause the most bugs. How values and types relate, and the two kinds of equality - loose comparison is the single most common source of surprise in PHP code; then control flow including match, which is the strict cousin of switch; then arrays, the one data structure that serves as both list and map.', 1),
   ('d0000001-0000-4000-8000-00000000001d', 'c0000001-0000-4000-8000-000000000009',
-   'Level 2 - Intermediate', 'Text and dates, the class machinery, and failing on purpose rather than by accident.', 2),
+   'Level 2 - Intermediate',
+   'Everything real code needs before it can be called an application. Strings, formatting and dates, which is where most output bugs live; the class machinery - constructor promotion, readonly, interfaces and enums - and how little of it you need to write; and failing on purpose, with exceptions, error levels and a debugging approach that does not rely on luck.', 2),
   ('d0000001-0000-4000-8000-00000000001e', 'c0000001-0000-4000-8000-000000000009',
-   'Level 3 - Advanced', 'Sharing behaviour without inheritance, laziness, and the three ways applications get broken into.', 3),
+   'Level 3 - Advanced',
+   'Composition, laziness and safety. Traits and static methods, and sharing behaviour without an inheritance chain nobody can follow; generators and iterators for the request that would otherwise run out of memory; and the input and output lesson, which is the difference between a site that works and one that has been breached.', 3),
   ('d0000001-0000-4000-8000-00000000001f', 'c0000001-0000-4000-8000-000000000009',
-   'Level 4 - Expert', 'Attributes and reflection, where the time and memory go, and how to arrange it all.', 4)
+   'Level 4 - Expert',
+   'The level that is about the application rather than the language. Attributes and reflection, which is how routing, validation and ORM mapping are done in modern frameworks; performance and memory, measured rather than guessed; and arranging an application so a change stays small, which is the only test of structure that matters.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

@@ -24,7 +24,13 @@ VALUES
    'Four levels, twelve lessons, every example runs in your browser',
    'A complete path through Python in four levels. Level 1, Basic, covers how names and values relate, the flow of control, and writing functions whose arguments read well at the call site. Level 2, Intermediate, is the collections you reach for every day - lists, tuples, dicts and sets - and the string handling around them. Level 3, Advanced, covers comprehensions and the iterator protocol, classes that behave like built-in types, and failing well. Level 4, Expert, finishes with decorators, generators and laziness, and the type hints that describe a boundary.
 
-Every example runs in the browser, at the version this course teaches, with the standard library available. Nothing is installed and nothing is sent to a server.',
+This is a first course in Python and assumes no programming at all; if you have written another language, Level 1 will mostly be learning where Python differs. If you already use Python at work, the course earns its place from Level 3 on, where the behaviour you have relied on gets explained rather than demonstrated.
+
+Each level is three lessons and a Level Check quiz, and the course ends with an Expert Exam. Every example runs in the browser at the version this course teaches, with the standard library available - press Try yourself and it opens in the compiler, where you edit on the left and see the output on the right. Nothing is installed and nothing is sent to a server.
+
+Every example runs in the browser, at the version this course teaches, with the standard library available. Nothing is installed and nothing is sent to a server.
+
+By the end you will be able to write Python that other people can maintain: functions whose arguments read well at the call site, the right collection for the job rather than a list every time, classes that behave like built-in types, generators that handle a file larger than memory, and type hints that describe a boundary without cluttering the code behind it.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -49,13 +55,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000018', 'c0000001-0000-4000-8000-000000000008',
-   'Level 1 - Basic', 'Names and values, the flow of control, and functions that take arguments well.', 1),
+   'Level 1 - Basic',
+   'The foundations, in the order they cause trouble. Names and values first, because the difference between the two explains the mutable default argument and the list that changed by itself; then the flow of control, including the else that belongs to a loop; then functions, and how to write arguments that read well where they are called rather than where they are defined.', 1),
   ('d0000001-0000-4000-8000-000000000019', 'c0000001-0000-4000-8000-000000000008',
-   'Level 2 - Intermediate', 'The collections you will reach for daily, and the text handling around them.', 2),
+   'Level 2 - Intermediate',
+   'The collections you will reach for every day, and the text handling around them. Lists and tuples with slicing and the copy that is not as deep as you think; dictionaries and sets, with lookups that do not raise, the live views, Counter and defaultdict; and strings, f-strings and their format mini-language, and the encodings that cause the rest.', 2),
   ('d0000001-0000-4000-8000-00000000001a', 'c0000001-0000-4000-8000-000000000008',
-   'Level 3 - Advanced', 'Comprehensions and iteration, classes that behave like built-ins, and failure.', 3),
+   'Level 3 - Advanced',
+   'Where Python stops looking like other languages. Comprehensions and the iterator protocol explain what a for loop actually does; dataclasses and dunder methods let your own types behave like built-in ones, including comparison and printing; and the last lesson covers exceptions and context managers, which is how a program fails without leaving a mess.', 3),
   ('d0000001-0000-4000-8000-00000000001b', 'c0000001-0000-4000-8000-000000000008',
-   'Level 4 - Expert', 'Decorators, generators, and the type hints that describe a boundary.', 4)
+   'Level 4 - Expert',
+   'The features that make libraries possible. Decorators and closures, built up from what a function actually is; generators and itertools for data too large to hold, with laziness as a design choice rather than an optimisation; and type hints as they are used in modern Python, at the edges, where the cost is lowest and the value is highest.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

@@ -30,7 +30,13 @@ VALUES
    'Four levels, twelve lessons, every example run against the real SDK',
    'A complete path through Dart in four levels. Level 1, Basic, covers the type system and sound null safety - the reason a Dart program does not fail on a null it never expected - along with the three kinds of parameter, closures, and the collections. Level 2, Intermediate, is classes and constructors, value objects that compare by value, generics and mixins, the Dart 3 class modifiers, and failing deliberately rather than by accident. Level 3, Advanced, covers the single-threaded event loop behind async and await, streams of values over time, and the records and patterns that arrived in Dart 3. Level 4, Expert, finishes with isolates and real parallelism, where the time and memory actually go, and how to arrange an application so a change stays small.
 
-Every example in this course was analysed and run against the Dart SDK before publication. There is no in-browser Dart runner yet, so the code blocks are for reading and for pasting into your own editor - install the SDK from dart.dev, or open dartpad.dev, and run them as you go.',
+No Dart is assumed. Most people arrive here on the way to Flutter, and the course is written with that in mind - but it teaches the language itself, so nothing here depends on a widget. If you have written Java, C# or TypeScript, Level 1 will feel familiar until sound null safety, which is the part worth slowing down for.
+
+Three lessons and a Level Check quiz per level, then an Expert Exam. There is no in-browser Dart runner on the site yet, so every example was analysed and run against the real SDK before publication and is written to be pasted into your own editor - install the SDK from dart.dev, or open dartpad.dev, and run them as you read.
+
+Every example in this course was analysed and run against the Dart SDK before publication. There is no in-browser Dart runner yet, so the code blocks are for reading and for pasting into your own editor - install the SDK from dart.dev, or open dartpad.dev, and run them as you go.
+
+By the end you will be able to write Dart that holds up outside a tutorial: types that cannot be null by accident, value objects that compare by value, streams consumed without leaking a subscription, isolates for work that would otherwise block the frame, and a project laid out so a change stays small.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -54,13 +60,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000024', 'c0000001-0000-4000-8000-00000000000b',
-   'Level 1 - Basic', 'Types that cannot be null by accident, the three kinds of parameter, and the collections.', 1),
+   'Level 1 - Basic',
+   'The type system first, because sound null safety is the reason a Dart program does not fail on a null it never expected - and it changes how you write every signature. Then control flow, the three kinds of parameter, closures and the cascade operator; then lists, maps, sets and the Iterable methods that most Dart code is actually made of.', 1),
   ('d0000001-0000-4000-8000-000000000025', 'c0000001-0000-4000-8000-00000000000b',
-   'Level 2 - Intermediate', 'Constructors and value objects, generics and mixins, and failing on purpose.', 2),
+   'Level 2 - Intermediate',
+   'Turning types into a design. Constructors, named and factory, and value objects that compare by value rather than identity; generics and mixins, and the Dart 3 class modifiers that let you say what may extend what; and failing on purpose, with the difference between an Error and an Exception taken seriously.', 2),
   ('d0000001-0000-4000-8000-000000000026', 'c0000001-0000-4000-8000-00000000000b',
-   'Level 3 - Advanced', 'One thread and an event loop, streams of values over time, and matching on shape.', 3),
+   'Level 3 - Advanced',
+   'One thread, and everything that follows from it. Futures, async and await over a single event loop; streams, which are values arriving over time, with the subscription you have to remember to cancel; and records and patterns from Dart 3, which make taking apart a nested structure a single readable line.', 3),
   ('d0000001-0000-4000-8000-000000000027', 'c0000001-0000-4000-8000-00000000000b',
-   'Level 4 - Expert', 'Real concurrency with isolates, where the time and memory go, and how to arrange it all.', 4)
+   'Level 4 - Expert',
+   'Where the single thread is not enough, and where the time goes. Isolates give real parallelism with no shared memory, which is a different model to think in; the performance lesson measures rather than guesses; and the last lesson is how to arrange an application so a change stays in one place.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons

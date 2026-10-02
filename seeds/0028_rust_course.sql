@@ -32,9 +32,15 @@ VALUES
    'Four levels, twelve lessons, every example compiled with warnings as errors',
    'A complete path through Rust in four levels, taught on Rust 1.94 and edition 2021. Level 1, Basic, covers ownership and borrowing - the rule that makes data races and use-after-free compile errors rather than crashes - along with exhaustive match and iterators that do nothing until something asks. Level 2, Intermediate, is traits instead of inheritance, enums as sum types with Option replacing null, and error handling built on Result and the ? operator. Level 3, Advanced, covers lifetimes and what an annotation actually says, the smart pointers for when one owner is not enough, and the Send and Sync traits that turn a data race into a compile error. Level 4, Expert, finishes with memory management without a collector, why a debug build is ten times slower than a release one, what unsafe really enables, and how to arrange a crate.
 
+No Rust is assumed, but some programming experience helps: this is a language that asks you to be precise about things other languages decide for you. Expect Level 1 to be slower than the first level of any other course here - ownership is not difficult so much as unfamiliar, and everything after it depends on having it straight.
+
+Three lessons and a Level Check quiz at each level, then an Expert Exam. There is no in-browser Rust runner on the site yet, so every example was compiled with warnings treated as errors and executed on a real toolchain before publication - install Rust with rustup from rust-lang.org and run each one with cargo run, or paste it into play.rust-lang.org.
+
 Every example in this course was compiled with warnings treated as errors and executed on a real Rust toolchain before publication. There is no in-browser Rust runner yet, so the code blocks are for reading and for running in your own editor.
 
-There is no in-browser runner for this language on the site, so to follow along install it with rustup from rust-lang.org and run each one with cargo run, or paste it into play.rust-lang.org.',
+There is no in-browser runner for this language on the site, so to follow along install it with rustup from rust-lang.org and run each one with cargo run, or paste it into play.rust-lang.org.
+
+By the end you will be able to read a compiler error and know what the borrow checker is actually objecting to, choose between Box, Rc and RefCell for a reason you can state, share data across threads without a data race being possible, and lay out a crate so that its public surface is the part you meant to publish.',
    'aaaaaaa1-0000-4000-8000-000000000001',
    '55555555-5555-4555-8555-555555555555',
    'beginner', 'published',
@@ -58,13 +64,17 @@ ON DUPLICATE KEY UPDATE course_id = VALUES(course_id);
 
 INSERT INTO catalog_modules (id, course_id, title, summary, `position`) VALUES
   ('d0000001-0000-4000-8000-000000000034', 'c0000001-0000-4000-8000-00000000000f',
-   'Level 1 - Basic', 'Ownership and borrowing, exhaustive match, and iterators that do nothing until asked.', 1),
+   'Level 1 - Basic',
+   'The rule the rest of the language is built on. Ownership and borrowing make data races and use-after-free compile errors rather than crashes, and this level is about making that rule second nature. Alongside it: exhaustive match, which will not let you forget a case, and iterators that do nothing at all until something asks them for a value.', 1),
   ('d0000001-0000-4000-8000-000000000035', 'c0000001-0000-4000-8000-00000000000f',
-   'Level 2 - Intermediate', 'Traits instead of inheritance, enums as sum types, and Result with the ? operator.', 2),
+   'Level 2 - Intermediate',
+   'Rust''s answers to the questions other languages answer with inheritance and exceptions. Structs and traits, with implementations kept separate from data; enums as real sum types, which is how Option replaces null; and error handling built on Result and the ? operator, where a function says in its signature how it can fail.', 2),
   ('d0000001-0000-4000-8000-000000000036', 'c0000001-0000-4000-8000-00000000000f',
-   'Level 3 - Advanced', 'Lifetimes, the smart pointers for when one owner is not enough, and fearless concurrency.', 3),
+   'Level 3 - Advanced',
+   'The parts that need the borrow checker explained rather than obeyed. Lifetimes, and what an annotation actually claims; Box, Rc and RefCell for when a single owner is not enough, and the cost of each; and fearless concurrency, where Send and Sync turn a data race into something that simply does not compile.', 3),
   ('d0000001-0000-4000-8000-000000000037', 'c0000001-0000-4000-8000-00000000000f',
-   'Level 4 - Expert', 'Memory without a collector, release builds, and how a crate is arranged.', 4)
+   'Level 4 - Expert',
+   'Memory and output, without a garbage collector anywhere. Where values live and when they are freed; why a debug build can be ten times slower than a release one, and what the optimiser is doing with that time; what unsafe actually enables and what it still does not; and how a crate is arranged, module by module.', 4)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 INSERT INTO catalog_lessons
