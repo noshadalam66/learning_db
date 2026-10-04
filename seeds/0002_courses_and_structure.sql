@@ -192,7 +192,23 @@ VALUES
    'sessions-and-csrf', 'Sessions and CSRF Tokens',
    'Keeping a login and making sure only your own forms can use it.',
    'article', 'published', 1, 877, 0)
-ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
+-- kind is in this list because of what it cost to leave out.
+--
+-- These eight lessons used to be kind='video'. Changing the literal above is
+-- all a fresh install needs; a database that already has the row only takes
+-- the columns named here, so on the live server every one of them would have
+-- stayed a video lesson pointing at a player with nothing in it. The rehearsal
+-- against a copy of the live database is what caught it, after this file had
+-- already passed every test that reads it.
+--
+-- The rule, for the next edit: a seed must update every column it owns, not
+-- only the ones that happened to change. `position` is the one exception - it
+-- is half of a unique key, so re-numbering it inside an upsert can collide
+-- with a row the same statement has not reached yet.
+ON DUPLICATE KEY UPDATE
+  title = VALUES(title), summary = VALUES(summary), kind = VALUES(kind),
+  status = VALUES(status), duration_seconds = VALUES(duration_seconds),
+  is_free_preview = VALUES(is_free_preview);
 
 -- Refresh the denormalised counters now that lessons exist.
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000001');
