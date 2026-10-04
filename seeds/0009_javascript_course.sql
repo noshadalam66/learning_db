@@ -17,13 +17,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000006',
    'javascript-from-basics-to-expert',
    'JavaScript: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'JavaScript is the only programming language a browser runs, which is how it ended up everywhere else as well: on servers through Node, in build tools, in databases, in editors. Learn it once and you can work at either end of a web application.
+
+It has a reputation for being strange, and it has earned about half of it. The strangeness is concentrated in a few places - how values compare, what `this` refers to, what happens to code that waits - and the rest of the language is small and ordinary. This course spends its time on the few places rather than on the many.
+
+The payoff is that most of the behaviour people work around without understanding has one explanation, usually a short one. A closure, the event loop, and the prototype chain account for a surprising share of the bugs in front-end code.',
    'A complete path through JavaScript in four levels. Level 1, Basic, covers values and types, functions and scope, and the two structures everything else is built from. Level 2, Intermediate, is the working vocabulary: the array methods you will use every day, destructuring, and classes. Level 3, Advanced, is where the language gets interesting - closures, promises and async/await, and modules. Level 4, Expert, finishes with the event loop, iterators and generators, and the metaprogramming hooks that make frameworks possible.
 
 No previous JavaScript is assumed, though you will move faster if you have written HTML. If you already use the language at work, Level 1 and Level 2 are the vocabulary you probably have; Level 3 and Level 4 are the parts that explain the behaviour you have worked around without ever being told why it happens.
@@ -46,7 +51,8 @@ By the end you will be able to read the JavaScript in any codebase and know what
    JSON_ARRAY('You can write basic HTML', 'No previous JavaScript required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

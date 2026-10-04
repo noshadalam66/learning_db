@@ -23,13 +23,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000e',
    'go-from-basics-to-expert',
    'Go: From Basics to Expert',
    'Four levels, twelve lessons, every example vetted and run on a real toolchain',
+   'Go was built at Google for one problem: large teams writing network services that have to be maintained for years. Everything distinctive about it follows from that - the small feature set, the strict formatting, the fast compiler, the single static binary with no runtime to install.
+
+It is deliberately a small language. You can hold all of it in your head, which is rare, and this course is genuinely complete rather than a working subset. The flip side is that Go says no to things other languages say yes to, and a few of those refusals take getting used to.
+
+What you get for it is the easiest deployment story in mainstream programming and the most approachable concurrency model: goroutines and channels make concurrent code something you write on purpose rather than something you survive. It is why so much of the infrastructure you use - Docker, Kubernetes, Terraform - is written in it.',
    'A complete path through Go in four levels, taught on Go 1.24. Level 1, Basic, covers the zero value that is always usable, the absence of implicit conversions, one loop keyword, and the slice aliasing that surprises everyone exactly once. Level 2, Intermediate, is structs and methods with the receiver decision you make constantly, interfaces satisfied implicitly and declared by the code that consumes them, generics, and errors as ordinary values with wrapping, errors.Is and errors.As. Level 3, Advanced, covers goroutines and channels and the four deadlocks you will actually hit, context and worker pools and pipelines, and the parts of the standard library that turn up in every program. Level 4, Expert, finishes with escape analysis and the leaks a collector cannot prevent, where the time and allocations go, and how to arrange a module so a change stays small.
 
 No Go is assumed. The language is small enough that this course can be genuinely complete, and that is the shape it takes: by the end you will have seen essentially all of Go rather than a working subset. If you come from a language with inheritance or exceptions, the adjustment is in Level 2, and it is a short one.
@@ -54,7 +59,8 @@ By the end you will be able to write Go the way the standard library is written:
    JSON_ARRAY('No prior Go', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

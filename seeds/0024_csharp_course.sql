@@ -23,13 +23,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000d',
    'csharp-from-basics-to-expert',
    'C#: From Basics to Expert',
    'Four levels, twelve lessons, every example compiled and run on .NET',
+   'C# is Microsoft''s general-purpose language and the one most .NET applications are written in: web services, desktop software, games through Unity, and a large amount of enterprise back-end work.
+
+It is also one of the fastest-moving mainstream languages. Nullable reference types turned the most common crash in the language into a compiler warning; records made value objects a single line; pattern matching has grown into something close to a language of its own. Taught on .NET 8 and C# 12, this course uses all of that as ordinary tooling, because in current code it is.
+
+.NET has been cross-platform and open source for years now, so none of this is tied to Windows. If you have avoided it on that basis, the basis is gone.',
    'A complete path through C# in four levels, taught on .NET 8 and C# 12. Level 1, Basic, covers the split between value types and references, nullable reference types - the feature that turns a NullReferenceException into a compiler warning - and the collections with LINQ over them. Level 2, Intermediate, is classes, structs and records and when each is right, properties with init and required, interfaces and reified generics, variance, and the three shapes of failure. Level 3, Advanced, covers async and await and what they actually free, LINQ''s deferred execution with the pattern matching that has grown into its own language, and real parallelism with locks, Interlocked and channels. Level 4, Expert, finishes with the garbage collector and the leaks it cannot prevent, where the time and allocations go, and how to arrange an application so a change stays small.
 
 No C# is assumed. The course is taught on .NET 8 and C# 12, so it teaches the language as it is now rather than as it was: nullable reference types, records, pattern matching and channels are treated as ordinary tools, because in current code they are.
@@ -54,7 +59,8 @@ By the end you will be able to write C# that holds up under review: nullability 
    JSON_ARRAY('No prior C#', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

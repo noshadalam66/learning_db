@@ -15,13 +15,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000008',
    'python-from-basics-to-expert',
    'Python: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'Python is a general-purpose language built around being readable. It is the usual first language for people learning to program, and also the usual language for data analysis, machine learning, automation and scientific computing - which is unusual, and worth noticing. Very few languages are both a good first one and a serious professional one.
+
+The reason is the standard library and the ecosystem around it. Almost anything you need to do - read a CSV, call an API, parse a date, train a model - is either built in or one install away, with a community that has already answered the question you are about to ask.
+
+This course teaches the language itself rather than any one of those uses, because the language is what they all share. If you are heading for data science, this is the course the rest of that track assumes.',
    'A complete path through Python in four levels. Level 1, Basic, covers how names and values relate, the flow of control, and writing functions whose arguments read well at the call site. Level 2, Intermediate, is the collections you reach for every day - lists, tuples, dicts and sets - and the string handling around them. Level 3, Advanced, covers comprehensions and the iterator protocol, classes that behave like built-in types, and failing well. Level 4, Expert, finishes with decorators, generators and laziness, and the type hints that describe a boundary.
 
 This is a first course in Python and assumes no programming at all; if you have written another language, Level 1 will mostly be learning where Python differs. If you already use Python at work, the course earns its place from Level 3 on, where the behaviour you have relied on gets explained rather than demonstrated.
@@ -44,7 +49,8 @@ By the end you will be able to write Python that other people can maintain: func
    JSON_ARRAY('No prior Python', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

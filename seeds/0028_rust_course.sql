@@ -23,13 +23,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000f',
    'rust-from-basics-to-expert',
    'Rust: From Basics to Expert',
    'Four levels, twelve lessons, every example compiled with warnings as errors',
+   'Rust gives you the control of C and C++ without the two bugs that have caused most of the security problems in both: using memory after it has been freed, and two threads writing the same data at once. Not by checking at runtime, but by refusing to compile code where either is possible.
+
+That is done by the ownership system, and it is why Rust has a reputation for being hard. It is less hard than unfamiliar: every value has exactly one owner, borrowing it is temporary, and the compiler checks the rule. Once that is natural the rest of the language is pleasant and often very ordinary.
+
+It is worth the climb where the alternative is C: operating systems, browsers, game engines, embedded work, and increasingly the performance-critical core of applications written in other languages. The payoff is a program that is as fast as the unsafe version and does not have the class of bug that made it unsafe.',
    'A complete path through Rust in four levels, taught on Rust 1.94 and edition 2021. Level 1, Basic, covers ownership and borrowing - the rule that makes data races and use-after-free compile errors rather than crashes - along with exhaustive match and iterators that do nothing until something asks. Level 2, Intermediate, is traits instead of inheritance, enums as sum types with Option replacing null, and error handling built on Result and the ? operator. Level 3, Advanced, covers lifetimes and what an annotation actually says, the smart pointers for when one owner is not enough, and the Send and Sync traits that turn a data race into a compile error. Level 4, Expert, finishes with memory management without a collector, why a debug build is ten times slower than a release one, what unsafe really enables, and how to arrange a crate.
 
 No Rust is assumed, but some programming experience helps: this is a language that asks you to be precise about things other languages decide for you. Expect Level 1 to be slower than the first level of any other course here - ownership is not difficult so much as unfamiliar, and everything after it depends on having it straight.
@@ -54,7 +59,8 @@ By the end you will be able to read a compiler error and know what the borrow ch
    JSON_ARRAY('No prior Rust', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

@@ -22,13 +22,18 @@ ON DUPLICATE KEY UPDATE name = VALUES(name);
 -- The course
 -- ---------------------------------------------------------------------------
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000005',
    'css-from-basics-to-expert',
    'CSS: From Basics to Expert',
    'Four levels, twelve lessons, every example runnable in the browser',
+   'CSS decides what a page looks like. HTML says a thing is a heading; CSS says that headings are 32 pixels, dark blue, and have space above them. The two are deliberately separate, which is why one stylesheet can restyle a thousand pages.
+
+Most of the difficulty is not in the properties. There are a few hundred of them and you can look them up. The difficulty is in three questions that run underneath all of them: when two rules both apply, which one wins; how big is this box actually; and what decides where it sits on the page. Almost every afternoon lost to CSS is one of those three, and this course answers them in Level 1 before anything else.
+
+Modern CSS has also quietly absorbed things that used to need JavaScript or a build step - theming, container-relative layout, cascade control. A good deal of what people still reach for a framework to do, the browser now does.',
    -- Plain text, like every other description. Only content_articles is
    -- rendered as Markdown; asterisks here would reach the page as asterisks.
    'A complete path through CSS in four levels. Level 1, Basic, covers the three things every rule depends on: how a selector wins, how a box is measured, and which unit to reach for. Level 2, Intermediate, is layout - Flexbox for one dimension, Grid for two, and how to build a page that adapts without a single media query. Level 3, Advanced, moves to custom properties and theming, the positioning and stacking rules that decide what covers what, and motion that respects the people who do not want it. Level 4, Expert, finishes with cascade layers, container queries, and the CSS that decides how fast a page paints.
@@ -53,7 +58,8 @@ By the end you will be able to lay out a responsive page without a framework and
    JSON_ARRAY('You can write basic HTML', 'A text editor and a browser'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

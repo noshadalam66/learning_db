@@ -3,13 +3,18 @@
 -- ===========================================================================
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000001',
    'nodejs-microservices',
    'Node.js Microservices from Scratch',
    'Split a monolith into seven services without losing your weekends',
+   'This is a course about a decision, not a technology. Splitting an application into services is a trade: you give up a single deployment and a local function call, and you get independent releases and independent scaling. Whether that is a good trade depends on facts about your system, and most of the writing on the subject skips straight past them.
+
+So the first module is the argument against. A monolith is one deployable unit, which is not the same as a mess, and splitting a mess produces several messes with a network between them. Knowing when not to split is the more valuable half of this.
+
+The rest builds the thing properly: three layers inside each service, one gateway in front of them all, a request id that survives every hop, and failures that look like failures rather than hangs. By the end you will have the experience the opinion should be based on.',
    'A hands-on course that takes a single Express application and pulls it apart into independently deployable services. You will build a gateway, wire up service-to-service calls, and learn where a three-layer architecture pays for itself and where it does not.
 
 It is written for developers who already ship an Express application and are being asked, by a growing team or a slowing deploy, whether it should be several. The first module is deliberately the argument against: most systems that were split should not have been, and the lesson on boundaries is about recognising which case you are in before any code moves.
@@ -32,6 +37,11 @@ By the end you will be able to decide whether a split is justified, draw the bou
    'mysql-for-applications',
    'MySQL for Application Developers',
    'Schema design, indexing and the queries behind a real product',
+   'Most performance problems are schema problems wearing a disguise. A query that cannot be served by an index is slow no matter how it is written, and no amount of caching in front of it fixes the cause.
+
+This course works through modelling a real application in MySQL from the brief upwards: turning nouns into tables, choosing keys and constraints so invalid data cannot be stored in the first place, and then reading query plans to find out what the database is actually doing rather than what you assume.
+
+It also covers the point at which you do not need another piece of infrastructure. Full-text search in MySQL replaces the separate search service a surprising number of applications add before they have measured anything - and knowing where the real limits are is what makes the decision to add one defensible.',
    'Most performance problems are schema problems wearing a disguise. This course works through modelling a learning platform in MySQL: normalising the catalogue, choosing indexes InnoDB will actually use, and reaching for FULLTEXT before adding a second datastore.
 
 It assumes you can already write SQL and have never been entirely sure why one query is fast and the next one is not. The answer is almost always visible in EXPLAIN, and the second module is largely about learning to read it - which is the difference between adding an index and adding the right one.
@@ -54,6 +64,11 @@ By the end you will be able to turn a product brief into tables that will not ne
    'dynamic-php-frontends',
    'Dynamic PHP Front Ends',
    'Server-rendered pages that talk to a JSON API',
+   'PHP did not go anywhere, and server-rendered HTML is still the simplest way to put a page in front of a user: no build step, no hydration, no client-side router, and a page that works before any JavaScript has loaded.
+
+This course builds a front end on top of a JSON API using nothing but PHP - a layout, some templates, sessions and a CSRF token - and spends most of its time on the three mechanisms that a framework would otherwise hide from you. Knowing them is what lets you judge a framework rather than adopt one.
+
+It is short on purpose. Three lessons, no Composer, and every piece of it is in the site you are reading this on.',
    'PHP did not go anywhere. This course builds a server-rendered front end on top of a JSON API: templating without a framework, session handling, CSRF protection, and escaping every single thing you echo.
 
 It is for anyone who has to put a page in front of an API and would rather understand the three mechanisms underneath than adopt a framework to hide them. Nothing here needs Composer, and everything here is what a framework would be doing on your behalf.
@@ -75,7 +90,8 @@ By the end you will be able to render a page from an API response without a temp
 -- the title - which is what this said - meant a rewritten description was
 -- silently dropped on every database except an empty one.
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -113,7 +129,7 @@ VALUES
   ('e0000001-0000-4000-8000-000000000001', 'd0000001-0000-4000-8000-000000000001', 'c0000001-0000-4000-8000-000000000001',
    'the-monolith-you-have', 'The Monolith You Already Have',
    'A monolith is not a failure state. Here is when it stops being the right answer.',
-   'video', 'published', 1, 742, 1),
+   'article', 'published', 1, 742, 1),
   ('e0000001-0000-4000-8000-000000000002', 'd0000001-0000-4000-8000-000000000001', 'c0000001-0000-4000-8000-000000000001',
    'finding-service-boundaries', 'Finding Service Boundaries',
    'Boundaries follow the way your team and your data actually change.',
@@ -125,7 +141,7 @@ VALUES
   ('e0000001-0000-4000-8000-000000000004', 'd0000001-0000-4000-8000-000000000002', 'c0000001-0000-4000-8000-000000000001',
    'routes-controllers-layer', 'Layer One: Routes and Controllers',
    'HTTP in, HTTP out. No business rules allowed past this line.',
-   'video', 'published', 1, 913, 0),
+   'article', 'published', 1, 913, 0),
   ('e0000001-0000-4000-8000-000000000005', 'd0000001-0000-4000-8000-000000000002', 'c0000001-0000-4000-8000-000000000001',
    'service-layer', 'Layer Two: The Service Layer',
    'Where the rules live, and why it must not know what HTTP is.',
@@ -133,12 +149,12 @@ VALUES
   ('e0000001-0000-4000-8000-000000000006', 'd0000001-0000-4000-8000-000000000002', 'c0000001-0000-4000-8000-000000000001',
    'repository-layer', 'Layer Three: Repositories',
    'Every SQL statement in the codebase lives here and nowhere else.',
-   'video', 'published', 3, 805, 0),
+   'article', 'published', 3, 805, 0),
 
   ('e0000001-0000-4000-8000-000000000007', 'd0000001-0000-4000-8000-000000000003', 'c0000001-0000-4000-8000-000000000001',
    'building-the-gateway', 'Building the Gateway',
    'Routing, auth verification and request-id propagation in one small service.',
-   'video', 'published', 1, 1120, 0),
+   'article', 'published', 1, 1120, 0),
   ('e0000001-0000-4000-8000-000000000008', 'd0000001-0000-4000-8000-000000000003', 'c0000001-0000-4000-8000-000000000001',
    'final-exam', 'Final Exam', 'Everything from the three modules.',
    'quiz', 'published', 2, 900, 0),
@@ -146,7 +162,7 @@ VALUES
   ('e0000001-0000-4000-8000-000000000009', 'd0000001-0000-4000-8000-000000000004', 'c0000001-0000-4000-8000-000000000002',
    'from-brief-to-tables', 'From Brief to Tables',
    'Reading a product description and finding the entities inside it.',
-   'video', 'published', 1, 688, 1),
+   'article', 'published', 1, 688, 1),
   ('e0000001-0000-4000-8000-00000000000a', 'd0000001-0000-4000-8000-000000000004', 'c0000001-0000-4000-8000-000000000002',
    'keys-and-constraints', 'Keys, Constraints and Honest Data',
    'A constraint you did not write is a bug you will write later.',
@@ -155,7 +171,7 @@ VALUES
   ('e0000001-0000-4000-8000-00000000000b', 'd0000001-0000-4000-8000-000000000005', 'c0000001-0000-4000-8000-000000000002',
    'reading-explain', 'Reading EXPLAIN Output',
    'Table scans, index lookups, and when each one is fine.',
-   'video', 'published', 1, 954, 0),
+   'article', 'published', 1, 954, 0),
   ('e0000001-0000-4000-8000-00000000000c', 'd0000001-0000-4000-8000-000000000005', 'c0000001-0000-4000-8000-000000000002',
    'full-text-search', 'Full-Text Search with FULLTEXT Indexes',
    'Search that is good enough, without a second datastore.',
@@ -167,7 +183,7 @@ VALUES
   ('e0000001-0000-4000-8000-00000000000e', 'd0000001-0000-4000-8000-000000000006', 'c0000001-0000-4000-8000-000000000003',
    'templates-without-a-framework', 'Templates Without a Framework',
    'Plain PHP as a template language, done deliberately.',
-   'video', 'published', 1, 612, 1),
+   'article', 'published', 1, 612, 1),
   ('e0000001-0000-4000-8000-00000000000f', 'd0000001-0000-4000-8000-000000000006', 'c0000001-0000-4000-8000-000000000003',
    'escaping-everything', 'Escaping Everything You Echo',
    'The one habit that closes most XSS holes.',
@@ -175,7 +191,7 @@ VALUES
   ('e0000001-0000-4000-8000-000000000010', 'd0000001-0000-4000-8000-000000000007', 'c0000001-0000-4000-8000-000000000003',
    'sessions-and-csrf', 'Sessions and CSRF Tokens',
    'Keeping a login and making sure only your own forms can use it.',
-   'video', 'published', 1, 877, 0)
+   'article', 'published', 1, 877, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary);
 
 -- Refresh the denormalised counters now that lessons exist.

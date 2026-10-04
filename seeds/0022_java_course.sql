@@ -22,13 +22,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000c',
    'java-from-basics-to-expert',
    'Java: From Basics to Expert',
    'Four levels, twelve lessons, every example compiled and run on a real JDK',
+   'Java is the language of large, long-lived systems: banks, insurers, telecoms, Android, and most of the data infrastructure the rest of the industry runs on. Code written twenty years ago still compiles, which is both why it is everywhere and why it has a reputation for verbosity.
+
+That reputation is now out of date. Records, sealed types, switch expressions, pattern matching, var and virtual threads have changed what ordinary Java looks like, and a modern file is a good deal shorter than the one people picture. This course is taught on Java 21 and uses those features from the start rather than mentioning them at the end.
+
+What has not changed is the thing worth learning it for: the JVM. A platform that compiles the hot paths of a running program to native code, manages memory well enough that most developers never think about it, and runs the same artefact everywhere is a serious piece of engineering, and understanding it makes you better at the languages on top of it.',
    'A complete path through Java in four levels, taught on Java 21. Level 1, Basic, covers the split between primitives and references that explains most of Java''s surprises - why == is not equals, how null stays unannounced, and what the collections framework actually offers. Level 2, Intermediate, is classes and records, validation that makes invalid objects impossible, interfaces and generics including erasure and wildcards, sealed hierarchies, and the three kinds of failure. Level 3, Advanced, covers lambdas and streams, what a data race really costs and how executors and virtual threads answer it, and the pattern matching that makes a missed case a compile error. Level 4, Expert, finishes with reachability and the garbage collector, where the time and memory actually go, and how to arrange an application so a change stays small.
 
 No Java is assumed, and the course is taught on Java 21 rather than the Java most tutorials still teach. If you learned Java a decade ago, that is the reason to read it: records, sealed types, switch expressions, pattern matching and virtual threads have changed what ordinary code looks like.
@@ -51,7 +56,8 @@ By the end you will be able to write Java that a reviewer will pass without argu
    JSON_ARRAY('No prior Java', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

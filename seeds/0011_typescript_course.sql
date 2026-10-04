@@ -11,13 +11,18 @@
 -- ===========================================================================
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000007',
    'typescript-from-basics-to-expert',
    'TypeScript: From Basics to Expert',
    'Four levels, twelve lessons, fully type-checked in the browser',
+   'TypeScript is JavaScript with a type system bolted on top and removed again before the code runs. You write annotations, a compiler checks them, and what ships is ordinary JavaScript with the types erased.
+
+The trade is explicit, which is the reason to be honest about it. You pay a build step, some learning, and the occasional argument with the compiler. You get a class of bug caught at the moment you type it rather than in production, and an editor that actually knows what a value is - rename, go-to-definition and autocomplete stop being guesses.
+
+It is now the default for new JavaScript projects of any size, and most well-used libraries ship their own types. That makes it less a choice than a thing to be fluent in, which is why this course starts with what the type system is for rather than with a list of syntax.',
    'A complete path through TypeScript in four levels. Level 1, Basic, covers what the type system is for, the types you will annotate every day, and why inference means you write fewer of them than you expect. Level 2, Intermediate, is the shapes real code needs: interfaces and type aliases, unions and narrowing, and generics. Level 3, Advanced, covers utility types, the type-level operators they are built from, and how to describe a function precisely. Level 4, Expert, finishes with conditional and mapped types, template literal types, and the declaration files that make untyped libraries usable.
 
 You should be comfortable with JavaScript before starting: TypeScript adds a type system to a language this course assumes you can already write. If you have used TypeScript only as JavaScript with annotations, Level 1 will be quick and Level 3 is where the course begins to tell you things you cannot get from the autocomplete.
@@ -40,7 +45,8 @@ By the end you will be able to type a real codebase rather than annotate it: nar
    JSON_ARRAY('Comfortable with JavaScript: functions, objects and arrays', 'The JavaScript course, or equivalent experience'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

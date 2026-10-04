@@ -32,13 +32,18 @@ ON DUPLICATE KEY UPDATE name = VALUES(name);
 -- The course
 -- ---------------------------------------------------------------------------
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000004',
    'html-from-basics-to-expert',
    'HTML: From Basics to Expert',
    'Four levels, twelve lessons, every example runnable in the browser',
+   'HTML is the language every web page is written in. It is not a programming language: it does not calculate or decide anything. It says what the things on a page are - this is a heading, this is a link, this is a table of sales figures - and the browser, the search engine and the screen reader all work from that answer.
+
+That is why it is worth more attention than it usually gets. CSS can make any element look like any other, so a page built from meaningless divs can be made to look perfect and still be unusable with a keyboard, unreadable aloud, and invisible to the thing that decides whether anyone finds it. The markup is the layer that carries meaning, and nothing above it can put the meaning back.
+
+It is also the smallest useful thing you can learn in web development. By the end of Level 1 you can build a page that works. Nothing else on this site has that ratio.',
    -- catalog_courses.description is plain text, not Markdown. Only
    -- content_articles carries a format column, and only that body is rendered.
    -- Asterisks here would reach the page as literal asterisks.
@@ -64,7 +69,8 @@ By the end you will be able to build a page that is valid, accessible and fast w
    JSON_ARRAY('A text editor and a browser', 'No previous HTML required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

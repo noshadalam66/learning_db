@@ -21,13 +21,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000b',
    'dart-from-basics-to-expert',
    'Dart: From Basics to Expert',
    'Four levels, twelve lessons, every example run against the real SDK',
+   'Dart is the language Flutter is written in, which is why most people arrive at it: one codebase producing an app for iOS, Android, web and desktop. The language is worth knowing on its own terms, though, and this course teaches it without a single widget.
+
+Two things make it interesting. The first is sound null safety: the type system knows which values can be null and the compiler will not let you forget, which removes an entire category of crash rather than making it easier to debug. The second is that it compiles two ways - just in time while you are working, which is what makes hot reload possible, and ahead of time for release, which is why the shipped app starts instantly.
+
+If Flutter is where you are heading, the language is the part that will still be useful when the framework changes.',
    'A complete path through Dart in four levels. Level 1, Basic, covers the type system and sound null safety - the reason a Dart program does not fail on a null it never expected - along with the three kinds of parameter, closures, and the collections. Level 2, Intermediate, is classes and constructors, value objects that compare by value, generics and mixins, the Dart 3 class modifiers, and failing deliberately rather than by accident. Level 3, Advanced, covers the single-threaded event loop behind async and await, streams of values over time, and the records and patterns that arrived in Dart 3. Level 4, Expert, finishes with isolates and real parallelism, where the time and memory actually go, and how to arrange an application so a change stays small.
 
 No Dart is assumed. Most people arrive here on the way to Flutter, and the course is written with that in mind - but it teaches the language itself, so nothing here depends on a widget. If you have written Java, C# or TypeScript, Level 1 will feel familiar until sound null safety, which is the part worth slowing down for.
@@ -50,7 +55,8 @@ By the end you will be able to write Dart that holds up outside a tutorial: type
    JSON_ARRAY('No prior Dart', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

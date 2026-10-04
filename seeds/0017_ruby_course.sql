@@ -15,13 +15,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000a',
    'ruby-from-basics-to-expert',
    'Ruby: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'Ruby was designed to be pleasant to read and write, and it takes that further than most languages: there are no primitives, almost everything is an expression with a value, and much of the syntax turns out to be ordinary method calls wearing a disguise.
+
+That consistency is what makes Ruby libraries feel the way they do. Rails, RSpec and the rest are not magic; they are what you get when blocks, modules and a small amount of metaprogramming are used deliberately. Understanding the four or five mechanisms underneath means reading those libraries instead of memorising them.
+
+It remains a strong choice for web applications and for the kind of scripting that would otherwise be a mess of shell, and it is one of the better languages to learn object-oriented design in, precisely because it refuses to let you treat anything as not-an-object.',
    'A complete path through Ruby in four levels. Level 1, Basic, covers the one rule that explains the syntax - everything is an object - along with truthiness, the three kinds of equality, control flow that returns values, and the two collections that carry almost every program. Level 2, Intermediate, is text and time, the class and module machinery including mixins and Comparable, and failing deliberately rather than by accident. Level 3, Advanced, covers blocks as an interface, building your own Enumerable, sequences produced on demand, and the metaprogramming that frameworks are made of. Level 4, Expert, finishes with pattern matching, where the time and memory actually go, and how to arrange an application so a change stays small.
 
 No Ruby and no previous programming are assumed. If you come from another language, the thing to unlearn is in Level 1: Ruby has no primitives and almost no statements, and once you take the one rule seriously - everything is an object, nearly everything returns a value - the syntax stops looking like a collection of special cases.
@@ -44,7 +49,8 @@ By the end you will be able to read the Ruby that libraries are written in, not 
    JSON_ARRAY('No prior Ruby', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES

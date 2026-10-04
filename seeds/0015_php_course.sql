@@ -14,13 +14,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000009',
    'php-from-basics-to-expert',
    'PHP: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'PHP runs a large share of the web, including most of the sites you use without thinking about it. It was designed to put a page together on a server and send it to a browser, and it is still extremely good at exactly that.
+
+The PHP most people remember is not the PHP that exists now. Typed properties, enums, readonly classes, constructor promotion, real exceptions, match expressions and a serious performance rewrite arrived over the last few versions. Code written today looks much more like modern Java or C# than like the PHP 5 it is still judged against.
+
+It is also the most direct route from nothing to a working server-rendered site. One file, a web server and a database, and you have an application - which is why it remains a sensible thing to learn even if you intend to spend your career elsewhere.',
    'A complete path through PHP in four levels. Level 1, Basic, covers how values and types relate, the two kinds of equality, control flow including match, and the array type that serves as both list and map. Level 2, Intermediate, is text and dates, the class machinery - promotion, readonly, interfaces and enums - and failing deliberately rather than by accident. Level 3, Advanced, covers sharing behaviour without inheritance, generators and laziness, and the input handling that separates a working site from a breached one. Level 4, Expert, finishes with attributes and reflection, where time and memory actually go, and how to arrange an application so a change stays small.
 
 No PHP is assumed, and no other language either. If you learned PHP years ago and have not looked since, this course is largely about what changed: typed properties, enums, match, readonly, constructor promotion and real exceptions have moved the language a long way from the one most people remember.
@@ -43,7 +48,8 @@ By the end you will be able to write PHP that is typed, tested and safe at its e
    JSON_ARRAY('No prior PHP', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
