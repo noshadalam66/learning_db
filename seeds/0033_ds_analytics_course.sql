@@ -97,7 +97,7 @@ VALUES
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-0000000000e4', 'd0000001-0000-4000-8000-00000000003c', 'c0000001-0000-4000-8000-000000000011',
    'an-level-1-check', 'Level 1 Check: Questions, Distributions and SQL',
-   'Translating a question into a metric, when a mean misleads, and the LEFT JOIN that silently becomes an INNER JOIN.',
+   'Five questions on turning a vague question into a metric somebody can act on, when a mean misleads and a median does not, and the LEFT JOIN that quietly becomes an INNER JOIN the moment you filter on the right-hand table.',
    'quiz', 'published', 4, 600, 0),
   ('e0000001-0000-4000-8000-0000000000e5', 'd0000001-0000-4000-8000-00000000003d', 'c0000001-0000-4000-8000-000000000011',
    'an-metrics', 'Defining a Metric That Survives Scrutiny',

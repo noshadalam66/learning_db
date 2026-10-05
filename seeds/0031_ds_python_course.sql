@@ -136,7 +136,7 @@ VALUES
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-0000000000dc', 'd0000001-0000-4000-8000-00000000003a', 'c0000001-0000-4000-8000-000000000010',
    'py-ds-level-3-check', 'Level 3 Check: Grouping, Time and Charts',
-   'Transform against agg, what resample does to a missing day, which direction tz_localize goes, and which chart answers which question.',
+   'Five questions on transform against agg, what resample does to a day with no rows in it, which direction tz_localize converts, and which chart answers which question. The groupby question is the one worth running rather than reasoning about.',
    'quiz', 'published', 4, 720, 0),
   ('e0000001-0000-4000-8000-0000000000dd', 'd0000001-0000-4000-8000-00000000003b', 'c0000001-0000-4000-8000-000000000010',
    'py-ds-performance', 'Memory, dtypes and When Pandas Is Wrong',

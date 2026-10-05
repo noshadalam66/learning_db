@@ -97,7 +97,7 @@ VALUES
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-0000000000f4', 'd0000001-0000-4000-8000-000000000040', 'c0000001-0000-4000-8000-000000000012',
    'ml-level-1-check', 'Level 1 Check: Models, Splits and First Scores',
-   'What a model is and is not, why the split comes first, when random splitting is wrong, and why an accuracy figure means nothing without a baseline.',
+   'Five questions on what a model is and is not, why the train and test split comes before anything else, when splitting at random is the wrong thing to do, and why an accuracy figure means nothing until you know the baseline it beat.',
    'quiz', 'published', 4, 600, 0),
   ('e0000001-0000-4000-8000-0000000000f5', 'd0000001-0000-4000-8000-000000000041', 'c0000001-0000-4000-8000-000000000012',
    'ml-overfitting', 'Overfitting, Underfitting and Cross-Validation',
