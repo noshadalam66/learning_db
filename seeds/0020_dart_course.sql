@@ -21,13 +21,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000b',
    'dart-from-basics-to-expert',
    'Dart: From Basics to Expert',
    'Four levels, twelve lessons, every example run against the real SDK',
+   'Dart is the language Flutter is written in, which is why most people arrive at it: one codebase producing an app for iOS, Android, web and desktop. The language is worth knowing on its own terms, though, and this course teaches it without a single widget.
+
+Two things make it interesting. The first is sound null safety: the type system knows which values can be null and the compiler will not let you forget, which removes an entire category of crash rather than making it easier to debug. The second is that it compiles two ways - just in time while you are working, which is what makes hot reload possible, and ahead of time for release, which is why the shipped app starts instantly.
+
+If Flutter is where you are heading, the language is the part that will still be useful when the framework changes.',
    'A complete path through Dart in four levels. Level 1, Basic, covers the type system and sound null safety - the reason a Dart program does not fail on a null it never expected - along with the three kinds of parameter, closures, and the collections. Level 2, Intermediate, is classes and constructors, value objects that compare by value, generics and mixins, the Dart 3 class modifiers, and failing deliberately rather than by accident. Level 3, Advanced, covers the single-threaded event loop behind async and await, streams of values over time, and the records and patterns that arrived in Dart 3. Level 4, Expert, finishes with isolates and real parallelism, where the time and memory actually go, and how to arrange an application so a change stays small.
 
 No Dart is assumed. Most people arrive here on the way to Flutter, and the course is written with that in mind - but it teaches the language itself, so nothing here depends on a widget. If you have written Java, C# or TypeScript, Level 1 will feel familiar until sound null safety, which is the part worth slowing down for.
@@ -50,7 +55,8 @@ By the end you will be able to write Dart that holds up outside a tutorial: type
    JSON_ARRAY('No prior Dart', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -79,67 +85,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-000000000081', 'd0000001-0000-4000-8000-000000000024', 'c0000001-0000-4000-8000-00000000000b',
    'dart-values-and-types', 'Values, Types and Null Safety',
-   'Everything is an object, the type is inferred, and String cannot hold null.',
+   'Dart is statically typed and every value is an object: int, double, bool and String are classes like any other, null is the sole instance of Null, and even a function is an object with a type. There are no primitives, and a String simply cannot hold null.',
    'article', 'published', 1, 660, 1),
   ('e0000001-0000-4000-8000-000000000082', 'd0000001-0000-4000-8000-000000000024', 'c0000001-0000-4000-8000-00000000000b',
    'dart-control-flow', 'Control Flow, Functions and Cascades',
-   'switch that returns a value, three kinds of parameter, closures and cascades.',
+   'Control flow in Dart will look familiar. What is worth your attention is how functions declare their parameters, because Dart gives you three kinds and the choice shows up at every call site afterwards - plus switch that returns a value, and cascades.',
    'article', 'published', 2, 660, 1),
   ('e0000001-0000-4000-8000-000000000083', 'd0000001-0000-4000-8000-000000000024', 'c0000001-0000-4000-8000-00000000000b',
    'dart-collections', 'Lists, Maps, Sets and Iterable',
-   'Lists, maps and sets, collection-if and collection-for, and why Iterable is lazy.',
+   'Three collections carry almost every Dart program: List for order, Set for membership, Map for lookup. All three are generic, so the element type travels with the collection - and Iterable is lazy, which is the surprise worth meeting here rather than in production.',
    'article', 'published', 3, 720, 0),
   ('e0000001-0000-4000-8000-000000000084', 'd0000001-0000-4000-8000-000000000025', 'c0000001-0000-4000-8000-00000000000b',
    'dart-classes', 'Classes, Constructors and Value Objects',
-   'Constructors that assign their own fields, factories, and == with hashCode.',
+   'Dart class syntax is compact in one specific way: the constructor can assign its own fields, so Point(this.x, this.y) is the whole thing - no body, no repetition. With named and factory constructors, and the equality contract a value object has to sign.',
    'article', 'published', 1, 780, 0),
   ('e0000001-0000-4000-8000-000000000085', 'd0000001-0000-4000-8000-000000000025', 'c0000001-0000-4000-8000-00000000000b',
    'dart-generics-and-mixins', 'Generics, Mixins and Class Modifiers',
-   'Reified generics, bounds, mixins with on, and the sealed switch that cannot miss a case.',
+   'Generics in Dart are not erased: a List of int knows it is a list of ints at runtime, so a cast that would be a silent lie in some languages fails here where you can see it. With bounds, mixins and their on clause, and the sealed switch that cannot miss a case.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-000000000086', 'd0000001-0000-4000-8000-000000000025', 'c0000001-0000-4000-8000-00000000000b',
    'dart-errors', 'Errors, Exceptions and Failing on Purpose',
-   'Exception against Error, rethrow, and when the answer is a value instead.',
+   'Dart splits failure into two families and the distinction is the whole lesson: an Exception is a condition the program should expect and may recover from, an Error is a bug. With rethrow that keeps the stack, and when the answer is a value rather than a throw.',
    'article', 'published', 3, 720, 0),
   ('e0000001-0000-4000-8000-000000000087', 'd0000001-0000-4000-8000-000000000026', 'c0000001-0000-4000-8000-00000000000b',
    'dart-async', 'Futures, async and await',
-   'One thread and two queues, what await suspends, and Future.wait with a timeout.',
+   'Dart runs your code on a single thread with an event loop: nothing you write runs in parallel with anything else you write, so you never need a lock - and anything that blocks stops everything. What await really suspends, and Future.wait with a timeout.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-000000000088', 'd0000001-0000-4000-8000-000000000026', 'c0000001-0000-4000-8000-00000000000b',
    'dart-streams', 'Streams',
-   'async* and yield, listen''s three channels, and the controller you forgot to close.',
+   'A Future delivers one value; a Stream delivers many over time - lines from a file, messages from a socket, events from a user - and the same await machinery works on it with await for. With async star and yield, the three channels of listen, and closing the controller.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-000000000089', 'd0000001-0000-4000-8000-000000000026', 'c0000001-0000-4000-8000-00000000000b',
    'dart-records-and-patterns', 'Records and Pattern Matching',
-   'Records without a class, destructuring everywhere, and exhaustive switch on sealed types.',
+   'Dart 3 added two features that work together: records, which are anonymous product types, and patterns, which take them apart. Between them they remove most of the ceremony that used to surround returning two things, and make a switch over sealed types exhaustive.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-00000000008a', 'd0000001-0000-4000-8000-000000000027', 'c0000001-0000-4000-8000-00000000000b',
    'dart-isolates', 'Isolates and Real Concurrency',
-   'Why async is not parallel, Isolate.run, ports, and what a message costs to copy.',
+   'async does not give you parallelism: everything so far runs on one thread interleaved at await points, which is why a long synchronous loop freezes the program whether you awaited or not. Isolate.run, ports, and what sending a message costs to copy.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-00000000008b', 'd0000001-0000-4000-8000-000000000027', 'c0000001-0000-4000-8000-00000000000b',
    'dart-performance', 'Where Dart Spends Time and Memory',
-   'StringBuffer, lazy iterables iterated twice, hoisting, const, and JIT against AOT.',
+   'Most Dart performance problems are one of four things: building strings in a loop, iterating something lazy more than once, doing work inside a loop that could be done before it, and allocating where you did not need to. Plus what const buys, and JIT against AOT.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-00000000008c', 'd0000001-0000-4000-8000-000000000027', 'c0000001-0000-4000-8000-00000000000b',
    'dart-architecture', 'Arranging a Dart Application',
-   'Rules in plain Dart, dependencies pointing inward, and one boring composition root.',
+   'A program that is easy to change has its rules in one place, its I/O at the edge, and arrows that point inward: the rules know nothing about the database, the web framework or Flutter. One boring composition root, and nothing clever anywhere.',
    'article', 'published', 3, 900, 0),
   ('e0000001-0000-4000-8000-00000000008d', 'd0000001-0000-4000-8000-000000000024', 'c0000001-0000-4000-8000-00000000000b',
    'dart-level-1-check', 'Level 1 Check: Types, Null Safety and Collections',
-   'Five questions on final and const, the null-safety operators, and Iterable.',
+   'Five questions on final against const, what the question mark and the bang actually do to a type, and how a lazy Iterable behaves when you walk it twice. Every one can be settled by running four lines of Dart.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-00000000008e', 'd0000001-0000-4000-8000-000000000025', 'c0000001-0000-4000-8000-00000000000b',
    'dart-level-2-check', 'Level 2 Check: Classes, Generics and Failure',
-   'Five questions on constructors, equality, class modifiers and which failures to catch.',
+   'Five questions on constructors and what this.x in a parameter list does, equality and hashCode together, mixins and the class modifiers, and which failures are actually yours to catch.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-00000000008f', 'd0000001-0000-4000-8000-000000000026', 'c0000001-0000-4000-8000-00000000000b',
    'dart-level-3-check', 'Level 3 Check: Async, Streams and Patterns',
-   'Five questions on the event loop, Future.wait, stream lifetimes and pattern matching.',
+   'Five questions on the event loop and what runs when, Future.wait against awaiting in sequence, the stream that never closes, and matching on shape with records and patterns.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-000000000090', 'd0000001-0000-4000-8000-000000000027', 'c0000001-0000-4000-8000-00000000000b',
    'dart-expert-exam', 'Expert Exam: Dart',
-   'Isolates, performance, and how an application is arranged.',
+   'Twenty questions over the whole course: isolates and why async was never parallelism, where the time and the memory go, and how an application is arranged so its rules know nothing about Flutter.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

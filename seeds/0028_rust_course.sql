@@ -23,13 +23,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000f',
    'rust-from-basics-to-expert',
    'Rust: From Basics to Expert',
    'Four levels, twelve lessons, every example compiled with warnings as errors',
+   'Rust gives you the control of C and C++ without the two bugs that have caused most of the security problems in both: using memory after it has been freed, and two threads writing the same data at once. Not by checking at runtime, but by refusing to compile code where either is possible.
+
+That is done by the ownership system, and it is why Rust has a reputation for being hard. It is less hard than unfamiliar: every value has exactly one owner, borrowing it is temporary, and the compiler checks the rule. Once that is natural the rest of the language is pleasant and often very ordinary.
+
+It is worth the climb where the alternative is C: operating systems, browsers, game engines, embedded work, and increasingly the performance-critical core of applications written in other languages. The payoff is a program that is as fast as the unsafe version and does not have the class of bug that made it unsafe.',
    'A complete path through Rust in four levels, taught on Rust 1.94 and edition 2021. Level 1, Basic, covers ownership and borrowing - the rule that makes data races and use-after-free compile errors rather than crashes - along with exhaustive match and iterators that do nothing until something asks. Level 2, Intermediate, is traits instead of inheritance, enums as sum types with Option replacing null, and error handling built on Result and the ? operator. Level 3, Advanced, covers lifetimes and what an annotation actually says, the smart pointers for when one owner is not enough, and the Send and Sync traits that turn a data race into a compile error. Level 4, Expert, finishes with memory management without a collector, why a debug build is ten times slower than a release one, what unsafe really enables, and how to arrange a crate.
 
 No Rust is assumed, but some programming experience helps: this is a language that asks you to be precise about things other languages decide for you. Expect Level 1 to be slower than the first level of any other course here - ownership is not difficult so much as unfamiliar, and everything after it depends on having it straight.
@@ -54,7 +59,8 @@ By the end you will be able to read a compiler error and know what the borrow ch
    JSON_ARRAY('No prior Rust', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -83,67 +89,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-0000000000c1', 'd0000001-0000-4000-8000-000000000034', 'c0000001-0000-4000-8000-00000000000f',
    'rs-values-and-ownership', 'Values, Types and Ownership',
-   'One owner, moves that fail to compile rather than crash, and the borrowing rule.',
+   'Rust type system is conventional. What is not conventional is ownership: every value has exactly one owner, and when the owner goes out of scope the value is dropped. No collector, no manual free - and a move that is a compile error rather than a crash.',
    'article', 'published', 1, 840, 1),
   ('e0000001-0000-4000-8000-0000000000c2', 'd0000001-0000-4000-8000-000000000034', 'c0000001-0000-4000-8000-00000000000f',
    'rs-control-flow', 'Control Flow, Functions and Pattern Matching',
-   'Everything is an expression, match is exhaustive, and if let, let else and while let.',
+   'Almost everything in Rust is an expression, including if and match, so control flow produces values rather than assigning to them. With match that the compiler proves exhaustive, and if let, let else and while let for the one case you care about.',
    'article', 'published', 2, 720, 1),
   ('e0000001-0000-4000-8000-0000000000c3', 'd0000001-0000-4000-8000-000000000034', 'c0000001-0000-4000-8000-00000000000f',
    'rs-collections', 'Vectors, Maps and Iterators',
-   'Vec and HashMap, slices that ask for less, and iter against iter_mut against into_iter.',
+   'Vec for order, HashMap for lookup, HashSet for membership. All three own their contents, all three free them when they go out of scope, and all three are built on the same iterator machinery - with slices that ask for less, and iter against iter_mut against into_iter.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-0000000000c4', 'd0000001-0000-4000-8000-000000000035', 'c0000001-0000-4000-8000-00000000000f',
    'rs-structs-and-traits', 'Structs, Traits and Implementations',
-   'impl blocks, traits with defaults, static against dynamic dispatch, and derive.',
+   'Rust has structs and traits and no inheritance: a struct holds data, an impl block gives it behaviour, and a trait describes behaviour several types can share. With default methods, static against dynamic dispatch, and what derive writes for you.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-0000000000c5', 'd0000001-0000-4000-8000-000000000035', 'c0000001-0000-4000-8000-00000000000f',
    'rs-enums-and-options', 'Enums, Option and Result',
-   'Sum types, Option instead of null, Result with a reason, and patterns with guards.',
+   'A Rust enum is a sum type: a value that is exactly one of several variants, each able to carry different data. Combined with exhaustive match it is the single most useful feature in the language - Option instead of null, and Result with a reason attached.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-0000000000c6', 'd0000001-0000-4000-8000-000000000035', 'c0000001-0000-4000-8000-00000000000f',
    'rs-errors', 'Error Handling Without Exceptions',
-   '? converting through From, an error enum for a library, Box<dyn Error> for an application.',
+   'Rust has no exceptions. A function that can fail returns a Result, the caller must acknowledge it, and the question mark operator makes doing so almost invisible. An error enum for a library, a boxed error for an application, and panic for bugs only.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-0000000000c7', 'd0000001-0000-4000-8000-000000000036', 'c0000001-0000-4000-8000-00000000000f',
    'rs-lifetimes', 'Lifetimes and the Borrow Checker',
-   'What an annotation actually says, elision, structs that borrow, and ''static as a bound.',
+   'A lifetime is the span of code for which a reference is valid. The compiler works most of them out alone; the annotations you write exist to tell it how several references relate when it cannot tell. With elision, structs that borrow, and static as a bound.',
    'article', 'published', 1, 900, 0),
   ('e0000001-0000-4000-8000-0000000000c8', 'd0000001-0000-4000-8000-000000000036', 'c0000001-0000-4000-8000-00000000000f',
    'rs-smart-pointers', 'Box, Rc, RefCell and Interior Mutability',
-   'Box, Rc, RefCell and the runtime borrow check, Weak for cycles, and Drop.',
+   'Ownership says one owner and borrowing says one mutable reference, and most programs fit those rules. For the ones that do not, the standard library moves the check elsewhere: Box to the heap, Rc to a count, RefCell to runtime - and Weak to break a cycle.',
    'article', 'published', 2, 900, 0),
   ('e0000001-0000-4000-8000-0000000000c9', 'd0000001-0000-4000-8000-000000000036', 'c0000001-0000-4000-8000-00000000000f',
    'rs-concurrency', 'Fearless Concurrency',
-   'Send and Sync, Arc<Mutex<T>>, channels that move values, and scoped threads.',
+   'Rust headline claim is that it catches data races at compile time. It does, and the mechanism is the ownership system you already know plus two marker traits, Send and Sync. With Arc and Mutex, channels that move values, and scoped threads.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-0000000000ca', 'd0000001-0000-4000-8000-000000000037', 'c0000001-0000-4000-8000-00000000000f',
    'rs-memory', 'Memory Without a Garbage Collector',
-   'Drop order, stack against heap, zero-cost abstractions, leaks, and what unsafe enables.',
+   'Rust has no garbage collector and no manual free: memory is released when its owner goes out of scope, at a point the compiler can see, so the cost is predictable and there is no pause to tune. Drop order, zero-cost abstractions, leaks, and what unsafe enables.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-0000000000cb', 'd0000001-0000-4000-8000-000000000037', 'c0000001-0000-4000-8000-00000000000f',
    'rs-performance', 'Where Rust Spends Its Time',
-   'with_capacity, why a debug build is ten times slower, and cloning in a loop.',
+   'Rust is fast by default, and the things that make it slow are specific: allocating in a loop, cloning to satisfy the borrow checker, and - most of all - benchmarking a debug build, which can be ten times slower than the release one for no reason you will find in the code.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-0000000000cc', 'd0000001-0000-4000-8000-000000000037', 'c0000001-0000-4000-8000-00000000000f',
    'rs-architecture', 'Arranging a Rust Project',
-   'Modules private by default, the trait as the boundary, newtypes, and doc tests.',
+   'Cargo decides more about structure than you do, and its decisions are good ones. What is left to you is where the boundaries go, and a module system that is private by default makes those explicit - with the trait as the boundary, newtypes, and doc tests that run.',
    'article', 'published', 3, 900, 0),
   ('e0000001-0000-4000-8000-0000000000cd', 'd0000001-0000-4000-8000-000000000034', 'c0000001-0000-4000-8000-00000000000f',
    'rs-level-1-check', 'Level 1 Check: Ownership, Borrowing and Iterators',
-   'Five questions on moves, the borrowing rule, &str against String, and laziness.',
+   'Five questions on what a move leaves behind, the borrowing rule and why it exists, &str against String, and what actually makes an iterator run. Every one of these can be settled by asking the compiler.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-0000000000ce', 'd0000001-0000-4000-8000-000000000035', 'c0000001-0000-4000-8000-00000000000f',
    'rs-level-2-check', 'Level 2 Check: Traits, Enums and Results',
-   'Five questions on dispatch, exhaustiveness, the ? operator and error design.',
+   'Five questions on static against dynamic dispatch and what each costs, why match has to be exhaustive, what the question mark operator does with the error type, and designing an error a caller can act on.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-0000000000cf', 'd0000001-0000-4000-8000-000000000036', 'c0000001-0000-4000-8000-00000000000f',
    'rs-level-3-check', 'Level 3 Check: Lifetimes, Smart Pointers and Threads',
-   'Five questions on what ''a says, RefCell, Rc against Arc, and Send and Sync.',
+   'Five questions on what a lifetime annotation actually says, when to reach for Rc or RefCell, the difference between Rc and Arc, and why Send and Sync exist at all rather than being checked at runtime.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-0000000000d0', 'd0000001-0000-4000-8000-000000000037', 'c0000001-0000-4000-8000-00000000000f',
    'rs-expert-exam', 'Expert Exam: Rust',
-   'Drop, release builds, zero-cost abstractions, unsafe, and crate structure.',
+   'Twenty questions over the whole course: drop order, zero-cost abstractions and what makes them zero-cost, why a release build is a different program, what unsafe actually permits, and how a crate is arranged.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

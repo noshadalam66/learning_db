@@ -17,13 +17,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000006',
    'javascript-from-basics-to-expert',
    'JavaScript: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'JavaScript is the only programming language a browser runs, which is how it ended up everywhere else as well: on servers through Node, in build tools, in databases, in editors. Learn it once and you can work at either end of a web application.
+
+It has a reputation for being strange, and it has earned about half of it. The strangeness is concentrated in a few places - how values compare, what `this` refers to, what happens to code that waits - and the rest of the language is small and ordinary. This course spends its time on the few places rather than on the many.
+
+The payoff is that most of the behaviour people work around without understanding has one explanation, usually a short one. A closure, the event loop, and the prototype chain account for a surprising share of the bugs in front-end code.',
    'A complete path through JavaScript in four levels. Level 1, Basic, covers values and types, functions and scope, and the two structures everything else is built from. Level 2, Intermediate, is the working vocabulary: the array methods you will use every day, destructuring, and classes. Level 3, Advanced, is where the language gets interesting - closures, promises and async/await, and modules. Level 4, Expert, finishes with the event loop, iterators and generators, and the metaprogramming hooks that make frameworks possible.
 
 No previous JavaScript is assumed, though you will move faster if you have written HTML. If you already use the language at work, Level 1 and Level 2 are the vocabulary you probably have; Level 3 and Level 4 are the parts that explain the behaviour you have worked around without ever being told why it happens.
@@ -46,7 +51,8 @@ By the end you will be able to read the JavaScript in any codebase and know what
    JSON_ARRAY('You can write basic HTML', 'No previous JavaScript required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -77,73 +83,73 @@ VALUES
   -- Level 1
   ('e0000001-0000-4000-8000-000000000031', 'd0000001-0000-4000-8000-000000000010', 'c0000001-0000-4000-8000-000000000006',
    'values-and-types', 'Values and Types',
-   'Seven primitives, one object type, and the coercion rules that surprise everyone once.',
+   'JavaScript has seven primitive types and one object type. That is the whole list, and knowing it settles most of the questions that look like language quirks - including the coercion rules that surprise everyone exactly once.',
    'article', 'published', 1, 540, 1),
   ('e0000001-0000-4000-8000-000000000032', 'd0000001-0000-4000-8000-000000000010', 'c0000001-0000-4000-8000-000000000006',
    'functions-and-scope', 'Functions and Scope',
-   'Declarations, expressions, arrows - and which one changes what `this` means.',
+   'Three ways to write a function, and the differences between them are not stylistic - they change when the function exists and what this means inside it. Declarations, expressions and arrows, with the hoisting rule for each.',
    'article', 'published', 2, 600, 1),
   ('e0000001-0000-4000-8000-000000000033', 'd0000001-0000-4000-8000-000000000010', 'c0000001-0000-4000-8000-000000000006',
    'arrays-and-objects', 'Arrays and Objects',
-   'Reference semantics, and why copying one is the bug you will write first.',
+   'Both are objects and both are held by reference. That one fact explains the first genuinely confusing bug most people write: a copy that was not a copy, and a change in one place showing up in another.',
    'article', 'published', 3, 600, 0),
   ('e0000001-0000-4000-8000-00000000003d', 'd0000001-0000-4000-8000-000000000010', 'c0000001-0000-4000-8000-000000000006',
    'js-level-1-check', 'Level 1 Check: Values, Scope and Equality',
-   'Five questions on types, scope and reference semantics.',
+   'Five questions on the seven primitives, how equality actually compares them, where a binding is visible, and reference semantics. Every one of these is something you can settle in the scratchpad below the questions.',
    'quiz', 'published', 4, 420, 1),
 
   -- Level 2
   ('e0000001-0000-4000-8000-000000000034', 'd0000001-0000-4000-8000-000000000011', 'c0000001-0000-4000-8000-000000000006',
    'array-methods', 'The Array Methods You Will Actually Use',
-   'map, filter, reduce and the six others that replace most loops you would write.',
+   'Nine methods replace almost every loop you would otherwise write. The win is not fewer characters - it is that the method name says what the loop is for before you read the body: map, filter, reduce and the six worth knowing by name.',
    'article', 'published', 1, 720, 0),
   ('e0000001-0000-4000-8000-000000000035', 'd0000001-0000-4000-8000-000000000011', 'c0000001-0000-4000-8000-000000000006',
    'destructuring-and-spread', 'Destructuring and Spread',
-   'Pulling values out and putting them back, without a pile of temporary variables.',
+   'Two pieces of syntax that show up in nearly every modern JavaScript file. Both are about moving values in and out of shapes without a pile of temporary variables - including defaults, renaming and the rest pattern.',
    'article', 'published', 2, 600, 0),
   ('e0000001-0000-4000-8000-000000000036', 'd0000001-0000-4000-8000-000000000011', 'c0000001-0000-4000-8000-000000000006',
    'classes-and-prototypes', 'Classes and Prototypes',
-   'What class syntax is actually doing, and the private fields that are genuinely private.',
+   'class is syntax over the prototype system that was already there, and knowing what it compiles to explains every behaviour that looks odd from the outside. With the # private fields that are genuinely private rather than conventionally so.',
    'article', 'published', 3, 720, 0),
   ('e0000001-0000-4000-8000-00000000003e', 'd0000001-0000-4000-8000-000000000011', 'c0000001-0000-4000-8000-000000000006',
    'js-level-2-check', 'Level 2 Check: Everyday JavaScript',
-   'Five questions on array methods, destructuring and classes.',
+   'Five questions on which array method to reach for, what destructuring does with a missing property, and what class syntax is really doing underneath - the vocabulary you will use on every working day.',
    'quiz', 'published', 4, 480, 0),
 
   -- Level 3
   ('e0000001-0000-4000-8000-000000000037', 'd0000001-0000-4000-8000-000000000012', 'c0000001-0000-4000-8000-000000000006',
    'closures', 'Closures',
-   'A function remembering where it was born. The idea behind most JavaScript patterns.',
+   'A closure is a function that remembers the scope it was created in, even after that scope has finished. It sounds academic and it is behind most of the JavaScript patterns you will read, from a counter to a module to a memoised call.',
    'article', 'published', 1, 720, 0),
   ('e0000001-0000-4000-8000-000000000038', 'd0000001-0000-4000-8000-000000000012', 'c0000001-0000-4000-8000-000000000006',
    'promises-and-async', 'Promises and async/await',
-   'Sequential when you need it, parallel when you do not, and failure handled either way.',
+   'A promise is a value that is not there yet; async and await are syntax for waiting on one without nesting callbacks. Sequential when you need it, parallel when you do not, and failure handled either way rather than swallowed.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-000000000039', 'd0000001-0000-4000-8000-000000000012', 'c0000001-0000-4000-8000-000000000006',
    'modules', 'Modules',
-   'import, export, and why a module runs exactly once no matter how often you import it.',
+   'A module is a file with its own scope: nothing leaks out unless you export it, nothing comes in unless you import it, and the file runs exactly once however many times it is imported. That last part is what makes a module a good place to keep state.',
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-00000000003f', 'd0000001-0000-4000-8000-000000000012', 'c0000001-0000-4000-8000-000000000006',
    'js-level-3-check', 'Level 3 Check: Closures and Async',
-   'Five questions on closures, promises and modules.',
+   'Five questions on what a closure captures, how promises order their work, and why a module body runs once. Several of these are easier to answer by running them than by reasoning about them, so run them.',
    'quiz', 'published', 4, 540, 0),
 
   -- Level 4
   ('e0000001-0000-4000-8000-00000000003a', 'd0000001-0000-4000-8000-000000000013', 'c0000001-0000-4000-8000-000000000006',
    'the-event-loop', 'The Event Loop',
-   'Why setTimeout(fn, 0) runs after a promise, and what a microtask actually is.',
+   'JavaScript runs on one thread, and everything asynchronous is a queue of work that thread picks up when it has finished what it is doing. Once you can see the queues, ordering stops being surprising - including why setTimeout(fn, 0) runs after a promise.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-00000000003b', 'd0000001-0000-4000-8000-000000000013', 'c0000001-0000-4000-8000-000000000006',
    'iterators-and-generators', 'Iterators and Generators',
-   'The protocol behind for...of, and functions that pause in the middle.',
+   'for...of works on anything that follows one small protocol, and a generator is a function that can pause in the middle and implements that protocol for free. Which is how you write a lazy sequence, or one that never ends.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-00000000003c', 'd0000001-0000-4000-8000-000000000013', 'c0000001-0000-4000-8000-000000000006',
    'metaprogramming', 'Symbols, Proxies and Metaprogramming',
-   'The hooks reactivity frameworks are built on, and when reaching for them is a mistake.',
+   'The hooks that let you change what the language itself does to your objects. Every reactivity framework of the last decade is built on them, and most application code should not use them at all - this says why, as well as how.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-000000000040', 'd0000001-0000-4000-8000-000000000013', 'c0000001-0000-4000-8000-000000000006',
    'js-expert-exam', 'Expert Exam: JavaScript',
-   'The event loop, generators and metaprogramming.',
+   'Twenty questions over the whole course: the event loop and the order its queues run in, iterators and generators, and the metaprogramming hooks underneath every modern framework.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

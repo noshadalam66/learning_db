@@ -11,13 +11,18 @@
 -- ===========================================================================
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000007',
    'typescript-from-basics-to-expert',
    'TypeScript: From Basics to Expert',
    'Four levels, twelve lessons, fully type-checked in the browser',
+   'TypeScript is JavaScript with a type system bolted on top and removed again before the code runs. You write annotations, a compiler checks them, and what ships is ordinary JavaScript with the types erased.
+
+The trade is explicit, which is the reason to be honest about it. You pay a build step, some learning, and the occasional argument with the compiler. You get a class of bug caught at the moment you type it rather than in production, and an editor that actually knows what a value is - rename, go-to-definition and autocomplete stop being guesses.
+
+It is now the default for new JavaScript projects of any size, and most well-used libraries ship their own types. That makes it less a choice than a thing to be fluent in, which is why this course starts with what the type system is for rather than with a list of syntax.',
    'A complete path through TypeScript in four levels. Level 1, Basic, covers what the type system is for, the types you will annotate every day, and why inference means you write fewer of them than you expect. Level 2, Intermediate, is the shapes real code needs: interfaces and type aliases, unions and narrowing, and generics. Level 3, Advanced, covers utility types, the type-level operators they are built from, and how to describe a function precisely. Level 4, Expert, finishes with conditional and mapped types, template literal types, and the declaration files that make untyped libraries usable.
 
 You should be comfortable with JavaScript before starting: TypeScript adds a type system to a language this course assumes you can already write. If you have used TypeScript only as JavaScript with annotations, Level 1 will be quick and Level 3 is where the course begins to tell you things you cannot get from the autocomplete.
@@ -40,7 +45,8 @@ By the end you will be able to type a real codebase rather than annotate it: nar
    JSON_ARRAY('Comfortable with JavaScript: functions, objects and arrays', 'The JavaScript course, or equivalent experience'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -70,70 +76,70 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-000000000041', 'd0000001-0000-4000-8000-000000000014', 'c0000001-0000-4000-8000-000000000007',
    'why-types', 'Why Types, and What They Cost',
-   'What the compiler catches, what it cannot, and the one thing that is erased at runtime.',
+   'TypeScript is JavaScript with a compiler that checks your assumptions before you run anything. It catches one specific class of bug - the kind where a value is not the shape you believed - and it catches nothing else, because every type is erased at runtime.',
    'article', 'published', 1, 540, 1),
   ('e0000001-0000-4000-8000-000000000042', 'd0000001-0000-4000-8000-000000000014', 'c0000001-0000-4000-8000-000000000007',
    'the-everyday-types', 'The Everyday Types',
-   'Primitives, arrays, objects, and the difference between any, unknown and never.',
+   'The annotations you will write nearly every day, and the three special types that decide how strict the rest of your code gets to be. The difference between any, unknown and never is the part worth reading twice.',
    'article', 'published', 2, 600, 1),
   ('e0000001-0000-4000-8000-000000000043', 'd0000001-0000-4000-8000-000000000014', 'c0000001-0000-4000-8000-000000000007',
    'inference-and-annotation', 'Inference, and When to Annotate',
-   'The compiler already knows most of it. Annotating anyway is how types get out of date.',
+   'The compiler works out most types on its own, and annotating anyway is not harmless: an annotation is a claim you now have to keep in step with the code. Where inference is enough, and where an annotation earns its place.',
    'article', 'published', 3, 600, 0),
   ('e0000001-0000-4000-8000-00000000004d', 'd0000001-0000-4000-8000-000000000014', 'c0000001-0000-4000-8000-000000000007',
    'ts-level-1-check', 'Level 1 Check: Types and Inference',
-   'Five questions on what types do, the everyday annotations and inference.',
+   'Five questions on what the compiler knows, what it guesses, and where an annotation earns its place rather than going stale. Every question here can be settled by typing it into the scratchpad below.',
    'quiz', 'published', 4, 420, 1),
 
   ('e0000001-0000-4000-8000-000000000044', 'd0000001-0000-4000-8000-000000000015', 'c0000001-0000-4000-8000-000000000007',
    'interfaces-and-aliases', 'Interfaces and Type Aliases',
-   'Two ways to name a shape, one real difference, and when that difference matters.',
+   'Two ways to name a shape. They overlap almost completely, and the one real difference - whether a later declaration can add to it - decides which you want, which is why libraries and application code tend to choose differently.',
    'article', 'published', 1, 660, 0),
   ('e0000001-0000-4000-8000-000000000045', 'd0000001-0000-4000-8000-000000000015', 'c0000001-0000-4000-8000-000000000007',
    'unions-and-narrowing', 'Unions and Narrowing',
-   'Modelling "one of these" so the compiler can prove which one you have.',
+   'A union says one of these. Narrowing is how the compiler works out which one you have in a particular branch, and it is the part of TypeScript that most changes how you model a problem - a discriminated union instead of optional fields.',
    'article', 'published', 2, 720, 0),
   ('e0000001-0000-4000-8000-000000000046', 'd0000001-0000-4000-8000-000000000015', 'c0000001-0000-4000-8000-000000000007',
    'generics', 'Generics',
-   'Keeping the type information a function was given instead of throwing it away.',
+   'A generic keeps the type information a function was given instead of flattening it. That is the entire idea; everything else is syntax, including the constraints that let you say what you need from a type without pinning it down.',
    'article', 'published', 3, 720, 0),
   ('e0000001-0000-4000-8000-00000000004e', 'd0000001-0000-4000-8000-000000000015', 'c0000001-0000-4000-8000-000000000007',
    'ts-level-2-check', 'Level 2 Check: Shapes, Unions and Generics',
-   'Five questions on interfaces, narrowing and generics.',
+   'Five questions on interfaces against aliases, narrowing a union down to one member, and writing a generic that keeps the caller type instead of losing it on the way through.',
    'quiz', 'published', 4, 480, 0),
 
   ('e0000001-0000-4000-8000-000000000047', 'd0000001-0000-4000-8000-000000000016', 'c0000001-0000-4000-8000-000000000007',
    'utility-types', 'The Utility Types',
-   'Partial, Pick, Omit, Record and Readonly - and what each one is actually built from.',
+   'A handful of built-in types that transform other types. They save real work, and every one of them is written in TypeScript you could have written yourself - Partial, Pick, Omit, Record and Readonly, with what each is actually made of.',
    'article', 'published', 1, 720, 0),
   ('e0000001-0000-4000-8000-000000000048', 'd0000001-0000-4000-8000-000000000016', 'c0000001-0000-4000-8000-000000000007',
    'keyof-typeof-indexed', 'keyof, typeof and Indexed Access',
-   'Deriving types from values and from each other, so they cannot drift apart.',
+   'Three operators that derive a type from something that already exists. Between them they remove nearly every case where two things have to be kept in step by hand, which is the case where they eventually drift apart.',
    'article', 'published', 2, 720, 0),
   ('e0000001-0000-4000-8000-000000000049', 'd0000001-0000-4000-8000-000000000016', 'c0000001-0000-4000-8000-000000000007',
    'typing-functions', 'Typing Functions Precisely',
-   'Overloads, this, predicates and assertions - describing what a function really does.',
+   'Most functions need nothing but parameter types. The ones that need more - because the return depends on the input, or because the call proves something about its argument - have specific tools: overloads, this types, predicates and assertions.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-00000000004f', 'd0000001-0000-4000-8000-000000000016', 'c0000001-0000-4000-8000-000000000007',
    'ts-level-3-check', 'Level 3 Check: Utility Types and Operators',
-   'Five questions on utility types, keyof and typing functions.',
+   'Five questions on Pick, Omit, Partial and Record, the keyof and typeof operators, and the rules that govern when one function type is assignable to another. The parameter question catches most people.',
    'quiz', 'published', 4, 540, 0),
 
   ('e0000001-0000-4000-8000-00000000004a', 'd0000001-0000-4000-8000-000000000017', 'c0000001-0000-4000-8000-000000000007',
    'conditional-and-mapped', 'Conditional and Mapped Types',
-   'Types that branch and types that transform - how the standard library is written.',
+   'Types that branch, and types that transform. Together they are how the whole standard library is written, and once you can read them the utility types stop being magic and become code you could have written yourself.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-00000000004b', 'd0000001-0000-4000-8000-000000000017', 'c0000001-0000-4000-8000-000000000007',
    'template-literal-types', 'Template Literal Types',
-   'Types built from string patterns, and the autocomplete they make possible.',
+   'String types built from patterns. They turn a stringly-typed API into one the editor can autocomplete, and they are the reason a modern library can give a precise type to something that used to be plain string.',
    'article', 'published', 2, 720, 0),
   ('e0000001-0000-4000-8000-00000000004c', 'd0000001-0000-4000-8000-000000000017', 'c0000001-0000-4000-8000-000000000007',
    'declaration-files', 'Declaration Files and Configuration',
-   'Typing a library that ships no types, and the tsconfig flags that matter.',
+   'How to use a library that ships no types, how to extend one that does, and the handful of tsconfig flags that decide how much the compiler actually does for you. strict is one flag that turns on several.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-000000000050', 'd0000001-0000-4000-8000-000000000017', 'c0000001-0000-4000-8000-000000000007',
    'ts-expert-exam', 'Expert Exam: TypeScript',
-   'Conditional and mapped types, template literals and declaration files.',
+   'Twenty questions over the whole course: conditional and mapped types, inference inside a conditional, template literal types, and the configuration that decides how much of this the compiler really enforces.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

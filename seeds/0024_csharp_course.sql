@@ -23,13 +23,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000d',
    'csharp-from-basics-to-expert',
    'C#: From Basics to Expert',
    'Four levels, twelve lessons, every example compiled and run on .NET',
+   'C# is Microsoft''s general-purpose language and the one most .NET applications are written in: web services, desktop software, games through Unity, and a large amount of enterprise back-end work.
+
+It is also one of the fastest-moving mainstream languages. Nullable reference types turned the most common crash in the language into a compiler warning; records made value objects a single line; pattern matching has grown into something close to a language of its own. Taught on .NET 8 and C# 12, this course uses all of that as ordinary tooling, because in current code it is.
+
+.NET has been cross-platform and open source for years now, so none of this is tied to Windows. If you have avoided it on that basis, the basis is gone.',
    'A complete path through C# in four levels, taught on .NET 8 and C# 12. Level 1, Basic, covers the split between value types and references, nullable reference types - the feature that turns a NullReferenceException into a compiler warning - and the collections with LINQ over them. Level 2, Intermediate, is classes, structs and records and when each is right, properties with init and required, interfaces and reified generics, variance, and the three shapes of failure. Level 3, Advanced, covers async and await and what they actually free, LINQ''s deferred execution with the pattern matching that has grown into its own language, and real parallelism with locks, Interlocked and channels. Level 4, Expert, finishes with the garbage collector and the leaks it cannot prevent, where the time and allocations go, and how to arrange an application so a change stays small.
 
 No C# is assumed. The course is taught on .NET 8 and C# 12, so it teaches the language as it is now rather than as it was: nullable reference types, records, pattern matching and channels are treated as ordinary tools, because in current code they are.
@@ -54,7 +59,8 @@ By the end you will be able to write C# that holds up under review: nullability 
    JSON_ARRAY('No prior C#', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -83,67 +89,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-0000000000a1', 'd0000001-0000-4000-8000-00000000002c', 'c0000001-0000-4000-8000-00000000000d',
    'cs-values-and-types', 'Values, Types and Nullable Reference Types',
-   'Value types against references, what ! really does, and decimal for money.',
+   'Two families of type, and which one a variable is decides whether it holds the value or a reference to it. Also what the nullable annotations and the ! operator really promise, and why money is decimal rather than double.',
    'article', 'published', 1, 720, 1),
   ('e0000001-0000-4000-8000-0000000000a2', 'd0000001-0000-4000-8000-00000000002c', 'c0000001-0000-4000-8000-00000000000d',
    'cs-control-flow', 'Control Flow, Methods and Pattern Switches',
-   'The switch expression with relational patterns, named arguments, and the Try shape.',
+   'The loops are conventional; switch is not. C# has two forms of it, and the expression form with relational and logical patterns is shorter and harder to get wrong - plus named arguments and the Try shape for a call that may not succeed.',
    'article', 'published', 2, 660, 1),
   ('e0000001-0000-4000-8000-0000000000a3', 'd0000001-0000-4000-8000-00000000002c', 'c0000001-0000-4000-8000-00000000000d',
    'cs-collections', 'Collections and LINQ',
-   'Collection expressions, the dictionary that throws, and LINQ''s deferred execution.',
+   'Three collections carry almost every C# program: List for order, HashSet for membership, Dictionary for lookup. Why C# generics are not erased, which dictionary access throws and which does not, and what deferred execution means in LINQ.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-0000000000a4', 'd0000001-0000-4000-8000-00000000002d', 'c0000001-0000-4000-8000-00000000000d',
    'cs-classes-and-records', 'Classes, Structs and Records',
-   'class, struct or record; primary constructors, init, required, and the equality contract.',
+   'Three ways to declare a type, and the choice is about identity and copying rather than style: a class is shared, a struct is copied, a record compares by value. With primary constructors, init and required, and the equality contract each one signs.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-0000000000a5', 'd0000001-0000-4000-8000-00000000002d', 'c0000001-0000-4000-8000-00000000000d',
    'cs-interfaces-and-generics', 'Interfaces, Generics and Extension Methods',
-   'Default implementations, reified generics, in and out variance, and extension methods.',
+   'An interface is a promise about behaviour, which is what lets a use case take a real database in production and a dictionary in a test. Then reified generics, where in and out variance is allowed, and what an extension method compiles to.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-0000000000a6', 'd0000001-0000-4000-8000-00000000002d', 'c0000001-0000-4000-8000-00000000000d',
    'cs-exceptions', 'Exceptions, Disposal and Failing on Purpose',
-   'when filters, using, keeping the stack trace, and the TryParse shape.',
+   'C# has no checked exceptions, so nothing in a signature tells a caller what might be thrown and what you throw becomes a design decision. Exception filters, using and IDisposable, how a rethrow loses the stack trace, and the TryParse shape.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-0000000000a7', 'd0000001-0000-4000-8000-00000000002e', 'c0000001-0000-4000-8000-00000000000d',
    'cs-async', 'async, await and Tasks',
-   'What await frees, WhenAll, cancellation tokens, and why async void is a trap.',
+   'A Task is work that may not have finished; await is where a method suspends and hands its thread back to the pool. What that actually frees, running work together with WhenAll, cancellation tokens, and why async void swallows the exception.',
    'article', 'published', 1, 900, 0),
   ('e0000001-0000-4000-8000-0000000000a8', 'd0000001-0000-4000-8000-00000000002e', 'c0000001-0000-4000-8000-00000000000d',
    'cs-linq-and-patterns', 'LINQ in Depth and Pattern Matching',
-   'Deferred execution, the collectors worth knowing, and property and positional patterns.',
+   'LINQ is two things at once: extension methods over IEnumerable, and a query syntax that compiles to exactly those calls. Understanding the first explains every surprise in the second - deferred execution, the collectors worth knowing, and matching on shape.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-0000000000a9', 'd0000001-0000-4000-8000-00000000002e', 'c0000001-0000-4000-8000-00000000000d',
    'cs-parallel', 'Threads, Locks and Parallel Work',
-   'Data races, lock and Interlocked, AsParallel, and Channels with backpressure.',
+   'async and parallelism are different problems: one is about not holding a thread while waiting, the other about using several cores at once. Data races and where they come from, lock against Interlocked, AsParallel, and Channels with backpressure.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-0000000000aa', 'd0000001-0000-4000-8000-00000000002f', 'c0000001-0000-4000-8000-00000000000d',
    'cs-memory', 'Memory, the Heap and Disposal',
-   'Generations, the leaks a collector cannot prevent, IDisposable, and Span.',
+   'Values live in two places: a stack frame per call, and a heap a garbage collector manages. Generations and why most collections are cheap, the leaks a collector cannot prevent, what IDisposable is for, and where Span avoids a copy.',
    'article', 'published', 1, 900, 0),
   ('e0000001-0000-4000-8000-0000000000ab', 'd0000001-0000-4000-8000-00000000002f', 'c0000001-0000-4000-8000-00000000000d',
    'cs-performance', 'Where C# Spends Its Time',
-   'StringBuilder, boxing, the right collection, and why the first measurement is the JIT.',
+   'Most .NET performance problems are one of four things: building strings in a loop, allocating in a hot path, the wrong collection, and measuring the JIT warm-up instead of the code. Each one, with the measurement that shows it.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-0000000000ac', 'd0000001-0000-4000-8000-00000000002f', 'c0000001-0000-4000-8000-00000000000d',
    'cs-architecture', 'Arranging a C# Application',
-   'Plain-C# rules, interfaces the domain owns, internal by default, one composition root.',
+   'An application that stays easy to change keeps its rules in one place, its I/O at the edges and its dependencies pointing inward. Plain C# for the domain, interfaces the domain owns rather than the database, internal by default, and one composition root.',
    'article', 'published', 3, 900, 0),
   ('e0000001-0000-4000-8000-0000000000ad', 'd0000001-0000-4000-8000-00000000002c', 'c0000001-0000-4000-8000-00000000000d',
    'cs-level-1-check', 'Level 1 Check: Types, Nullability and Collections',
-   'Five questions on nullability, the dictionary indexer, LINQ and const against readonly.',
+   'Five questions on the value-and-reference split, what the nullable annotations actually guarantee, the dictionary indexer against TryGetValue, deferred execution, and const against readonly. Every one can be settled in a scratch console project.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-0000000000ae', 'd0000001-0000-4000-8000-00000000002d', 'c0000001-0000-4000-8000-00000000000d',
    'cs-level-2-check', 'Level 2 Check: Records, Interfaces and Failure',
-   'Five questions on records and structs, variance, and preserving a stack trace.',
+   'Five questions on class against struct against record, what in and out variance allow, which failures are worth catching at all, and the one line that destroys a stack trace on the way back up.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-0000000000af', 'd0000001-0000-4000-8000-00000000002e', 'c0000001-0000-4000-8000-00000000000d',
    'cs-level-3-check', 'Level 3 Check: async, LINQ and Patterns',
-   'Five questions on what await frees, cancellation, data races and patterns.',
+   'Five questions on what await actually frees, how a cancellation token reaches the work, where a data race comes from, and what property and positional patterns match. The async void question is the one most people get wrong.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-0000000000b0', 'd0000001-0000-4000-8000-00000000002f', 'c0000001-0000-4000-8000-00000000000d',
    'cs-expert-exam', 'Expert Exam: C#',
-   'Leaks, disposal, the JIT, and how an application is arranged.',
+   'Twenty questions over the whole course: disposal and the leaks a collector cannot prevent, allocation and the JIT, async and cancellation, and how an application is arranged so its domain knows nothing about its database.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

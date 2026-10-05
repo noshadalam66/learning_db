@@ -22,13 +22,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000c',
    'java-from-basics-to-expert',
    'Java: From Basics to Expert',
    'Four levels, twelve lessons, every example compiled and run on a real JDK',
+   'Java is the language of large, long-lived systems: banks, insurers, telecoms, Android, and most of the data infrastructure the rest of the industry runs on. Code written twenty years ago still compiles, which is both why it is everywhere and why it has a reputation for verbosity.
+
+That reputation is now out of date. Records, sealed types, switch expressions, pattern matching, var and virtual threads have changed what ordinary Java looks like, and a modern file is a good deal shorter than the one people picture. This course is taught on Java 21 and uses those features from the start rather than mentioning them at the end.
+
+What has not changed is the thing worth learning it for: the JVM. A platform that compiles the hot paths of a running program to native code, manages memory well enough that most developers never think about it, and runs the same artefact everywhere is a serious piece of engineering, and understanding it makes you better at the languages on top of it.',
    'A complete path through Java in four levels, taught on Java 21. Level 1, Basic, covers the split between primitives and references that explains most of Java''s surprises - why == is not equals, how null stays unannounced, and what the collections framework actually offers. Level 2, Intermediate, is classes and records, validation that makes invalid objects impossible, interfaces and generics including erasure and wildcards, sealed hierarchies, and the three kinds of failure. Level 3, Advanced, covers lambdas and streams, what a data race really costs and how executors and virtual threads answer it, and the pattern matching that makes a missed case a compile error. Level 4, Expert, finishes with reachability and the garbage collector, where the time and memory actually go, and how to arrange an application so a change stays small.
 
 No Java is assumed, and the course is taught on Java 21 rather than the Java most tutorials still teach. If you learned Java a decade ago, that is the reason to read it: records, sealed types, switch expressions, pattern matching and virtual threads have changed what ordinary code looks like.
@@ -51,7 +56,8 @@ By the end you will be able to write Java that a reviewer will pass without argu
    JSON_ARRAY('No prior Java', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -80,67 +86,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-000000000091', 'd0000001-0000-4000-8000-000000000028', 'c0000001-0000-4000-8000-00000000000c',
    'java-values-and-types', 'Values, Types and References',
-   'Primitives against references, why == is not equals, and how null stays unannounced.',
+   'Java has two kinds of value and the difference explains most of the surprises a beginner meets: primitives hold the value, everything else holds a reference. Which is why == is not equals, and why null arrives with no announcement at all.',
    'article', 'published', 1, 720, 1),
   ('e0000001-0000-4000-8000-000000000092', 'd0000001-0000-4000-8000-000000000028', 'c0000001-0000-4000-8000-00000000000c',
    'java-control-flow', 'Control Flow, Methods and switch',
-   'The switch expression that cannot fall through, varargs, and pass-by-value explained precisely.',
+   'The loops and conditionals will look familiar from any C-family language. What has changed recently and is worth knowing properly is switch: since Java 14 it can be an expression, which cannot fall through. Plus varargs and pass-by-value, precisely.',
    'article', 'published', 2, 660, 1),
   ('e0000001-0000-4000-8000-000000000093', 'd0000001-0000-4000-8000-000000000028', 'c0000001-0000-4000-8000-00000000000c',
    'java-collections', 'Lists, Maps, Sets and the Collections Framework',
-   'List, Set and Map, which implementation to pick, and the hashCode contract for keys.',
+   'Three interfaces carry almost every Java program: List for order, Set for membership, Map for lookup. You program against the interface and choose the implementation once - and if your keys are your own type, the hashCode contract is not optional.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-000000000094', 'd0000001-0000-4000-8000-000000000029', 'c0000001-0000-4000-8000-00000000000c',
    'java-classes-and-records', 'Classes, Records and Value Objects',
-   'Validation in the constructor, the equals and hashCode pair, and what a record generates.',
+   'A class bundles state with the operations allowed on it, and the point of private fields is not secrecy - it is that the class gets to decide what a valid object looks like and keep that true. With the equals and hashCode pair, and what a record generates for you.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-000000000095', 'd0000001-0000-4000-8000-000000000029', 'c0000001-0000-4000-8000-00000000000c',
    'java-interfaces-and-generics', 'Interfaces, Generics and Sealed Types',
-   'Default methods, bounds, erasure, PECS, enums with behaviour, and sealed hierarchies.',
+   'An interface is a promise about what a type can do, with no statement about what it is, and programming against one is what lets a test swap the implementation out. Default methods, bounds, erasure and what it costs, PECS, and sealed hierarchies.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-000000000096', 'd0000001-0000-4000-8000-000000000029', 'c0000001-0000-4000-8000-00000000000c',
    'java-exceptions', 'Exceptions, Optional and Failing on Purpose',
-   'Checked against unchecked, try-with-resources, keeping the cause, and Optional as a return type.',
+   'Java splits failure into three, and the split is the lesson: checked for what a caller can do something about, unchecked for a programmer error, Error for what nobody can. With try-with-resources, keeping the cause, and Optional as a return type.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-000000000097', 'd0000001-0000-4000-8000-00000000002a', 'c0000001-0000-4000-8000-00000000000c',
    'java-streams', 'Lambdas, Streams and Collectors',
-   'Functional interfaces, lazy pipelines, the collectors worth knowing, and why not to mutate from a lambda.',
+   'A lambda is a function written where a value is expected, and since Java has no function type of its own it is an instance of a functional interface. Then lazy pipelines, the collectors worth knowing, and why mutating from inside a lambda is a bug waiting.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-000000000098', 'd0000001-0000-4000-8000-00000000002a', 'c0000001-0000-4000-8000-00000000000c',
    'java-concurrency', 'Threads, Executors and Virtual Threads',
-   'What a data race actually costs, executors over raw threads, and what virtual threads change.',
+   'Two threads reading and writing the same field with nothing arranged between them is a data race, and the result is not merely a wrong number - the JVM and the CPU are free to reorder. Executors over raw threads, and what virtual threads actually change.',
    'article', 'published', 2, 900, 0),
   ('e0000001-0000-4000-8000-000000000099', 'd0000001-0000-4000-8000-00000000002a', 'c0000001-0000-4000-8000-00000000000c',
    'java-patterns', 'Pattern Matching and Sealed Hierarchies',
-   'instanceof with a binding, exhaustive switch over sealed types, record patterns and guards.',
+   'Java spent twenty years arriving at this: instanceof with a binding, a switch over a sealed type that the compiler proves exhaustive, record patterns that destructure, and guards. Together they replace a chain of casts with something that cannot miss a case.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-00000000009a', 'd0000001-0000-4000-8000-00000000002b', 'c0000001-0000-4000-8000-00000000000c',
    'java-memory', 'Objects, Memory and the Garbage Collector',
-   'Reachability rather than use, the four classic leaks, and why nested classes should be static.',
+   'Java memory is in two parts: a stack frame per method call, and a heap holding every object. Collection is about reachability rather than use, which is the whole of the four classic leaks - and why a nested class should be static unless it needs not to be.',
    'article', 'published', 1, 900, 0),
   ('e0000001-0000-4000-8000-00000000009b', 'd0000001-0000-4000-8000-00000000002b', 'c0000001-0000-4000-8000-00000000000c',
    'java-performance', 'Where Java Spends Its Time',
-   'StringBuilder, boxing, the right collection, and why your first measurement is the JIT.',
+   'Four things account for most Java performance problems: building strings in a loop, boxing in a hot path, the wrong collection, and measuring the JIT warm-up instead of the code. The first three are avoidable; the fourth is why your first measurement is wrong.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-00000000009c', 'd0000001-0000-4000-8000-00000000002b', 'c0000001-0000-4000-8000-00000000000c',
    'java-architecture', 'Arranging a Java Application',
-   'Plain-Java rules, interfaces the domain owns, package-private by default, one dull composition root.',
+   'An application that stays easy to change has its rules in one place, its I/O at the edges, and dependencies pointing inward. Plain Java for the domain, interfaces the domain owns rather than the database, package-private by default, and one dull composition root.',
    'article', 'published', 3, 900, 0),
   ('e0000001-0000-4000-8000-00000000009d', 'd0000001-0000-4000-8000-000000000028', 'c0000001-0000-4000-8000-00000000000c',
    'java-level-1-check', 'Level 1 Check: Types, References and Collections',
-   'Five questions on boxing, pass-by-value, strings and the collections.',
+   'Five questions on boxing and where it costs, what pass-by-value actually means for an object argument, string identity, and picking a collection. Every one of these can be settled by compiling five lines.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-00000000009e', 'd0000001-0000-4000-8000-000000000029', 'c0000001-0000-4000-8000-00000000000c',
    'java-level-2-check', 'Level 2 Check: Records, Generics and Exceptions',
-   'Five questions on the equals contract, erasure, PECS and which failures to catch.',
+   'Five questions on the equals and hashCode contract, what erasure costs you at runtime, when PECS decides between extends and super, and which failures are actually yours to catch.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-00000000009f', 'd0000001-0000-4000-8000-00000000002a', 'c0000001-0000-4000-8000-00000000000c',
    'java-level-3-check', 'Level 3 Check: Streams, Threads and Patterns',
-   'Five questions on lazy pipelines, data races, virtual threads and exhaustive switch.',
+   'Five questions on what makes a stream pipeline lazy, where a data race comes from, what virtual threads change about blocking, and a switch over a sealed type that cannot miss a case.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-0000000000a0', 'd0000001-0000-4000-8000-00000000002b', 'c0000001-0000-4000-8000-00000000000c',
    'java-expert-exam', 'Expert Exam: Java',
-   'Leaks, the JIT, the right data structure, and how an application is arranged.',
+   'Twenty questions over the whole course: reachability and the leaks that follow from it, where the time goes and why the JIT hides it, choosing the right data structure, and how an application is arranged.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

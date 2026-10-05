@@ -32,13 +32,18 @@ ON DUPLICATE KEY UPDATE name = VALUES(name);
 -- The course
 -- ---------------------------------------------------------------------------
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000004',
    'html-from-basics-to-expert',
    'HTML: From Basics to Expert',
    'Four levels, twelve lessons, every example runnable in the browser',
+   'HTML is the language every web page is written in. It is not a programming language: it does not calculate or decide anything. It says what the things on a page are - this is a heading, this is a link, this is a table of sales figures - and the browser, the search engine and the screen reader all work from that answer.
+
+That is why it is worth more attention than it usually gets. CSS can make any element look like any other, so a page built from meaningless divs can be made to look perfect and still be unusable with a keyboard, unreadable aloud, and invisible to the thing that decides whether anyone finds it. The markup is the layer that carries meaning, and nothing above it can put the meaning back.
+
+It is also the smallest useful thing you can learn in web development. By the end of Level 1 you can build a page that works. Nothing else on this site has that ratio.',
    -- catalog_courses.description is plain text, not Markdown. Only
    -- content_articles carries a format column, and only that body is rendered.
    -- Asterisks here would reach the page as literal asterisks.
@@ -64,7 +69,8 @@ By the end you will be able to build a page that is valid, accessible and fast w
    JSON_ARRAY('A text editor and a browser', 'No previous HTML required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -102,57 +108,57 @@ VALUES
   -- Level 1 - Basic
   ('e0000001-0000-4000-8000-000000000011', 'd0000001-0000-4000-8000-000000000008', 'c0000001-0000-4000-8000-000000000004',
    'the-document-skeleton', 'The Document Skeleton',
-   'Every page you will ever write starts with these nine lines. Here is what each one is for.',
+   'Every HTML page ever shipped starts from the same nine lines, and they are worth knowing by heart: a page that omits one still renders, because the browser repairs it silently, and then behaves strangely in a way nothing points at.',
    'article', 'published', 1, 420, 1),
   ('e0000001-0000-4000-8000-000000000012', 'd0000001-0000-4000-8000-000000000008', 'c0000001-0000-4000-8000-000000000004',
    'text-headings-and-meaning', 'Text, Headings and Meaning',
-   'Headings are an outline, not a font size. Choosing the right text element is most of what HTML is.',
+   'Choosing the right text element is HTML; everything about how it looks belongs to CSS. The question to ask about a piece of text is not how it should look but what it is - and headings answer it as an outline, not as a font size.',
    'article', 'published', 2, 480, 1),
   ('e0000001-0000-4000-8000-000000000013', 'd0000001-0000-4000-8000-000000000008', 'c0000001-0000-4000-8000-000000000004',
    'links-images-and-lists', 'Links, Images and Lists',
-   'Three elements carry most of the web. Each has one attribute people forget, and each omission has a cost.',
+   'Three elements carry most of the web, and each has an attribute people leave off: a link that does not say where it goes, an image with no alt text, a list that is really a stack of divs. Each omission has a specific cost.',
    'article', 'published', 3, 540, 0),
 
   -- Level 2 - Intermediate
   ('e0000001-0000-4000-8000-000000000014', 'd0000001-0000-4000-8000-000000000009', 'c0000001-0000-4000-8000-000000000004',
    'tables-that-communicate', 'Tables That Communicate Data',
-   'A table without a caption and scoped headers is a grid of numbers nobody can read out loud.',
+   'A table is the right element for two-dimensional data and the wrong one for layout, and the difference is not aesthetic: a screen reader announces the shape and then reads each cell against its headers. Without a caption and scope it reads a grid of numbers.',
    'article', 'published', 1, 600, 0),
   ('e0000001-0000-4000-8000-000000000015', 'd0000001-0000-4000-8000-000000000009', 'c0000001-0000-4000-8000-000000000004',
    'forms-and-native-validation', 'Forms and Native Validation',
-   'The browser will validate, autofill and describe your form for free, if you label it properly.',
+   'The browser will label, validate, autofill and describe your form for free. Most of the JavaScript written for forms re-implements something that was already there and does it worse - without keyboard support, and without telling anyone what went wrong.',
    'article', 'published', 2, 720, 0),
   ('e0000001-0000-4000-8000-000000000016', 'd0000001-0000-4000-8000-000000000009', 'c0000001-0000-4000-8000-000000000004',
    'responsive-images-and-media', 'Responsive Images and Media',
-   'One image element, several files, and the browser picking the cheapest one that still looks right.',
+   'Sending a 2400-pixel photograph to a phone wastes the visitor data allowance and their battery, and fixing it is the easiest performance win on most sites. One image element, several files, and the browser picking the cheapest one that still looks right.',
    'article', 'published', 3, 660, 0),
 
   -- Level 3 - Advanced
   ('e0000001-0000-4000-8000-000000000017', 'd0000001-0000-4000-8000-00000000000a', 'c0000001-0000-4000-8000-000000000004',
    'semantic-layout-and-landmarks', 'Semantic Layout and Landmarks',
-   'Six elements replace a page full of divs and give screen reader users a table of contents.',
+   'Six elements replace a page full of div class=header and give screen reader users something a sighted reader has always had: the ability to skim. Landmarks are that skimming interface, and this is where each one goes.',
    'article', 'published', 1, 660, 0),
   ('e0000001-0000-4000-8000-000000000018', 'd0000001-0000-4000-8000-00000000000a', 'c0000001-0000-4000-8000-000000000004',
    'accessible-components', 'Accessible Interactive Components',
-   'Disclosure, dialog and tabs - built on elements the browser already makes accessible.',
+   'The accessible version of most components is the one built on an element the browser already understands. Focus, keyboard handling, escape-to-close and the announcements are hard to get right - so disclosure, dialog and tabs, built on what is already there.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-000000000019', 'd0000001-0000-4000-8000-00000000000a', 'c0000001-0000-4000-8000-000000000004',
    'head-metadata-and-sharing', 'Head Metadata and Sharing',
-   'What search engines index, what a chat app previews, and what a browser tab shows.',
+   'Nobody looks at the head, and it decides what the page is in a search result, in a shared link, on a phone home screen and in a browser tab. Per byte written it is the highest-leverage markup in the document.',
    'article', 'published', 3, 600, 0),
 
   -- Level 4 - Expert
   ('e0000001-0000-4000-8000-00000000001a', 'd0000001-0000-4000-8000-00000000000b', 'c0000001-0000-4000-8000-000000000004',
    'templates-and-custom-elements', 'Templates and Custom Elements',
-   'Inert markup you can stamp out repeatedly, and a tag the browser lets you define yourself.',
+   'The template element is markup the parser reads but does not render: no images fetched, no scripts run, no styles applied - a stencil you stamp out. A custom element is a tag you define yourself, with lifecycle callbacks the browser calls for you.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-00000000001b', 'd0000001-0000-4000-8000-00000000000b', 'c0000001-0000-4000-8000-000000000004',
    'html-that-loads-fast', 'HTML That Loads Fast',
-   'Attributes that move a page from three seconds to under one, without changing a single byte of the design.',
+   'Most of a page loading behaviour is decided by attributes in the first few kilobytes of HTML, before any CSS or JavaScript has run. Getting them right costs nothing at runtime and is usually worth more than any amount of bundling.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-00000000001c', 'd0000001-0000-4000-8000-00000000000b', 'c0000001-0000-4000-8000-000000000004',
    'progressive-enhancement', 'Progressive Enhancement in Practice',
-   'Build the version that works with no JavaScript, then add the version that feels instant.',
+   'Build the version that works with plain HTML, then add the version that feels instant. The order matters: the second is an enhancement of the first rather than a replacement, and the first is what is left when the script fails to load.',
    'article', 'published', 3, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

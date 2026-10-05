@@ -14,13 +14,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000009',
    'php-from-basics-to-expert',
    'PHP: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'PHP runs a large share of the web, including most of the sites you use without thinking about it. It was designed to put a page together on a server and send it to a browser, and it is still extremely good at exactly that.
+
+The PHP most people remember is not the PHP that exists now. Typed properties, enums, readonly classes, constructor promotion, real exceptions, match expressions and a serious performance rewrite arrived over the last few versions. Code written today looks much more like modern Java or C# than like the PHP 5 it is still judged against.
+
+It is also the most direct route from nothing to a working server-rendered site. One file, a web server and a database, and you have an application - which is why it remains a sensible thing to learn even if you intend to spend your career elsewhere.',
    'A complete path through PHP in four levels. Level 1, Basic, covers how values and types relate, the two kinds of equality, control flow including match, and the array type that serves as both list and map. Level 2, Intermediate, is text and dates, the class machinery - promotion, readonly, interfaces and enums - and failing deliberately rather than by accident. Level 3, Advanced, covers sharing behaviour without inheritance, generators and laziness, and the input handling that separates a working site from a breached one. Level 4, Expert, finishes with attributes and reflection, where time and memory actually go, and how to arrange an application so a change stays small.
 
 No PHP is assumed, and no other language either. If you learned PHP years ago and have not looked since, this course is largely about what changed: typed properties, enums, match, readonly, constructor promotion and real exceptions have moved the language a long way from the one most people remember.
@@ -43,7 +48,8 @@ By the end you will be able to write PHP that is typed, tested and safe at its e
    JSON_ARRAY('No prior PHP', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -73,67 +79,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-000000000061', 'd0000001-0000-4000-8000-00000000001c', 'c0000001-0000-4000-8000-000000000009',
    'php-values-and-types', 'Values, Types and Variables',
-   'Types that follow the value, and the difference between == and ===.',
+   'Every PHP variable starts with a dollar sign, and PHP works out the type from what you put in it. That flexibility is exactly why the comparison rules matter so much, and why == and === are not interchangeable.',
    'article', 'published', 1, 600, 1),
   ('e0000001-0000-4000-8000-000000000062', 'd0000001-0000-4000-8000-00000000001c', 'c0000001-0000-4000-8000-000000000009',
    'php-control-flow', 'Control Flow and Functions',
-   'match against switch, typed functions, and closures that capture on purpose.',
+   'The building blocks look like C, with two modern additions that remove most of the noise from everyday code: match, which compares strictly and returns a value, and arrow functions, which capture what they use without a use clause.',
    'article', 'published', 2, 660, 1),
   ('e0000001-0000-4000-8000-000000000063', 'd0000001-0000-4000-8000-00000000001c', 'c0000001-0000-4000-8000-000000000009',
    'php-arrays', 'Arrays, the One Data Structure',
-   'One structure serving as list and map, and the copy semantics that surprise people.',
+   'A PHP array is an ordered map, and the same type serves as a list, a dictionary, a set and a stack depending on how you use it - which is convenient and occasionally confusing. With the copy semantics that surprise people coming from other languages.',
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-000000000064', 'd0000001-0000-4000-8000-00000000001d', 'c0000001-0000-4000-8000-000000000009',
    'php-strings-and-dates', 'Strings, Formatting and Dates',
-   'Bytes against characters, formatting, and dates that cannot change underneath you.',
+   'PHP strings are byte strings. That matters the moment a learner name has an accent in it, so the multibyte functions are not optional extras. With formatting, and date objects that cannot change underneath the code holding them.',
    'article', 'published', 1, 660, 0),
   ('e0000001-0000-4000-8000-000000000065', 'd0000001-0000-4000-8000-00000000001d', 'c0000001-0000-4000-8000-000000000009',
    'php-classes', 'Classes, Interfaces and Enums',
-   'Promotion, readonly, interfaces against abstract classes, and enums that carry behaviour.',
+   'Modern PHP has enough type machinery that a class can describe its own rules rather than relying on documentation. Constructor promotion, readonly, interfaces against abstract classes, and enums that carry behaviour rather than just names.',
    'article', 'published', 2, 720, 0),
   ('e0000001-0000-4000-8000-000000000066', 'd0000001-0000-4000-8000-00000000001d', 'c0000001-0000-4000-8000-000000000009',
    'php-errors', 'Errors, Exceptions and Debugging',
-   'Error against Exception, catching precisely, and warnings that hide real bugs.',
+   'PHP has two failure families, and knowing which one you are looking at is most of debugging: an Error means something is wrong with the program, an Exception that something went wrong in it. Plus the warnings that quietly hide a real bug.',
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-000000000067', 'd0000001-0000-4000-8000-00000000001e', 'c0000001-0000-4000-8000-000000000009',
    'php-composition', 'Traits, Static and Composition',
-   'Traits and their collisions, why static resists testing, and what to do instead.',
+   'PHP has single inheritance, so the interesting question is how to share behaviour without it. Traits are one answer and composition is usually the better one - with what happens when two traits collide, and why static state resists testing.',
    'article', 'published', 1, 720, 0),
   ('e0000001-0000-4000-8000-000000000068', 'd0000001-0000-4000-8000-00000000001e', 'c0000001-0000-4000-8000-000000000009',
    'php-iterators', 'Generators, Iterators and Laziness',
-   'Producing one value at a time, and making your own type work in a foreach.',
+   'A generator produces values one at a time, which is how PHP reads a file larger than memory and how it describes a sequence that never ends. Plus making your own type work in a foreach by implementing the protocol behind it.',
    'article', 'published', 2, 720, 0),
   ('e0000001-0000-4000-8000-000000000069', 'd0000001-0000-4000-8000-00000000001e', 'c0000001-0000-4000-8000-000000000009',
    'php-web-safety', 'Input, Output and Staying Safe',
-   'Validating input, escaping for the destination, and queries that take parameters.',
+   'Every serious PHP vulnerability is one of three mistakes: trusting input, building a query by pasting strings together, or printing data as markup. Validating on the way in, escaping for the destination, and queries that take parameters.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-00000000006a', 'd0000001-0000-4000-8000-00000000001f', 'c0000001-0000-4000-8000-000000000009',
    'php-attributes', 'Attributes and Reflection',
-   'Metadata that does nothing until something reads it, and what reading it costs.',
+   'An attribute is structured metadata attached to a declaration, and reflection is how you read it back. Together they are how modern PHP frameworks configure themselves without a configuration file - and this says what that reading costs.',
    'article', 'published', 1, 780, 0),
   ('e0000001-0000-4000-8000-00000000006b', 'd0000001-0000-4000-8000-00000000001f', 'c0000001-0000-4000-8000-000000000009',
    'php-performance', 'Performance and Memory',
-   'Memory, the N+1 query, and the loop work that did not need to be in the loop.',
+   'Most PHP performance work is not micro-optimisation. It is avoiding the three things that actually cost: loading everything into memory, doing work in a loop that belongs outside it, and asking the database N times instead of once.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-00000000006c', 'd0000001-0000-4000-8000-00000000001f', 'c0000001-0000-4000-8000-000000000009',
    'php-architecture', 'Structuring an Application',
-   'Rules in plain objects, dependencies pointing inwards, and a thin edge.',
+   'The point of structure is that a change stays small, and everything here serves that: the thing you change most often should depend on the things that change least. Rules in plain objects, dependencies pointing inward, and a thin edge.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-000000000079', 'd0000001-0000-4000-8000-00000000001c', 'c0000001-0000-4000-8000-000000000009',
    'php-level-1-check', 'Level 1 Check: Types, Flow and Arrays',
-   'Five questions on comparison, match, and how arrays behave when you copy them.',
+   'Five questions on comparison and what == will accept, match against switch, and how an array behaves when you copy it or pass it to a function. Every one can be settled in the scratchpad below the questions.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-00000000007a', 'd0000001-0000-4000-8000-00000000001d', 'c0000001-0000-4000-8000-000000000009',
    'php-level-2-check', 'Level 2 Check: Text, Classes and Failure',
-   'Five questions on strings and dates, the class machinery, and exceptions.',
+   'Five questions on strings and dates, the class machinery that replaces documentation with types, and the difference between an Error and an Exception - including which of the two you should almost never catch.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-00000000007b', 'd0000001-0000-4000-8000-00000000001e', 'c0000001-0000-4000-8000-000000000009',
    'php-level-3-check', 'Level 3 Check: Composition, Laziness and Safety',
-   'Five questions on traits, generators, and the mistakes that become vulnerabilities.',
+   'Five questions on traits and their collisions, static state and what it does to a test, generators, and the three mistakes that turn into vulnerabilities. The escaping question has more than one right answer.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-00000000007c', 'd0000001-0000-4000-8000-00000000001f', 'c0000001-0000-4000-8000-000000000009',
    'php-expert-exam', 'Expert Exam: PHP',
-   'Attributes and reflection, performance, and how an application is arranged.',
+   'Twenty questions over the whole course: attributes and reflection and what they cost, where the time actually goes in a PHP request, and how an application is arranged so a change stays small.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

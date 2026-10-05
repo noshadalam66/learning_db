@@ -15,13 +15,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-000000000008',
    'python-from-basics-to-expert',
    'Python: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'Python is a general-purpose language built around being readable. It is the usual first language for people learning to program, and also the usual language for data analysis, machine learning, automation and scientific computing - which is unusual, and worth noticing. Very few languages are both a good first one and a serious professional one.
+
+The reason is the standard library and the ecosystem around it. Almost anything you need to do - read a CSV, call an API, parse a date, train a model - is either built in or one install away, with a community that has already answered the question you are about to ask.
+
+This course teaches the language itself rather than any one of those uses, because the language is what they all share. If you are heading for data science, this is the course the rest of that track assumes.',
    'A complete path through Python in four levels. Level 1, Basic, covers how names and values relate, the flow of control, and writing functions whose arguments read well at the call site. Level 2, Intermediate, is the collections you reach for every day - lists, tuples, dicts and sets - and the string handling around them. Level 3, Advanced, covers comprehensions and the iterator protocol, classes that behave like built-in types, and failing well. Level 4, Expert, finishes with decorators, generators and laziness, and the type hints that describe a boundary.
 
 This is a first course in Python and assumes no programming at all; if you have written another language, Level 1 will mostly be learning where Python differs. If you already use Python at work, the course earns its place from Level 3 on, where the behaviour you have relied on gets explained rather than demonstrated.
@@ -44,7 +49,8 @@ By the end you will be able to write Python that other people can maintain: func
    JSON_ARRAY('No prior Python', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -74,67 +80,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-000000000051', 'd0000001-0000-4000-8000-000000000018', 'c0000001-0000-4000-8000-000000000008',
    'values-and-names', 'Values, Names and Types',
-   'Names refer to values, values carry the type, and assignment never copies.',
+   'Python has no variable declarations. A name starts existing the moment you assign something to it, and it refers to a value rather than containing one - that single idea explains most of what looks surprising later, starting with assignment never copying.',
    'article', 'published', 1, 600, 1),
   ('e0000001-0000-4000-8000-000000000052', 'd0000001-0000-4000-8000-000000000018', 'c0000001-0000-4000-8000-000000000008',
    'control-flow', 'Making Decisions and Repeating Work',
-   'Indentation as syntax, iterating over items, and the else that belongs to a loop.',
+   'Indentation is the block structure: there are no braces, and the colon at the end of a line is what announces that a block follows. Iterating over items rather than indices, and the else that belongs to a loop rather than to an if.',
    'article', 'published', 2, 660, 1),
   ('e0000001-0000-4000-8000-000000000053', 'd0000001-0000-4000-8000-000000000018', 'c0000001-0000-4000-8000-000000000008',
    'functions', 'Functions, Arguments and Return Values',
-   'Defaults, *args and **kwargs, keyword-only arguments, and closures.',
+   'A function groups work behind a name, and Python is generous about how arguments may be passed. Worth understanding early because it shapes how the standard library reads: defaults, *args and **kwargs, and keyword-only arguments.',
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-000000000054', 'd0000001-0000-4000-8000-000000000019', 'c0000001-0000-4000-8000-000000000008',
    'lists-and-tuples', 'Lists, Tuples and Slicing',
-   'Mutable against immutable, slicing, unpacking, and the copy that is not deep.',
+   'A list is an ordered, mutable sequence; a tuple is the same thing without the mutation, so the choice between them is a statement about whether the contents are meant to change. With slicing, unpacking, and the copy that is not deep.',
    'article', 'published', 1, 660, 0),
   ('e0000001-0000-4000-8000-000000000055', 'd0000001-0000-4000-8000-000000000019', 'c0000001-0000-4000-8000-000000000008',
    'dicts-and-sets', 'Dictionaries and Sets',
-   'Lookup without KeyError, live views, Counter and defaultdict, and set algebra.',
+   'A dict maps keys to values with roughly constant-time lookup; a set is the same machinery without the values, so membership and uniqueness. Lookup without a KeyError, the live views, Counter and defaultdict, and set algebra.',
    'article', 'published', 2, 660, 0),
   ('e0000001-0000-4000-8000-000000000056', 'd0000001-0000-4000-8000-000000000019', 'c0000001-0000-4000-8000-000000000008',
    'strings-and-formatting', 'Strings and Formatting',
-   'Immutability, f-strings and their format spec, splitting, and encodings.',
+   'Strings are immutable sequences of characters, and every method that looks like it edits one actually returns a new string. f-strings and the format spec that goes inside them, splitting and joining, and why encoding is a decision rather than a detail.',
    'article', 'published', 3, 660, 0),
   ('e0000001-0000-4000-8000-000000000057', 'd0000001-0000-4000-8000-00000000001a', 'c0000001-0000-4000-8000-000000000008',
    'comprehensions-and-iteration', 'Comprehensions and the Iterator Protocol',
-   'Building collections in one expression, and what for actually does.',
+   'A comprehension builds a collection from an iterable in one expression. It is not merely shorter than the loop - it says this produces a list up front, where a loop only reveals that at the end. Plus what a for loop is really doing.',
    'article', 'published', 1, 720, 0),
   ('e0000001-0000-4000-8000-000000000058', 'd0000001-0000-4000-8000-00000000001a', 'c0000001-0000-4000-8000-000000000008',
    'classes-and-dunder', 'Classes, dataclasses and Dunder Methods',
-   'State and behaviour, dataclasses, and the methods that join the language.',
+   'A class defines behaviour and the shape of the state that behaviour works on. The dunder methods are how a class joins in with the language rather than sitting beside it, and a dataclass writes most of them for you.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-000000000059', 'd0000001-0000-4000-8000-00000000001a', 'c0000001-0000-4000-8000-000000000008',
    'errors-and-context-managers', 'Exceptions and Context Managers',
-   'Asking forgiveness, catching precisely, and guaranteeing cleanup.',
+   'Python asks forgiveness rather than permission: attempt the operation and handle the failure if it comes, because checking first is often both slower and racier. Catching precisely, and guaranteeing cleanup with a context manager.',
    'article', 'published', 3, 720, 0),
   ('e0000001-0000-4000-8000-00000000005a', 'd0000001-0000-4000-8000-00000000001b', 'c0000001-0000-4000-8000-000000000008',
    'decorators-and-closures', 'Decorators and Closures',
-   'A function that replaces a function, and the closure underneath it.',
+   'A decorator is a function that takes a function and returns a replacement, and the @name above a definition is exactly that call written where you can see it. With the closure underneath, and functools.wraps so the result still knows its own name.',
    'article', 'published', 1, 780, 0),
   ('e0000001-0000-4000-8000-00000000005b', 'd0000001-0000-4000-8000-00000000001b', 'c0000001-0000-4000-8000-000000000008',
    'generators-and-laziness', 'Generators, Laziness and itertools',
-   'Producing one value at a time, and the itertools built on that idea.',
+   'A function with yield in it is a generator function, and calling it runs nothing: it hands back a generator, and each next runs until the following yield. Which is how you process a file larger than memory, and what itertools is built on.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-00000000005c', 'd0000001-0000-4000-8000-00000000001b', 'c0000001-0000-4000-8000-000000000008',
    'typing-and-modern-python', 'Type Hints and Modern Python',
-   'Annotations that are not enforced, and where they earn their place.',
+   'Type hints are annotations, and Python does not enforce them at runtime - they are for readers, editors and a checker like mypy. That is a feature: they cost nothing when the program runs, and this is where they earn their place.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-00000000005d', 'd0000001-0000-4000-8000-000000000018', 'c0000001-0000-4000-8000-000000000008',
    'py-level-1-check', 'Level 1 Check: Values, Flow and Functions',
-   'Five questions on names and values, iteration, and how arguments are passed.',
+   'Five questions on names and values, the flow of control, and how arguments are passed - including the mutable default argument that catches everyone once. Every one can be settled in the scratchpad below the questions.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-00000000005e', 'd0000001-0000-4000-8000-000000000019', 'c0000001-0000-4000-8000-000000000008',
    'py-level-2-check', 'Level 2 Check: Collections and Text',
-   'Five questions on lists, dicts, sets and strings.',
+   'Five questions on lists against tuples, what a dict view gives you that a copy does not, set operations, and the string methods that return rather than change. The slicing question is the one worth running.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-00000000005f', 'd0000001-0000-4000-8000-00000000001a', 'c0000001-0000-4000-8000-000000000008',
    'py-level-3-check', 'Level 3 Check: Iteration, Classes and Errors',
-   'Five questions on comprehensions, the iterator protocol, classes and exceptions.',
+   'Five questions on comprehensions, what a for loop actually calls, the dunder methods that make a class behave like a built-in, and handling failure without catching everything. Run the ones you are unsure of.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-000000000060', 'd0000001-0000-4000-8000-00000000001b', 'c0000001-0000-4000-8000-000000000008',
    'py-expert-exam', 'Expert Exam: Python',
-   'Decorators, generators and laziness, and the type system that is not enforced.',
+   'Twenty questions over the whole course: decorators and the closures underneath them, generators and laziness, and a type system that is deliberately not enforced at runtime.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

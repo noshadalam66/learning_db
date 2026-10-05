@@ -23,13 +23,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000e',
    'go-from-basics-to-expert',
    'Go: From Basics to Expert',
    'Four levels, twelve lessons, every example vetted and run on a real toolchain',
+   'Go was built at Google for one problem: large teams writing network services that have to be maintained for years. Everything distinctive about it follows from that - the small feature set, the strict formatting, the fast compiler, the single static binary with no runtime to install.
+
+It is deliberately a small language. You can hold all of it in your head, which is rare, and this course is genuinely complete rather than a working subset. The flip side is that Go says no to things other languages say yes to, and a few of those refusals take getting used to.
+
+What you get for it is the easiest deployment story in mainstream programming and the most approachable concurrency model: goroutines and channels make concurrent code something you write on purpose rather than something you survive. It is why so much of the infrastructure you use - Docker, Kubernetes, Terraform - is written in it.',
    'A complete path through Go in four levels, taught on Go 1.24. Level 1, Basic, covers the zero value that is always usable, the absence of implicit conversions, one loop keyword, and the slice aliasing that surprises everyone exactly once. Level 2, Intermediate, is structs and methods with the receiver decision you make constantly, interfaces satisfied implicitly and declared by the code that consumes them, generics, and errors as ordinary values with wrapping, errors.Is and errors.As. Level 3, Advanced, covers goroutines and channels and the four deadlocks you will actually hit, context and worker pools and pipelines, and the parts of the standard library that turn up in every program. Level 4, Expert, finishes with escape analysis and the leaks a collector cannot prevent, where the time and allocations go, and how to arrange a module so a change stays small.
 
 No Go is assumed. The language is small enough that this course can be genuinely complete, and that is the shape it takes: by the end you will have seen essentially all of Go rather than a working subset. If you come from a language with inheritance or exceptions, the adjustment is in Level 2, and it is a short one.
@@ -54,7 +59,8 @@ By the end you will be able to write Go the way the standard library is written:
    JSON_ARRAY('No prior Go', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -83,67 +89,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-0000000000b1', 'd0000001-0000-4000-8000-000000000030', 'c0000001-0000-4000-8000-00000000000e',
    'go-values-and-types', 'Values, Types and the Zero Value',
-   'The zero value that is always usable, no implicit conversions, bytes against runes.',
+   'Go is statically typed with a deliberately small type system: no classes, no inheritance, no exceptions and no implicit conversions. The zero value is the idea to take from this - every type has one, and it is meant to be usable rather than a trap.',
    'article', 'published', 1, 720, 1),
   ('e0000001-0000-4000-8000-0000000000b2', 'd0000001-0000-4000-8000-000000000030', 'c0000001-0000-4000-8000-00000000000e',
    'go-control-flow', 'Control Flow, Functions and defer',
-   'One loop keyword, if with a statement, multiple returns, and defer''s LIFO order.',
+   'Go has one loop keyword, no parentheses around conditions and compulsory braces: the syntax is small enough to hold in your head, which is the point. With if that carries a statement, multiple return values, and the LIFO order defer runs in.',
    'article', 'published', 2, 660, 1),
   ('e0000001-0000-4000-8000-0000000000b3', 'd0000001-0000-4000-8000-000000000030', 'c0000001-0000-4000-8000-00000000000e',
    'go-collections', 'Slices, Maps and the Aliasing That Surprises You',
-   'Arrays copy and slices share, what append really does, and the comma-ok idiom.',
+   'Go has arrays, slices and maps. You will use slices and maps - the array exists mainly so that slices have something to point at, and understanding that explains every slice surprise, including what append really does and when two slices share memory.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-0000000000b4', 'd0000001-0000-4000-8000-000000000031', 'c0000001-0000-4000-8000-00000000000e',
    'go-structs-and-methods', 'Structs, Methods and Composition',
-   'Pointer against value receivers, embedding without inheritance, and exported fields.',
+   'Go has no classes and no inheritance. It has structs, methods on any named type, and embedding - and between them they cover what inheritance was for without the fragile base class. With pointer against value receivers, and what capitalisation exports.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-0000000000b5', 'd0000001-0000-4000-8000-000000000031', 'c0000001-0000-4000-8000-00000000000e',
    'go-interfaces', 'Interfaces, Type Switches and Generics',
-   'Implicit satisfaction, small consumer-declared interfaces, and the nil interface trap.',
+   'A Go interface is a set of method signatures, and a type satisfies it by having those methods: no implements keyword, and the implementation need not know the interface exists. Which is why the consumer declares it - plus the nil interface that is not nil.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-0000000000b6', 'd0000001-0000-4000-8000-000000000031', 'c0000001-0000-4000-8000-00000000000e',
    'go-errors', 'Errors Are Values',
-   'Wrapping with %w, errors.Is and errors.As, and why panic is only for bugs.',
+   'Go has no exceptions. A function that can fail returns an error as its last result and the caller checks it - that is the whole mechanism, and everything else follows from it: wrapping with %w, errors.Is and errors.As, and panic being only for bugs.',
    'article', 'published', 3, 780, 0),
   ('e0000001-0000-4000-8000-0000000000b7', 'd0000001-0000-4000-8000-000000000032', 'c0000001-0000-4000-8000-00000000000e',
    'go-goroutines', 'Goroutines and Channels',
-   'WaitGroups, unbuffered channels as synchronisation, select, and the four deadlocks.',
+   'A goroutine is a function running concurrently, managed by the Go runtime rather than the operating system, and starting one costs a couple of kilobytes - so a program can have hundreds of thousands. WaitGroups, channels as synchronisation, select, and the four deadlocks.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-0000000000b8', 'd0000001-0000-4000-8000-000000000032', 'c0000001-0000-4000-8000-00000000000e',
    'go-context-and-patterns', 'Context, Pipelines and Worker Pools',
-   'ctx.Done(), worker pools, pipelines, and the goroutine leak that never gets collected.',
+   'A context carries cancellation, deadlines and request-scoped values across API boundaries. Every standard-library call that can block takes one and yours should too, as the first parameter - then worker pools, pipelines, and the goroutine leak nothing collects.',
    'article', 'published', 2, 900, 0),
   ('e0000001-0000-4000-8000-0000000000b9', 'd0000001-0000-4000-8000-000000000032', 'c0000001-0000-4000-8000-00000000000e',
    'go-stdlib', 'The Standard Library You Will Actually Use',
-   'encoding/json and its struct tags, time layouts by example, io composition, slices and maps.',
+   'Go standard library is unusually complete, and leaning on it is idiomatic rather than lazy. The packages that turn up in almost every program: encoding/json and its struct tags, time layouts written by example, io composition, and the slices and maps helpers.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-0000000000ba', 'd0000001-0000-4000-8000-000000000033', 'c0000001-0000-4000-8000-00000000000e',
    'go-memory', 'Memory, Escape Analysis and the Collector',
-   'Escape analysis, the slice that holds a megabyte alive, and when to use a pointer.',
+   'Go has a garbage collector and pointers, and no new-and-delete distinction to worry about: you take an address and the compiler works out whether the value can live on the stack. Escape analysis, the slice that holds a megabyte alive, and when a pointer earns its place.',
    'article', 'published', 1, 840, 0),
   ('e0000001-0000-4000-8000-0000000000bb', 'd0000001-0000-4000-8000-000000000033', 'c0000001-0000-4000-8000-00000000000e',
    'go-performance', 'Where Go Spends Its Time',
-   'strings.Builder, preallocation, map[T]struct{}, and benchmarks that mean something.',
+   'Go programs are usually fast by default, and the three things that make them slow are the same three every time: building strings in a loop, growing a slice or map that could have been preallocated, and allocating inside a hot path. With benchmarks that mean something.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-0000000000bc', 'd0000001-0000-4000-8000-000000000033', 'c0000001-0000-4000-8000-00000000000e',
    'go-architecture', 'Arranging a Go Application',
-   'internal/ as real privacy, consumer-declared interfaces, and table-driven tests.',
+   'Go conventions push you towards an architecture whether you plan one or not: packages are the unit of privacy, imports may not form a cycle, and interfaces are satisfied implicitly. Working with those three - internal as real privacy, and table-driven tests.',
    'article', 'published', 3, 900, 0),
   ('e0000001-0000-4000-8000-0000000000bd', 'd0000001-0000-4000-8000-000000000030', 'c0000001-0000-4000-8000-00000000000e',
    'go-level-1-check', 'Level 1 Check: Zero Values, Slices and Maps',
-   'Five questions on the nil map, slice aliasing, conversions and defer.',
+   'Five questions on the zero value and the nil map you can read but not write, slice aliasing after append, why there are no implicit conversions, and when defer runs. Every one can be settled with go run and five lines.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-0000000000be', 'd0000001-0000-4000-8000-000000000031', 'c0000001-0000-4000-8000-00000000000e',
    'go-level-2-check', 'Level 2 Check: Methods, Interfaces and Errors',
-   'Five questions on receivers, implicit satisfaction, the nil interface and error wrapping.',
+   'Five questions on pointer against value receivers, implicit interface satisfaction, the typed nil inside an interface, and wrapping an error so a caller can still ask what it was.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-0000000000bf', 'd0000001-0000-4000-8000-000000000032', 'c0000001-0000-4000-8000-00000000000e',
    'go-level-3-check', 'Level 3 Check: Goroutines, Channels and Context',
-   'Five questions on who closes, what blocks, context and goroutine leaks.',
+   'Five questions on what blocks and why, who is responsible for closing a channel, how a context tells work to stop, and where a goroutine leak comes from. Several are easier to answer by running them.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-0000000000c0', 'd0000001-0000-4000-8000-000000000033', 'c0000001-0000-4000-8000-00000000000e',
    'go-expert-exam', 'Expert Exam: Go',
-   'Escape analysis, preallocation, internal/, and where an interface belongs.',
+   'Twenty questions over the whole course: escape analysis and what it decides, goroutine leaks, preallocation and where the time goes, the internal directory, and where an interface belongs.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 

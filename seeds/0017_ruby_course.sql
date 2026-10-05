@@ -15,13 +15,18 @@ INSERT INTO catalog_tags (id, slug, name) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO catalog_courses
-  (id, slug, title, subtitle, description, category_id, instructor_id, level, status,
+  (id, slug, title, subtitle, overview, description, category_id, instructor_id, level, status,
    thumbnail_url, price_cents, learning_outcomes, requirements, published_at)
 VALUES
   ('c0000001-0000-4000-8000-00000000000a',
    'ruby-from-basics-to-expert',
    'Ruby: From Basics to Expert',
    'Four levels, twelve lessons, every example runs in your browser',
+   'Ruby was designed to be pleasant to read and write, and it takes that further than most languages: there are no primitives, almost everything is an expression with a value, and much of the syntax turns out to be ordinary method calls wearing a disguise.
+
+That consistency is what makes Ruby libraries feel the way they do. Rails, RSpec and the rest are not magic; they are what you get when blocks, modules and a small amount of metaprogramming are used deliberately. Understanding the four or five mechanisms underneath means reading those libraries instead of memorising them.
+
+It remains a strong choice for web applications and for the kind of scripting that would otherwise be a mess of shell, and it is one of the better languages to learn object-oriented design in, precisely because it refuses to let you treat anything as not-an-object.',
    'A complete path through Ruby in four levels. Level 1, Basic, covers the one rule that explains the syntax - everything is an object - along with truthiness, the three kinds of equality, control flow that returns values, and the two collections that carry almost every program. Level 2, Intermediate, is text and time, the class and module machinery including mixins and Comparable, and failing deliberately rather than by accident. Level 3, Advanced, covers blocks as an interface, building your own Enumerable, sequences produced on demand, and the metaprogramming that frameworks are made of. Level 4, Expert, finishes with pattern matching, where the time and memory actually go, and how to arrange an application so a change stays small.
 
 No Ruby and no previous programming are assumed. If you come from another language, the thing to unlearn is in Level 1: Ruby has no primitives and almost no statements, and once you take the one rule seriously - everything is an object, nearly everything returns a value - the syntax stops looking like a collection of special cases.
@@ -44,7 +49,8 @@ By the end you will be able to read the Ruby that libraries are written in, not 
    JSON_ARRAY('No prior Ruby', 'Some experience of any programming language helps but is not required'),
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
-  title = VALUES(title), subtitle = VALUES(subtitle), description = VALUES(description),
+  title = VALUES(title), subtitle = VALUES(subtitle), overview = VALUES(overview),
+  description = VALUES(description),
   learning_outcomes = VALUES(learning_outcomes), requirements = VALUES(requirements);
 
 INSERT INTO catalog_course_tags (course_id, tag_id) VALUES
@@ -74,67 +80,67 @@ INSERT INTO catalog_lessons
 VALUES
   ('e0000001-0000-4000-8000-00000000006d', 'd0000001-0000-4000-8000-000000000020', 'c0000001-0000-4000-8000-00000000000a',
    'rb-values-and-types', 'Values, Types and Objects',
-   'Everything is an object, only two things are falsy, and three kinds of equality.',
+   'Ruby has one rule that explains most of its syntax: everything is an object, and everything you write is a message sent to one. There are no primitives outside that system - plus the two things that are falsy, and the three kinds of equality.',
    'article', 'published', 1, 600, 1),
   ('e0000001-0000-4000-8000-00000000006e', 'd0000001-0000-4000-8000-000000000020', 'c0000001-0000-4000-8000-00000000000a',
    'rb-control-flow', 'Control Flow and Methods',
-   'Conditions that return values, guard clauses, and what ? and ! mean on a method.',
+   'Ruby control flow reads close to English, and almost all of it produces a value you can assign. Conditions as expressions, guard clauses that let the happy path stay unindented, and what the question mark and bang on a method name promise.',
    'article', 'published', 2, 660, 1),
   ('e0000001-0000-4000-8000-00000000006f', 'd0000001-0000-4000-8000-000000000020', 'c0000001-0000-4000-8000-00000000000a',
    'rb-collections', 'Arrays, Hashes and Enumerable',
-   'Arrays, hashes, and the Enumerable vocabulary that replaces the loops.',
+   'Two structures cover most of the work - arrays and hashes - and one module gives them both the same enormous vocabulary. Which is why learning Enumerable once replaces the loops you would otherwise write for either of them.',
    'article', 'published', 3, 720, 0),
   ('e0000001-0000-4000-8000-000000000070', 'd0000001-0000-4000-8000-000000000021', 'c0000001-0000-4000-8000-00000000000a',
    'rb-strings-and-symbols', 'Strings, Symbols and Time',
-   'Characters against bytes, building text without allocating, and measuring time.',
+   'A Ruby string is a mutable sequence of bytes that knows its encoding, and that last part is what makes length mean characters rather than bytes. With symbols and when they are the right key, building text without allocating, and measuring time.',
    'article', 'published', 1, 720, 0),
   ('e0000001-0000-4000-8000-000000000071', 'd0000001-0000-4000-8000-000000000021', 'c0000001-0000-4000-8000-00000000000a',
    'rb-classes', 'Classes, Modules and Mixins',
-   'Readers before writers, validating in the constructor, and modules in the lookup chain.',
+   'A class collects state and the operations allowed on it. Ruby keeps instance variables private by default, so the only way in is through methods you chose to write - readers before writers, validating in the constructor, and modules in the lookup chain.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-000000000072', 'd0000001-0000-4000-8000-000000000021', 'c0000001-0000-4000-8000-00000000000a',
    'rb-errors', 'Exceptions and Failing Deliberately',
-   'Rescuing precisely, why never Exception, and when a failure is a value instead.',
+   'An exception is for the case you cannot handle where you are, so the skill is choosing which failures to catch and letting the rest travel. Rescuing precisely, why rescuing Exception is always wrong, and when a failure is better as a value.',
    'article', 'published', 3, 720, 0),
   ('e0000001-0000-4000-8000-000000000073', 'd0000001-0000-4000-8000-000000000022', 'c0000001-0000-4000-8000-00000000000a',
    'rb-blocks', 'Blocks, Procs and Lambdas',
-   'yield as an interface, capturing a block, and the two ways return behaves.',
+   'A block is a chunk of code passed to a method. Every method can take one, and that single idea is behind each, map, open and most of the standard library - with yield as an interface, and the two different things return does in a proc and a lambda.',
    'article', 'published', 1, 780, 0),
   ('e0000001-0000-4000-8000-000000000074', 'd0000001-0000-4000-8000-000000000022', 'c0000001-0000-4000-8000-00000000000a',
    'rb-enumerable', 'Building Enumerables and Going Lazy',
-   'One each method buys sixty, and lazy chains that never build the middle.',
+   'Enumerable is a module with about sixty methods, all built on one you supply. Write each, include the module, and your own type gains the entire vocabulary - then make the chain lazy so it never builds the intermediate arrays at all.',
    'article', 'published', 2, 780, 0),
   ('e0000001-0000-4000-8000-000000000075', 'd0000001-0000-4000-8000-000000000022', 'c0000001-0000-4000-8000-00000000000a',
    'rb-metaprogramming', 'Metaprogramming, and When Not To',
-   'Defining methods from data, method_missing done properly, and the cost of both.',
+   'Ruby lets a program inspect and modify itself while running. It is how attr_accessor works and how your frameworks define methods you never wrote - and it is the easiest way to make a codebase nobody can navigate, so this says when not to.',
    'article', 'published', 3, 840, 0),
   ('e0000001-0000-4000-8000-000000000076', 'd0000001-0000-4000-8000-000000000023', 'c0000001-0000-4000-8000-00000000000a',
    'rb-pattern-matching', 'Pattern Matching and Modelling Data',
-   'Matching on shape, binding while you match, and modelling states that cannot be missed.',
+   'case/in matches structure, not just value: it destructures and binds in the same expression, which is what makes handling nested data readable. And it is how you model a set of states so that none of them can be quietly missed.',
    'article', 'published', 1, 780, 0),
   ('e0000001-0000-4000-8000-000000000077', 'd0000001-0000-4000-8000-000000000023', 'c0000001-0000-4000-8000-00000000000a',
    'rb-performance', 'Where the Time and Memory Go',
-   'String building, the N+1, hoisting out of the loop, and memoisation that breaks.',
+   'Ruby is fast enough for almost everything, and the times it is not are usually one of a handful of mistakes. Measure first, which this lesson does with a small timing helper rather than guesswork: string building, the N+1, hoisting, and memoisation that breaks on nil.',
    'article', 'published', 2, 840, 0),
   ('e0000001-0000-4000-8000-000000000078', 'd0000001-0000-4000-8000-000000000023', 'c0000001-0000-4000-8000-00000000000a',
    'rb-architecture', 'Arranging a Ruby Application',
-   'Rules in plain objects, dependencies pointing inwards, and results at the edge.',
+   'The goal of an arrangement is that a change stays small, and that happens when the rules of the business sit in plain objects that know nothing about the web, the database or the framework you happened to pick. With results returned at the edge.',
    'article', 'published', 3, 900, 0),
   ('e0000001-0000-4000-8000-00000000007d', 'd0000001-0000-4000-8000-000000000020', 'c0000001-0000-4000-8000-00000000000a',
    'rb-level-1-check', 'Level 1 Check: Objects, Flow and Collections',
-   'Five questions on truthiness, equality, and the Enumerable methods.',
+   'Five questions on truthiness and the two values that are falsy, the three kinds of equality, and the Enumerable methods. Every one of these can be settled in the scratchpad below the questions.',
    'quiz', 'published', 4, 420, 1),
   ('e0000001-0000-4000-8000-00000000007e', 'd0000001-0000-4000-8000-000000000021', 'c0000001-0000-4000-8000-00000000000a',
    'rb-level-2-check', 'Level 2 Check: Symbols, Mixins and Failure',
-   'Five questions on strings and symbols, the lookup chain, and exceptions.',
+   'Five questions on strings against symbols, where a method is found in the lookup chain once modules are involved, and rescuing the right thing rather than everything. The lookup question is worth drawing out.',
    'quiz', 'published', 4, 480, 0),
   ('e0000001-0000-4000-8000-00000000007f', 'd0000001-0000-4000-8000-000000000022', 'c0000001-0000-4000-8000-00000000000a',
    'rb-level-3-check', 'Level 3 Check: Blocks, Laziness and Reflection',
-   'Five questions on procs against lambdas, Enumerator, and metaprogramming.',
+   'Five questions on procs against lambdas and what return does in each, building a type that is Enumerable, and what metaprogramming costs the next person to read the file.',
    'quiz', 'published', 4, 540, 0),
   ('e0000001-0000-4000-8000-000000000080', 'd0000001-0000-4000-8000-000000000023', 'c0000001-0000-4000-8000-00000000000a',
    'rb-expert-exam', 'Expert Exam: Ruby',
-   'Pattern matching, performance, and how an application is arranged.',
+   'Twenty questions over the whole course: pattern matching and modelling states that cannot be missed, where the time and the memory actually go, and how an application is arranged so a change stays small.',
    'quiz', 'published', 4, 900, 0)
 ON DUPLICATE KEY UPDATE title = VALUES(title), summary = VALUES(summary), `position` = VALUES(`position`);
 
