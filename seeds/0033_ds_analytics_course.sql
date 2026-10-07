@@ -173,603 +173,4151 @@ VALUES
   ('e0000001-0000-4000-8000-0000000000e1',
    'From a Question to Something You Can Measure',
    'markdown',
-   '"Are users engaged?" is not a question you can answer. It is a question you have to translate, and the translation is the analysis.
+   'Most analysis that goes wrong went wrong before any code was written, because the question was never turned into something a table can answer. This lesson is the translation step, and the four questions that make it reliable.
 
 ## The four questions, before any SQL
 
-**1. What decision follows from this?** If the answer changes nothing, the analysis is not worth doing, and saying so is a legitimate output. If the answer is "we would change the onboarding", that tells you what the metric has to be sensitive to.
+Someone asks "are we growing?". Before you open a query editor, answer these:
 
-**2. Which population?** All users, or users who signed up this quarter, or paying users excluding the free trial? Every one of those gives a different number and all of them are defensible. The analysis that does not say which it used cannot be reproduced.
+**1. Growing in what?** Users, revenue, orders, sessions, usage? "Growth" is four different numbers that frequently disagree. Revenue can rise while users fall, and both can rise while usage per user collapses.
 
-**3. Over what period, and compared to what?** A number alone is rarely useful. 4.2% is meaningless; 4.2% against 3.9% last month, on the same definition, is a finding.
+**2. Over what period, compared with what?** Week on week, month on month, against last year, against the plan? A 10% rise is excellent against last month and poor against last January if January is your peak.
 
-**4. What would make this wrong?** Ask it before you compute, while you can still be honest. A tracking change, a seasonal effect, a marketing campaign, a bot.
+**3. Which population?** All users, or paying ones? Including trials? Including the team''s own test accounts? Including the enterprise customer who is 40% of revenue?
+
+**4. What would change your mind?** If the answer is "nothing", you are being asked to confirm something rather than find it out, and it is better to know that now.
+
+The fourth question is the one people skip, and it is the one that saves the most time. An analysis that cannot come out the other way is a presentation.
 
 ## A worked translation
 
-- Question: *Are users engaged?*
-- Decision: whether to invest in a weekly digest email.
-- Metric: proportion of accounts active in at least 3 distinct days in a rolling 28-day window.
-- Population: accounts created more than 28 days ago, excluding internal and test accounts.
-- Comparison: this 28-day window against the same window a quarter ago.
-- Threats: the mobile app started sending a heartbeat in March, which would raise "active" without anyone doing anything.
+Vague: *"Is the new onboarding working?"*
 
-That takes ten minutes and is most of the work. The query is twenty lines.
+Specific enough to compute:
 
-## Write the definition down before you compute
+> Among users who signed up between 1 February and 28 February 2026, excluding internal accounts and users who never verified an email address, what proportion completed at least one lesson within seven days of signing up? Compare with the same measure for users who signed up in January, before the change shipped on 1 February.
 
-Not after. The pressure to adjust a definition once you have seen the number is enormous and usually invisible to the person doing it - you try a variant, it looks more sensible, you keep it. That is how an analysis ends up measuring the analyst''s expectations.
+Five decisions are now visible and arguable:
 
-If you do change it, say so and show both.
+- **Population**: February sign-ups, verified, external.
+- **Numerator**: completed at least one lesson.
+- **Window**: seven days from sign-up, not calendar weeks.
+- **Comparison**: the previous month''s cohort.
+- **Cut-off**: the change shipped on 1 February.
+
+Each is a thing a stakeholder can disagree with *before* you spend a day on it, which is the point. The version in the first line is a thing nobody can disagree with and nobody can compute.
+
+Write it as a one-sentence specification, every time:
+
+```python
+SPEC = {
+    ''question'': ''Did the new onboarding increase week-one activation?'',
+    ''population'': ''users who signed up in Feb 2026, verified, excluding internal'',
+    ''numerator'': ''users with at least one lesson completed'',
+    ''denominator'': ''all users in the population'',
+    ''window'': ''7 days from signup, per user'',
+    ''comparison'': ''the same measure for Jan 2026 signups'',
+    ''changes_my_mind'': ''a difference of less than 2 percentage points'',
+}
+width = max(len(k) for k in SPEC)
+for key, value in SPEC.items():
+    print(f''{key:<{width}}  {value}'')
+```
+
+That dictionary is six lines and it is the deliverable of the first hour. Put it at the top of the notebook and in the message where you share the result.
+
+## Writing the definition down before you compute
+
+The trap this avoids is the one where the number changes and nobody can say whether the world changed or the query did.
+
+```python
+import pandas as pd
+import numpy as np
+
+rng = np.random.default_rng(5)
+
+n = 2000
+users = pd.DataFrame({
+    ''user_id'': np.arange(1, n + 1),
+    ''signed_up'': pd.Timestamp(''2026-01-01'') + pd.to_timedelta(rng.integers(0, 59, n), ''D''),
+    ''verified'': rng.random(n) < 0.86,
+    ''internal'': rng.random(n) < 0.03,
+})
+users[''activated_days''] = np.where(
+    rng.random(n) < 0.42, rng.integers(0, 20, n), np.nan)
+
+# The population, as specified - and the count at every step, so a
+# reader can see what each exclusion cost.
+step = {''all signups'': len(users)}
+population = users[users[''signed_up''] < ''2026-03-01'']
+step[''in the period''] = len(population)
+population = population[~population[''internal'']]
+step[''external only''] = len(population)
+population = population[population[''verified'']]
+step[''verified only''] = len(population)
+
+for label, count in step.items():
+    print(f''{label:<16} {count:>6,}'')
+print()
+
+# The measure, as specified: activated WITHIN SEVEN DAYS.
+population = population.assign(
+    activated=lambda d: d[''activated_days''].notna() & (d[''activated_days''] <= 7),
+    month=lambda d: d[''signed_up''].dt.to_period(''M'').astype(str),
+)
+
+result = population.groupby(''month'', as_index=False).agg(
+    users=(''user_id'', ''size''),
+    activated=(''activated'', ''sum''),
+)
+result[''rate''] = (result[''activated''] / result[''users''] * 100).round(1)
+print(result.to_string(index=False))
+print()
+
+jan, feb = result.set_index(''month'')[''rate'']
+print(f''January {jan}%, February {feb}%, difference {feb - jan:+.1f} points'')
+```
+
+Notice the counts at each exclusion. "We excluded internal accounts" is a sentence; "we excluded 61 internal accounts, 3% of sign-ups" is a fact somebody can check. If the February exclusion were 30% rather than 3%, that is a data problem the headline number would have hidden.
+
+## The denominator decides the answer
+
+```python
+import pandas as pd
+import numpy as np
+
+rng = np.random.default_rng(9)
+n = 1000
+users = pd.DataFrame({
+    ''user_id'': np.arange(n),
+    ''verified'': rng.random(n) < 0.70,
+    ''activated'': rng.random(n) < 0.30,
+})
+# Only verified users can activate, which is the usual arrangement.
+users.loc[~users[''verified''], ''activated''] = False
+
+denominators = {
+    ''all signups'': len(users),
+    ''verified signups'': int(users[''verified''].sum()),
+}
+activated = int(users[''activated''].sum())
+
+for label, denominator in denominators.items():
+    print(f''{label:<18} {activated}/{denominator} = {activated / denominator * 100:.1f}%'')
+```
+
+Same numerator, two defensible denominators, and the answers differ by a third. Neither is wrong; what is wrong is reporting one without saying which, because next quarter somebody will compute the other and the trend will look like a change that never happened.
 
 ## The output is a sentence
 
-Not a table. "Engagement is flat at 4.2% quarter on quarter, and the mobile heartbeat added about 0.3 points in March, so the underlying number is slightly down." A table supports that sentence; it does not replace it.',
-   'Nobody asks an answerable question first time. This lesson is about the translation: what "are users engaged" has to become before anybody can compute it, and the four questions to ask before touching any data.',
-   9, 382, '55555555-5555-4555-8555-555555555555', 'published',
+An analysis is not a table. It is a sentence a decision can hang on, with the table underneath as evidence.
+
+```python
+jan_rate, feb_rate = 36.4, 41.2
+jan_n, feb_n = 612, 588
+
+print(
+    f''Week-one activation rose from {jan_rate}% to {feb_rate}% ''
+    f''({feb_rate - jan_rate:+.1f} points) between the January and February ''
+    f''sign-up cohorts (n={jan_n:,} and {feb_n:,}), measured as the share of ''
+    f''verified external sign-ups completing at least one lesson within seven ''
+    f''days. The onboarding change shipped on 1 February, so the February ''
+    f''cohort is the first fully exposed to it.''
+)
+print()
+print(''What would change this conclusion:'')
+for caveat in [
+    ''a change in what counts as "verified" between the two months'',
+    ''a marketing campaign that changed who was signing up'',
+    ''the seven-day window overlapping a holiday in one month and not the other'',
+]:
+    print('' -'', caveat)
+```
+
+Three parts, and all three matter. **The number with its units and its sample size.** **The definition, in one clause.** **The things that would make it wrong**, which is what distinguishes a finding from a claim.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=71)
+
+# ---- The specification, written first. ------------------------------
+SPEC = {
+    ''question'': ''Did the checkout change increase completed orders per session?'',
+    ''population'': ''sessions from external users, Jan-Mar 2026, excluding bots'',
+    ''numerator'': ''sessions containing at least one completed order'',
+    ''denominator'': ''all sessions in the population'',
+    ''comparison'': ''the month before the change against the month after'',
+    ''shipped'': ''2026-02-15'',
+    ''changes_my_mind'': ''a difference under 1 percentage point, or n < 500 either side'',
+}
+for key, value in SPEC.items():
+    print(f''{key:<18} {value}'')
+print()
+
+# ---- The data. ------------------------------------------------------
+n = 12_000
+sessions = pd.DataFrame({
+    ''session_id'': np.arange(n),
+    ''started'': pd.Timestamp(''2026-01-01'') + pd.to_timedelta(rng.integers(0, 89, n), ''D''),
+    ''internal'': rng.random(n) < 0.04,
+    ''bot'': rng.random(n) < 0.07,
+})
+# The real effect being measured: a small lift after the change date.
+after = sessions[''started''] >= ''2026-02-15''
+base = np.where(after, 0.185, 0.160)
+sessions[''ordered''] = rng.random(n) < base
+
+# ---- The population, counted at every exclusion. --------------------
+counts = {''all sessions'': len(sessions)}
+population = sessions[~sessions[''bot'']]
+counts[''not a bot''] = len(population)
+population = population[~population[''internal'']]
+counts[''external''] = len(population)
+
+for label, count in counts.items():
+    print(f''{label:<14} {count:>7,}'')
+dropped = counts[''all sessions''] - counts[''external'']
+print(f''{"excluded":<14} {dropped:>7,}  ({dropped / counts["all sessions"]:.1%})'')
+print()
+
+# The exclusion rate must be similar on both sides of the change, or
+# the comparison is between two different populations.
+population = population.assign(period=np.where(
+    population[''started''] >= SPEC[''shipped''], ''after'', ''before''))
+excl = (sessions.assign(period=np.where(sessions[''started''] >= SPEC[''shipped''], ''after'', ''before''))
+        .groupby(''period'')[[''bot'', ''internal'']].mean().round(4))
+print(''exclusion rates by period:'')
+print(excl)
+print()
+
+# ---- The measure. ---------------------------------------------------
+result = (population.groupby(''period'', as_index=False)
+          .agg(sessions=(''session_id'', ''size''), ordered=(''ordered'', ''sum'')))
+result[''rate''] = result[''ordered''] / result[''sessions'']
+result = result.set_index(''period'').loc[[''before'', ''after'']].reset_index()
+print(result.assign(rate=lambda d: (d[''rate''] * 100).round(2)).to_string(index=False))
+print()
+
+before_rate = float(result.loc[result.period == ''before'', ''rate''].iloc[0])
+after_rate = float(result.loc[result.period == ''after'', ''rate''].iloc[0])
+difference = (after_rate - before_rate) * 100
+
+# ---- The threshold the spec set, applied. ---------------------------
+n_before = int(result.loc[result.period == ''before'', ''sessions''].iloc[0])
+n_after = int(result.loc[result.period == ''after'', ''sessions''].iloc[0])
+big_enough = n_before >= 500 and n_after >= 500
+meaningful = abs(difference) >= 1.0
+
+print(f''difference {difference:+.2f} points, n={n_before:,} and {n_after:,}'')
+print(f''sample large enough: {big_enough}'')
+print(f''passes the threshold set in advance: {meaningful}'')
+print()
+
+# ---- The sentence. --------------------------------------------------
+verdict = ''rose'' if difference > 0 else ''fell''
+print(
+    f''Order rate per session {verdict} from {before_rate:.2%} to {after_rate:.2%} ''
+    f''({difference:+.2f} points) between the month before and the month after ''
+    f''the checkout change on {SPEC["shipped"]}, measured over external ''
+    f''non-bot sessions (n={n_before:,} and {n_after:,}).''
+)
+print()
+print(''What would change this conclusion:'')
+for caveat in [
+    ''the before and after periods differ in traffic mix, not just in checkout'',
+    ''the bot filter changed behaviour between the periods'',
+    ''something else shipped in the same window'',
+]:
+    print('' -'', caveat)
+```
+
+The step worth copying is the exclusion-rate comparison. A before-and-after measurement is only valid if the two populations were filtered the same way; if the bot rate doubled in February, the "lift" could be entirely a change in who got counted. That check costs three lines and it is the one a reviewer will ask about.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Two people get different numbers | The definition was never written down |
+| The metric moved and nobody knows why | The query changed, not the world |
+| The result is "interesting" but unusable | No decision was attached to it |
+| A before/after comparison is suspect | The populations were filtered differently |
+| An exclusion removed most of the data | Nobody counted what each filter cost |
+| The analysis confirmed what was expected | No falsifying condition set in advance |
+| The denominator is ambiguous | "Rate" without saying of what |
+| A caveat emerged in the meeting | Caveats belong with the result, not after it |
+
+## A check you can run
+
+Take the last analysis you shared and write its specification as the six-key dictionary above - question, population, numerator, denominator, window, comparison.
+
+If you cannot fill one of them from memory, nobody reading the result could have either. Fill it in, re-run, and see whether the number changed. In my experience it does roughly a third of the time, and the gap is always in the population.
+',
+   'Nobody asks an answerable question first time. This lesson is about the translation: what "are users engaged" has to become before anybody can compute it, and the four questions to ask before touching any data.', 9, 1719,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000e2',
    'Averages, Medians and the Shape Underneath',
    'markdown',
-   'The mean is the first statistic everyone learns and the one that misleads most often, because it assumes something about the data that business data rarely satisfies.
+   'The mean is the first number anyone computes and the wrong one surprisingly often. This lesson is about when it is fine, when it is not, and what to look at instead.
 
 ## When the mean is fine, and when it is not
 
-The mean is a good summary when the data is roughly symmetric and has no extreme values. Heights are like this. Almost nothing in a business is.
+```python
+import numpy as np
+import pandas as pd
 
-Revenue per customer, session length, time to first purchase, support tickets per account - all of these are skewed: most values small, a few enormous. One customer spending 50,000 moves the mean for everybody and tells you nothing about a typical customer.
+rng = np.random.default_rng(13)
 
+heights = rng.normal(170, 8, 5000)                     # symmetric
+incomes = rng.lognormal(mean=10.2, sigma=0.9, size=5000)   # right-skewed
+
+summary = pd.DataFrame({
+    ''heights'': [heights.mean(), np.median(heights), heights.std()],
+    ''incomes'': [incomes.mean(), np.median(incomes), incomes.std()],
+}, index=[''mean'', ''median'', ''std'']).round(1)
+print(summary)
+print()
+print(f''heights: mean / median = {heights.mean() / np.median(heights):.3f}'')
+print(f''incomes: mean / median = {incomes.mean() / np.median(incomes):.3f}'')
 ```
-Spend per customer: 10, 12, 15, 18, 20, 22, 25, 30, 35, 50000
-mean   = 5018.7
-median = 21
+
+For the heights the mean and median agree to a fraction of a percent. For the incomes the mean is around 50% above the median, because a small number of very large values pull it up.
+
+The rule: **the mean describes the data when the distribution is roughly symmetric and has no long tail.** Almost nothing in business is. Revenue per customer, session length, time to resolution, page load time, order value - all are right-skewed, and for all of them the mean describes a customer who does not exist.
+
+The sensitivity to a single value is worth seeing:
+
+```python
+import numpy as np
+
+salaries = np.array([28, 31, 33, 35, 36, 38, 41, 44, 48, 52]) * 1000
+print(f''mean   {salaries.mean():>9,.0f}'')
+print(f''median {np.median(salaries):>9,.0f}'')
+print()
+
+with_founder = np.append(salaries, 2_000_000)
+print(''after one founder joins:'')
+print(f''mean   {with_founder.mean():>9,.0f}  ({with_founder.mean() / salaries.mean() - 1:+.0%})'')
+print(f''median {np.median(with_founder):>9,.0f}  ''
+      f''({np.median(with_founder) / np.median(salaries) - 1:+.0%})'')
 ```
 
-The mean here describes nobody. The median describes the middle customer, which is what "typical" meant.
+One value out of eleven moves the mean by nearly 500% and the median by 3%. That is the whole argument, in two numbers.
 
 ## Percentiles say more than either
 
-```
-p50 = 21     half of customers spend less than this
-p90 = 50     the busiest tenth start here
-p99 = 50000  and this is the one distorting your mean
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(17)
+# Page load times: mostly fast, with a slow tail. This is what every
+# latency distribution looks like.
+latency = np.concatenate([
+    rng.gamma(2.0, 90, 9_500),       # the normal case
+    rng.gamma(2.0, 900, 500),        # the tail
+])
+
+percentiles = [50, 75, 90, 95, 99, 99.9]
+values = np.percentile(latency, percentiles)
+table = pd.DataFrame({''percentile'': [f''p{p:g}'' for p in percentiles],
+                      ''ms'': values.round(0)})
+print(f''mean {latency.mean():.0f}ms'')
+print(table.to_string(index=False))
+print()
+print(f''{(latency > latency.mean()).mean():.1%} of requests are slower than the mean'')
 ```
 
-For anything about time - page load, response time, delivery - the percentile is the only honest summary, because the average user experience is not the experience of the average. A mean response time of 200ms with a p99 of 8 seconds means one request in a hundred is unusable, and the mean conceals exactly that.
+The mean sits somewhere around the 70th percentile. Reporting it as "typical" means a quarter to a third of your users have a worse experience than the number you published.
+
+For anything a user waits for, **report p50, p95 and p99**. p50 is the typical experience, p95 is the bad day, and p99 is the complaint. A mean of 300ms with a p99 of nine seconds is a system with a serious problem that the mean conceals entirely.
+
+The same reasoning applies to money:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(19)
+order_value = rng.lognormal(mean=3.6, sigma=1.1, size=20_000)
+
+print(f''mean   {order_value.mean():.2f}'')
+print(f''median {np.median(order_value):.2f}'')
+print()
+shares = pd.DataFrame({
+    ''top 1%'': [order_value[order_value >= np.percentile(order_value, 99)].sum()],
+    ''top 10%'': [order_value[order_value >= np.percentile(order_value, 90)].sum()],
+    ''all'': [order_value.sum()],
+})
+print(f''top 1%  of orders are {shares["top 1%"][0] / shares["all"][0]:.1%} of revenue'')
+print(f''top 10% of orders are {shares["top 10%"][0] / shares["all"][0]:.1%} of revenue'')
+```
 
 ## Look at the distribution first
 
-A histogram takes ten seconds and answers questions a summary cannot:
+Summary statistics can be identical for data that looks nothing alike.
 
-- Is it **bimodal**? Two humps usually means two populations stuck together - trial and paid, mobile and desktop - and the right move is to split them, not to average them.
-- Is there a **spike at zero**? Very common, and it usually means "never did the thing", which is a different question from "how much did they do".
-- Are there **impossible values**? Negative ages, orders in 1970, a thousand sessions in a day. Those are data problems, and the mean quietly absorbs them.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(23)
+
+one = rng.normal(100, 15, 4000)
+two = np.concatenate([rng.normal(72, 6, 2000), rng.normal(128, 6, 2000)])
+three = np.concatenate([rng.normal(97, 8, 3900), rng.normal(180, 5, 100)])
+
+frame = pd.DataFrame({''one'': one, ''two'': two, ''three'': three})
+print(frame.describe().round(1))
+print()
+
+# describe() says they are similar. A histogram says they are not.
+for name in frame.columns:
+    values = frame[name]
+    counts, edges = np.histogram(values, bins=14, range=(50, 200))
+    bar = ''''.join(''#'' if c > len(values) / 30 else (''.'' if c else '' '') for c in counts)
+    print(f''{name:<6} |{bar}|'')
+print(''       '' + ''50'' + '' '' * 11 + ''200'')
+```
+
+Three distributions with similar means and standard deviations: one hump, two humps, and one hump plus a small separate group. Only the third row of the text histogram reveals the hundred records at 180, which in real data is usually the interesting finding - a different population that got mixed in.
+
+**Always plot the distribution before quoting a summary of it.** `describe()` is a check, not a conclusion.
 
 ## Variation matters as much as level
 
-Two teams both average 100 tickets a week. One does 95-105; the other does 20-250. Those are completely different operations and the average is identical. Report a spread - standard deviation if the data is symmetric, the interquartile range if it is not - or you have told half the story.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(29)
+
+steady = rng.normal(100, 4, 200)
+erratic = rng.normal(100, 28, 200)
+
+frame = pd.DataFrame({
+    ''mean'': [steady.mean(), erratic.mean()],
+    ''std'': [steady.std(), erratic.std()],
+    ''cv'': [steady.std() / steady.mean(), erratic.std() / erratic.mean()],
+    ''p5'': [np.percentile(steady, 5), np.percentile(erratic, 5)],
+    ''p95'': [np.percentile(steady, 95), np.percentile(erratic, 95)],
+}, index=[''steady'', ''erratic'']).round(2)
+print(frame)
+print()
+print(''Same average delivery time. One supplier you can plan around,'')
+print(''one you cannot - and the mean cannot tell them apart.'')
+```
+
+The coefficient of variation - standard deviation over mean - makes variability comparable across things measured in different units. A CV of 0.04 is a process under control; 0.28 is one that is not.
+
+For a skewed distribution the standard deviation is as misleading as the mean, and the interquartile range is the better measure:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(31)
+skewed = rng.lognormal(3, 1.2, 5000)
+
+print(f''std {skewed.std():.1f}'')
+print(f''iqr {np.percentile(skewed, 75) - np.percentile(skewed, 25):.1f}'')
+print(f''mad {np.median(np.abs(skewed - np.median(skewed))):.1f}'')
+```
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=97)
+
+# Support ticket resolution times, in hours, across three teams.
+# Two teams have similar means and very different experiences.
+n = 4000
+teams = []
+for name, base, tail_share, tail_scale in [
+    (''alpha'', 4.0, 0.02, 60),     # consistent, tiny tail
+    (''bravo'', 3.2, 0.14, 90),     # faster typical, much worse tail
+    (''charlie'', 5.5, 0.03, 40),   # slower typical, controlled tail
+]:
+    count = n // 3
+    tail = rng.random(count) < tail_share
+    hours = np.where(tail,
+                     rng.gamma(2.0, tail_scale, count),
+                     rng.gamma(2.0, base, count))
+    teams.append(pd.DataFrame({''team'': name, ''hours'': hours}))
+tickets = pd.concat(teams, ignore_index=True)
+
+# 1. What the mean says.
+print(''by mean alone:'')
+print(tickets.groupby(''team'')[''hours''].mean().round(1).to_string())
+print()
+
+# 2. What the percentiles say.
+summary = tickets.groupby(''team'')[''hours''].agg(
+    n=''size'',
+    mean=''mean'',
+    p50=lambda s: s.quantile(0.50),
+    p90=lambda s: s.quantile(0.90),
+    p95=lambda s: s.quantile(0.95),
+    p99=lambda s: s.quantile(0.99),
+    worst=''max'',
+).round(1)
+print(summary.to_string())
+print()
+
+# 3. The ratio that reveals the tail.
+summary[''mean_over_p50''] = (summary[''mean''] / summary[''p50'']).round(2)
+summary[''p99_over_p50''] = (summary[''p99''] / summary[''p50'']).round(1)
+print(summary[[''mean'', ''p50'', ''mean_over_p50'', ''p99_over_p50'']].to_string())
+print()
+print(''bravo has the BEST median and by far the worst tail.'')
+print(''The mean calls it the worst team; the median calls it the best.'')
+print(''Both are true, and the ratio above is the explanation.'')
+print()
+
+# 4. Where the mean actually sits in each distribution.
+for team, group in tickets.groupby(''team''):
+    above = (group[''hours''] > group[''hours''].mean()).mean()
+    print(f''{team:<8} mean {group["hours"].mean():>5.1f}h sits at the ''
+          f''{100 - above * 100:.0f}th percentile ''
+          f''({above:.1%} of tickets are slower)'')
+print(''A number most tickets beat is not a typical ticket.'')
+print()
+
+# 5. Variability, comparable across teams.
+spread = tickets.groupby(''team'')[''hours''].agg(
+    std=''std'',
+    iqr=lambda s: s.quantile(0.75) - s.quantile(0.25),
+    cv=lambda s: s.std() / s.mean(),
+).round(2)
+print(spread.to_string())
+print()
+
+# 6. The shape, as text, because the numbers above do not show it.
+print(''distribution of resolution time (0 to 60 hours):'')
+for team, group in tickets.groupby(''team''):
+    counts, _ = np.histogram(group[''hours''], bins=30, range=(0, 60))
+    peak = counts.max()
+    bar = ''''.join(''#'' if c > peak * 0.30 else (''+'' if c > peak * 0.08 else
+                  (''.'' if c else '' '')) for c in counts)
+    over = (group[''hours''] > 60).sum()
+    print(f''  {team:<8} |{bar}|  {over} over 60h'')
+print()
+
+# 7. The sentence, with the right number in it.
+best_median = summary[''p50''].idxmin()
+best_p95 = summary[''p95''].idxmin()
+print(f''Fastest typical ticket: {best_median} (p50 {summary.loc[best_median, "p50"]}h).'')
+print(f''Most reliable:          {best_p95} (p95 {summary.loc[best_p95, "p95"]}h).'')
+print(''These are different teams, which is the whole finding.'')
+```
+
+The finding in that example is only visible because of the percentiles. The mean calls bravo the worst team by a wide margin. The median calls it the best. Both are correct: bravo resolves the typical ticket fastest and has a tail four times longer than anyone else''s, and the customers in that tail are the ones who escalate. A report with only the mean would have missed the good news; a report with only the median would have missed the bad.
+
+The fourth step is worth a second look too. In every one of these distributions the mean sits well above the median - between the 68th and 85th percentile - so the "average" resolution time is one that most tickets beat. That is not a quirk of this data; it is what a right-skewed distribution does, and it is why a mean presented as "typical" overstates the typical experience for the majority while understating it badly for the tail.
 
 ## The practical rule
 
-Report the median and a couple of percentiles for anything skewed, say which you used, and keep the distribution to hand. Reporting a mean is not wrong; reporting only a mean, for data you have not looked at, usually is.',
-   'The mean is the most reported and most misleading statistic in business. This lesson covers when it lies, what the median and the percentiles tell you instead, and why the distribution is the thing to look at first.',
-   10, 442, '55555555-5555-4555-8555-555555555555', 'published',
+For any distribution you have not looked at:
+
+1. **Plot it.** A histogram takes one line and answers the shape question.
+2. **Compare mean and median.** If they differ by more than a few percent, the mean is not typical.
+3. **Report p50, p90 and p99** for anything a person experiences - latency, wait time, delivery.
+4. **Report the median and a range** for anything about money per person.
+5. **Publish the count** alongside, so a reader can judge how much to trust it.
+6. **Never report a mean alone** for a skewed quantity. It describes nobody.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The "average customer" does not exist | A skewed distribution summarised by its mean |
+| One record moved the headline number | Means are not robust; use the median |
+| The system looks fast and users complain | The mean hides the tail; look at p95 and p99 |
+| Two groups look identical in `describe()` | Different shapes, same summary; plot them |
+| A standard deviation is larger than the mean | Heavy skew; use the IQR instead |
+| A small segment looks dramatic | Too few records; publish the count |
+| A percentage with no denominator | "60% improvement" of what, from what |
+| An average of averages is wrong | Weight by the group sizes |
+
+That last one deserves a demonstration, because it is the most common arithmetic error in reporting:
+
+```python
+import numpy as np
+import pandas as pd
+
+groups = pd.DataFrame({
+    ''team'': [''alpha'', ''bravo''],
+    ''tickets'': [900, 100],
+    ''mean_hours'': [4.0, 20.0],
+})
+
+naive = groups[''mean_hours''].mean()
+weighted = np.average(groups[''mean_hours''], weights=groups[''tickets''])
+print(f''average of the averages: {naive:.1f} hours'')
+print(f''weighted by volume:      {weighted:.1f} hours'')
+```
+
+## A check you can run
+
+Take the last average you published and compute the median beside it.
+
+If they differ by more than about 5%, the mean was the wrong number. Then compute where the mean falls as a percentile: for a right-skewed quantity it is routinely the 70th or higher, meaning most of your population is on the better side of the number you published, and a long tail is on the far worse side.
+
+Either sentence changes the conversation: "most tickets beat our published average, and the 5% that do not take ten times longer" is a far more useful statement than a single mean, and it is two lines of code away.
+',
+   'The mean is the most reported and most misleading statistic in business. This lesson covers when it lies, what the median and the percentiles tell you instead, and why the distribution is the thing to look at first.', 9, 1824,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000e3',
    'The SQL an Analyst Actually Uses',
    'markdown',
-   'Analytical SQL is a small language. Five clauses, three patterns, and a handful of functions cover most questions.
+   'An analyst uses a small, specific subset of SQL very heavily. This lesson is that subset, plus the four places it quietly gives the wrong answer.
 
 ## The shape
 
+Every query runs its clauses in this order, which is not the order you write them:
+
 ```sql
-SELECT   region, COUNT(*) AS orders, SUM(amount) AS revenue
+-- Written in this order:
+SELECT   region, COUNT(*) AS orders, SUM(revenue) AS revenue
 FROM     orders
-WHERE    created_at >= ''2026-01-01''
+WHERE    status = ''complete''
 GROUP BY region
-HAVING   COUNT(*) > 10
-ORDER BY revenue DESC;
+HAVING   SUM(revenue) > 50
+ORDER BY revenue DESC
+LIMIT    10;
 ```
 
-WHERE filters rows before grouping; HAVING filters groups after. Putting an aggregate in WHERE is an error, and putting a row condition in HAVING is slow rather than wrong - the database had to build groups it then threw away.
+Executed as: `FROM` (get the rows), `WHERE` (filter them), `GROUP BY` (collapse them), `HAVING` (filter the groups), `SELECT` (compute the output), `ORDER BY`, `LIMIT`.
+
+Two consequences follow from that order and both catch people out.
+
+**`WHERE` filters rows, `HAVING` filters groups.** `WHERE` cannot see an aggregate because the grouping has not happened yet; `HAVING` can.
+
+**An alias defined in `SELECT` cannot be used in `WHERE`**, because `SELECT` runs later. Most databases do let you use it in `ORDER BY`, which runs later still.
+
+```sql
+-- WHERE filters before grouping; HAVING after.
+SELECT   region,
+         COUNT(*) AS orders,
+         SUM(revenue) AS revenue
+FROM     orders
+WHERE    placed_on >= ''2026-01-01''
+GROUP BY region
+HAVING   COUNT(*) >= 1
+ORDER BY revenue DESC;
+```
 
 ## Counting things carefully
 
 ```sql
-COUNT(*)              -- rows
-COUNT(user_id)        -- rows where user_id is not null
-COUNT(DISTINCT user_id)  -- distinct users
+SELECT COUNT(*)              AS rows_total,
+       COUNT(region)         AS rows_with_region,
+       COUNT(DISTINCT region) AS distinct_regions,
+       COUNT(DISTINCT user_id) AS distinct_users
+FROM   orders;
 ```
 
-Three different numbers, confused constantly. "How many customers ordered" is nearly always `COUNT(DISTINCT user_id)`, and reporting `COUNT(*)` instead silently counts your repeat buyers several times.
+Three different counts, and choosing the wrong one is the commonest reporting error there is:
+
+- **`COUNT(*)`** counts rows, including rows where every column is null.
+- **`COUNT(column)`** counts rows where that column is **not null**. The difference between it and `COUNT(*)` is your missing-value count, for free.
+- **`COUNT(DISTINCT column)`** counts distinct non-null values.
+
+"How many customers ordered" is `COUNT(DISTINCT user_id)`, never `COUNT(*)` - and after a join it is never `COUNT(*)` even if it was before.
+
+Conditional counting, without three separate queries:
+
+```sql
+SELECT region,
+       COUNT(*)                                            AS all_orders,
+       SUM(CASE WHEN status = ''complete'' THEN 1 ELSE 0 END) AS completed,
+       SUM(CASE WHEN status = ''cancelled'' THEN 1 ELSE 0 END) AS cancelled,
+       ROUND(
+         100.0 * SUM(CASE WHEN status = ''complete'' THEN 1 ELSE 0 END) / COUNT(*),
+         1) AS completion_pct
+FROM   orders
+GROUP BY region
+ORDER BY all_orders DESC;
+```
+
+`SUM(CASE WHEN ... THEN 1 ELSE 0 END)` is the portable form and works everywhere. Note the `100.0` rather than `100`: integer division is a silent source of zeros in several databases.
 
 ## The LEFT JOIN that becomes an INNER JOIN
 
 ```sql
--- Wrong: the WHERE clause drops the unmatched rows the LEFT JOIN kept
-SELECT u.id, o.amount
-FROM users u
-LEFT JOIN orders o ON o.user_id = u.id
-WHERE o.created_at >= ''2026-01-01'';
-
--- Right: the condition belongs in the join
-SELECT u.id, o.amount
-FROM users u
-LEFT JOIN orders o ON o.user_id = u.id AND o.created_at >= ''2026-01-01'';
+-- A LEFT JOIN keeps every user, even those with no orders.
+SELECT u.user_id,
+       u.country,
+       COUNT(o.order_id) AS orders
+FROM   users u
+LEFT JOIN orders o ON o.user_id = u.user_id
+GROUP BY u.user_id, u.country
+ORDER BY u.user_id;
 ```
 
-In the first query, a user with no orders has a NULL `created_at`, the WHERE rejects NULL, and the user disappears - so "users and their recent orders" quietly becomes "users who ordered recently". This is the most common bug in analytical SQL and it produces a plausible answer.
+Now put a condition on the right-hand table in the `WHERE` clause:
+
+```sql
+-- This LOOKS like a LEFT JOIN and behaves like an INNER one: a user
+-- with no orders has NULL in o.status, and NULL = ''complete'' is not
+-- true, so the row is filtered out again.
+SELECT u.user_id,
+       COUNT(o.order_id) AS orders
+FROM   users u
+LEFT JOIN orders o ON o.user_id = u.user_id
+WHERE  o.status = ''complete''
+GROUP BY u.user_id
+ORDER BY u.user_id;
+```
+
+The condition belongs in the `ON` clause, where it filters what is joined rather than what survives:
+
+```sql
+SELECT u.user_id,
+       COUNT(o.order_id) AS complete_orders
+FROM   users u
+LEFT JOIN orders o
+       ON o.user_id = u.user_id
+      AND o.status = ''complete''
+GROUP BY u.user_id
+ORDER BY u.user_id;
+```
+
+**The rule: a condition on the right-hand table of a `LEFT JOIN` goes in `ON`, not `WHERE`.** The exception is `WHERE o.id IS NULL`, which is the idiom for "rows on the left with no match".
+
+The other join hazard is multiplication:
+
+```sql
+-- If a user has three sessions, their single order row is repeated
+-- three times, and SUM(o.revenue) is three times too big.
+SELECT u.user_id,
+       COUNT(*)                   AS joined_rows,
+       COUNT(DISTINCT o.order_id) AS real_orders,
+       SUM(o.revenue)             AS inflated_revenue
+FROM   users u
+LEFT JOIN orders o   ON o.user_id = u.user_id
+LEFT JOIN sessions s ON s.user_id = u.user_id
+GROUP BY u.user_id
+ORDER BY u.user_id;
+```
+
+Joining two one-to-many tables to the same parent multiplies them together. Aggregate each side separately first - in a CTE - and join the summaries.
 
 ## Window functions
 
+A window function computes across a set of rows **without collapsing them**, which is the thing `GROUP BY` cannot do.
+
 ```sql
-SELECT
-  region,
-  order_id,
-  amount,
-  SUM(amount)  OVER (PARTITION BY region)                AS region_total,
-  RANK()       OVER (PARTITION BY region ORDER BY amount DESC) AS rank_in_region,
-  LAG(amount)  OVER (PARTITION BY region ORDER BY created_at)  AS previous_order
-FROM orders;
+SELECT order_id,
+       region,
+       revenue,
+       SUM(revenue)  OVER (PARTITION BY region)                      AS region_total,
+       ROUND(100.0 * revenue / SUM(revenue) OVER (PARTITION BY region), 1)
+                                                                     AS pct_of_region,
+       ROW_NUMBER()  OVER (PARTITION BY region ORDER BY revenue DESC) AS rank_in_region,
+       revenue - LAG(revenue) OVER (PARTITION BY region ORDER BY placed_on)
+                                                                     AS change_from_last
+FROM   orders
+WHERE  status = ''complete''
+ORDER BY region, rank_in_region;
 ```
 
-A window function computes across a set of rows without collapsing them - the same idea as `transform` in pandas. It replaces most self-joins, and `LAG` in particular turns "compared to the previous period" from a fiddly join into one line.
+Four patterns cover most analyst use:
+
+- **`SUM(x) OVER (PARTITION BY g)`** - the group total, on every row. This is the "share of total" calculation with no join.
+- **`ROW_NUMBER() OVER (PARTITION BY g ORDER BY x DESC)`** - rank within group, for top-n-per-group.
+- **`LAG(x) OVER (ORDER BY t)`** - the previous row''s value, for period-on-period change.
+- **`SUM(x) OVER (ORDER BY t ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)`** - a rolling window.
+
+The ranking functions differ on ties and it matters:
+
+```sql
+SELECT region,
+       revenue,
+       ROW_NUMBER() OVER (PARTITION BY region ORDER BY revenue DESC) AS row_number,
+       RANK()       OVER (PARTITION BY region ORDER BY revenue DESC) AS rank,
+       DENSE_RANK() OVER (PARTITION BY region ORDER BY revenue DESC) AS dense_rank
+FROM   orders
+ORDER BY region, revenue DESC;
+```
+
+`ROW_NUMBER` gives 1, 2, 3 and breaks ties arbitrarily. `RANK` gives 1, 1, 3. `DENSE_RANK` gives 1, 1, 2. For "top 3 per group" you want `ROW_NUMBER`, because the others can return four rows.
+
+A rolling total:
+
+```sql
+SELECT placed_on,
+       revenue,
+       SUM(revenue) OVER (ORDER BY placed_on
+                          ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS rolling_3,
+       SUM(revenue) OVER (ORDER BY placed_on)                       AS running_total
+FROM   orders
+ORDER BY placed_on;
+```
+
+Note that `SUM(x) OVER (ORDER BY t)` with no frame clause is a **running total**, not a total - the default frame is everything up to the current row. Leaving out `ORDER BY` gives the whole-partition total. That difference is a real source of wrong numbers.
 
 ## Dates, carefully
 
 ```sql
-WHERE created_at >= ''2026-01-01'' AND created_at < ''2026-02-01''
+-- Comparing a timestamp to a date: anything after midnight on the
+-- last day is excluded, because ''2026-03-31'' means 00:00:00.
+SELECT COUNT(*) AS wrong
+FROM   events
+WHERE  occurred_at BETWEEN ''2026-01-01'' AND ''2026-03-31'';
 ```
 
-Half-open ranges. `BETWEEN ''2026-01-01'' AND ''2026-01-31''` excludes everything that happened on the 31st after midnight, which is most of the 31st - and the error is invisible because the number still looks reasonable.
+```sql
+-- Half-open intervals are right, every time: >= the start, < the day
+-- after the end. No BETWEEN, no missing last day, no leap-second care.
+SELECT COUNT(*) AS correct
+FROM   events
+WHERE  occurred_at >= ''2026-01-01''
+  AND  occurred_at <  ''2026-04-01'';
+```
+
+**Use half-open ranges for anything with a time component.** `BETWEEN` on timestamps silently drops the last day, and it is the single most common date bug in analytics SQL.
+
+Grouping by period, portably:
+
+```sql
+SELECT substr(occurred_at, 1, 7) AS month,
+       COUNT(*)                  AS events,
+       COUNT(DISTINCT user_id)   AS users
+FROM   events
+GROUP BY substr(occurred_at, 1, 7)
+ORDER BY month;
+```
+
+Each database has its own function for this - `DATE_TRUNC(''month'', ts)` in PostgreSQL, `DATE_FORMAT(ts, ''%Y-%m'')` in MySQL, `FORMAT_DATE` in BigQuery. They do the same thing; know which one your warehouse uses, and never group by a raw timestamp.
 
 ## Common table expressions, for readability
 
 ```sql
-WITH recent AS (
-  SELECT * FROM orders WHERE created_at >= ''2026-01-01''
+WITH complete_orders AS (
+    SELECT user_id, order_id, region, revenue
+    FROM   orders
+    WHERE  status = ''complete''
 ),
 per_user AS (
-  SELECT user_id, SUM(amount) AS spend FROM recent GROUP BY user_id
+    SELECT user_id,
+           COUNT(*)      AS orders,
+           SUM(revenue)  AS revenue
+    FROM   complete_orders
+    GROUP BY user_id
+),
+per_user_sessions AS (
+    SELECT user_id, COUNT(*) AS sessions, SUM(seconds) AS seconds
+    FROM   sessions
+    GROUP BY user_id
 )
-SELECT AVG(spend), COUNT(*) FROM per_user;
+SELECT u.user_id,
+       u.country,
+       COALESCE(p.orders, 0)   AS orders,
+       COALESCE(p.revenue, 0)  AS revenue,
+       COALESCE(s.sessions, 0) AS sessions
+FROM   users u
+LEFT JOIN per_user p          ON p.user_id = u.user_id
+LEFT JOIN per_user_sessions s ON s.user_id = u.user_id
+ORDER BY revenue DESC, u.user_id;
 ```
 
-Each step is named and can be inspected on its own. A query written as one nested block is a query nobody will check.',
-   'Five clauses and three patterns answer most analytical questions. This lesson covers them, the difference between WHERE and HAVING, why a LEFT JOIN can silently drop rows, and the window functions that replace most self-joins.',
-   11, 442, '55555555-5555-4555-8555-555555555555', 'published',
+That is the shape to reach for whenever two one-to-many tables are involved: **aggregate each to one row per key in its own CTE, then join the summaries.** It cannot multiply, it reads top to bottom, and each CTE can be selected from on its own while debugging.
+
+`COALESCE` turns the nulls a `LEFT JOIN` produces into zeros, which is almost always what a report wants - a user with no orders has zero revenue, not unknown revenue.
+
+## NULL does not behave like a value
+
+```sql
+-- NULL compared to anything, including NULL, is not true.
+SELECT COUNT(*) AS rows_total,
+       SUM(CASE WHEN region IS NULL THEN 1 ELSE 0 END) AS null_region,
+       SUM(CASE WHEN region = ''North'' THEN 1 ELSE 0 END) AS north,
+       SUM(CASE WHEN region <> ''North'' THEN 1 ELSE 0 END) AS not_north
+FROM   orders;
+```
+
+`north + not_north` does not equal `rows_total` when any region is null, because `NULL <> ''North''` is neither true nor false. Use `IS NULL`, `IS NOT NULL` and `COALESCE`, and check that your partitions add up.
+
+`NOT IN` with a null in the subquery returns **no rows at all**:
+
+```sql
+-- If any user_id in the subquery is NULL, this returns nothing.
+SELECT COUNT(*) AS surviving
+FROM   users
+WHERE  user_id NOT IN (SELECT user_id FROM orders WHERE user_id IS NOT NULL);
+```
+
+Prefer `NOT EXISTS`, which has no such trap:
+
+```sql
+SELECT COUNT(*) AS users_with_no_orders
+FROM   users u
+WHERE  NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.user_id);
+```
+
+## A worked example
+
+```sql
+-- One query answering a real question: for each country, how many
+-- users ordered, what they spent, and what share of revenue came
+-- from the top order in that country.
+WITH complete_orders AS (
+    SELECT o.order_id, o.user_id, o.revenue, u.country
+    FROM   orders o
+    JOIN   users u ON u.user_id = o.user_id
+    WHERE  o.status = ''complete''
+      AND  o.placed_on >= ''2026-01-01''
+      AND  o.placed_on <  ''2026-04-01''
+),
+ranked AS (
+    SELECT country,
+           order_id,
+           user_id,
+           revenue,
+           SUM(revenue) OVER (PARTITION BY country)                       AS country_revenue,
+           ROW_NUMBER() OVER (PARTITION BY country ORDER BY revenue DESC) AS rank_in_country
+    FROM   complete_orders
+),
+country_totals AS (
+    SELECT country,
+           COUNT(*)                   AS orders,
+           COUNT(DISTINCT user_id)    AS customers,
+           SUM(revenue)               AS revenue,
+           MAX(CASE WHEN rank_in_country = 1 THEN revenue END) AS biggest_order
+    FROM   ranked
+    GROUP BY country
+)
+SELECT c.country,
+       c.customers,
+       c.orders,
+       ROUND(c.revenue, 2)                                  AS revenue,
+       ROUND(c.revenue / c.customers, 2)                    AS revenue_per_customer,
+       ROUND(100.0 * c.biggest_order / c.revenue, 1)        AS pct_from_biggest_order
+FROM   country_totals c
+ORDER BY c.revenue DESC;
+```
+
+Five techniques are in that one query. The date range is half-open. The filter on `status` is in the CTE rather than repeated. `COUNT(DISTINCT user_id)` counts customers rather than rows. A window function computes the country total without a second pass. And `pct_from_biggest_order` is a concentration check: a country where one order is 80% of revenue is a country whose "revenue per customer" means nothing.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A LEFT JOIN dropped rows | A condition on the right table in `WHERE` |
+| The total doubled after a join | Two one-to-many joins; aggregate in CTEs first |
+| The last day is missing | `BETWEEN` on a timestamp; use a half-open range |
+| A percentage is always 0 | Integer division; multiply by `100.0` |
+| `NOT IN` returned nothing | A NULL in the subquery; use `NOT EXISTS` |
+| Counts do not add up to the total | NULLs excluded by both `=` and `<>` |
+| `COUNT(*)` over-counted customers | Use `COUNT(DISTINCT user_id)` |
+| A window `SUM` gave a running total | `ORDER BY` with no frame defaults to cumulative |
+
+## A check you can run
+
+Take any query of yours with a `JOIN` in it and run `SELECT COUNT(*)` on the left table alone, then on the joined result.
+
+If the second is larger, the join multiplied rows, and every `SUM` in that query is too big. It is a ten-second check, it is the most common wrong number in analytics, and the fix - aggregate each side in its own CTE first - is mechanical.
+',
+   'Five clauses and three patterns answer most analytical questions. This lesson covers them, the difference between WHERE and HAVING, why a LEFT JOIN can silently drop rows, and the window functions that replace most self-joins.', 10, 1974,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000e5',
    'Defining a Metric That Survives Scrutiny',
    'markdown',
-   '"Monthly active users" sounds unambiguous. It is not, and two analysts given that brief will produce different numbers from the same database - both correctly.
+   'A metric that survives scrutiny is one whose definition is written down, whose denominator is watched, and that cannot be improved by doing the wrong thing. Most metrics fail at least one of those.
 
 ## What has to be nailed down
 
-- **Active doing what?** Logged in? Performed a meaningful action? Received an automated sync from a mobile app that was never opened?
-- **Which accounts?** Internal, test, bot, deleted, duplicate.
-- **What window?** Calendar month, or rolling 28 days? Calendar months differ in length and in weekend count, so January looks worse than March for no reason. Rolling 28 days has a constant number of each weekday and is almost always the better choice.
-- **Which time zone?** A day boundary in UTC splits an Australian evening in half.
-- **Counted how?** Distinct accounts, or distinct humans - two people sharing a login, one person with three accounts.
+"Monthly active users" sounds unambiguous. It is not, and two teams will produce different numbers from the same database. Six decisions hide inside those three words:
 
-A definition that answers those five is a definition two people can implement identically. One that does not is a source of meetings.
+**What counts as active?** Opened the app? Performed any action? Performed a meaningful action? A background sync is not activity; a push notification arriving is not activity.
+
+**What is a month?** Calendar months, or trailing 30 days? Calendar months are not comparable - February is 10% shorter than January, and the "drop" is arithmetic.
+
+**Whose timezone?** A user in Auckland acts on a different calendar day from one in London. Pick one - usually UTC - and say so.
+
+**Who is a user?** A logged-in account, a device, a browser? One person with a phone and a laptop is two devices and one account.
+
+**Which users are excluded?** Internal accounts, test accounts, bots, users who have deleted their account, users who never verified.
+
+**When is it counted?** A number computed on the 1st of the month will change if someone backfills late-arriving events on the 3rd.
+
+```python
+METRIC = {
+    ''name'': ''Monthly Active Users (MAU)'',
+    ''definition'': ''distinct user_id with >= 1 qualifying event in a trailing 30 days'',
+    ''qualifying events'': ''lesson_viewed, lesson_completed, quiz_submitted'',
+    ''not qualifying'': ''login, push_received, background_sync'',
+    ''window'': ''trailing 30 days, not calendar month'',
+    ''timezone'': ''UTC'',
+    ''identity'': ''user_id (an account), not device'',
+    ''excluded'': ''internal accounts, unverified accounts, soft-deleted users'',
+    ''computed'': ''daily at 04:00 UTC over events up to 03:00, restated for 3 days'',
+    ''owner'': ''growth analytics'',
+    ''version'': ''2026-02-01: added quiz_submitted'',
+}
+width = max(len(k) for k in METRIC)
+for key, value in METRIC.items():
+    print(f''{key:<{width}}  {value}'')
+```
+
+Eleven lines. Any one of them left unspecified is a number two people will compute differently.
+
+## Calendar months are a trap
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+
+# Exactly constant daily activity for a year - no trend at all.
+days = pd.date_range(''2026-01-01'', ''2026-12-31'', freq=''D'')
+daily = pd.DataFrame({''day'': days, ''actives'': 1000})
+
+monthly = (daily.set_index(''day'').resample(''ME'')[''actives''].sum()
+           .rename(''total'').to_frame())
+monthly[''days''] = daily.set_index(''day'').resample(''ME'').size()
+monthly[''per_day''] = monthly[''total''] / monthly[''days'']
+monthly.index = monthly.index.strftime(''%b'')
+
+print(monthly.head(4))
+print()
+jan, feb = monthly.loc[''Jan'', ''total''], monthly.loc[''Feb'', ''total'']
+print(f''Jan {jan:,} -> Feb {feb:,}: {(feb / jan - 1):+.1%}'')
+print(''per-day change:'', f''{(monthly.loc["Feb", "per_day"] / monthly.loc["Jan", "per_day"] - 1):+.1%}'')
+```
+
+A 10% "decline" in February, with nothing whatever having changed. Every February, every year, in every monthly-total metric.
+
+Three fixes, in order of preference: **use a trailing 30 days**, **divide by the number of days**, or **compare with the same month last year**. The first is the only one that works for a chart somebody glances at.
 
 ## Properties of a metric worth having
 
-**It moves when the thing moves.** If a metric cannot distinguish a good month from a bad one, it is decoration.
+**It moves when the thing you care about moves, and not otherwise.** Page views move when a marketing email goes out, which is not the thing you care about.
 
-**It is hard to game accidentally.** Page views goes up when navigation gets worse. Tickets closed goes up when tickets are closed badly. Choose metrics whose easiest way to improve is the thing you actually want.
+**It cannot be improved by doing the wrong thing.** This one deserves its own section below.
 
-**It is one number, with a stated denominator.** "Conversion" is meaningless until you say conversion of what to what over what period.
+**It is comparable across periods.** Trailing windows, not calendar months. The same definition, versioned.
 
-**Somebody owns it.** Metrics without an owner drift: a column changes meaning, a filter is added, and nobody notices for a quarter.
+**It is computable the same way twice.** By two people, and by the same person in six months.
+
+**Somebody owns it.** A metric with no owner drifts, and when it drifts nobody is responsible for saying so.
+
+## The metric that rewards the wrong thing
+
+Every metric is a target, and every target gets optimised - including in ways you did not intend. This is worth taking seriously rather than treating as a joke.
+
+```python
+import pandas as pd
+
+cases = pd.DataFrame([
+    {''metric'': ''support tickets closed'',
+     ''wrong behaviour'': ''close without resolving, let them be reopened'',
+     ''fix'': ''pair with reopen rate within 7 days''},
+    {''metric'': ''average session length'',
+     ''wrong behaviour'': ''make the interface confusing so people take longer'',
+     ''fix'': ''pair with task completion rate''},
+    {''metric'': ''number of releases'',
+     ''wrong behaviour'': ''split one release into five'',
+     ''fix'': ''pair with change failure rate''},
+    {''metric'': ''lessons started'',
+     ''wrong behaviour'': ''autoplay the next lesson'',
+     ''fix'': ''count lessons completed, not started''},
+    {''metric'': ''new sign-ups'',
+     ''wrong behaviour'': ''buy low-quality traffic'',
+     ''fix'': ''pair with week-one activation''},
+])
+print(cases.to_string(index=False))
+```
+
+The defence is a **pair**: a volume metric with a quality metric, where improving one by cheating makes the other worse. Tickets closed with reopen rate. Sign-ups with activation. Releases with failure rate. Neither alone is safe; together they are hard to game without actually improving things.
 
 ## Ratios need their denominator watched
 
-A conversion rate can rise because more people converted or because fewer people arrived. Those call for opposite responses. Always report the numerator and denominator alongside the ratio - it costs two columns and prevents the most common misreading in analytics.
+```python
+import pandas as pd
+
+periods = pd.DataFrame({
+    ''month'': [''Jan'', ''Feb'', ''Mar''],
+    ''conversions'': [500, 520, 480],
+    ''visitors'': [10_000, 8_000, 16_000],
+})
+periods[''rate''] = (periods[''conversions''] / periods[''visitors''] * 100).round(2)
+print(periods.to_string(index=False))
+print()
+print(''February: rate up, because the denominator fell.'')
+print(''March:    rate down, because the denominator grew.'')
+print(''Conversions barely moved in either month.'')
+```
+
+A ratio hides two numbers. It can rise because the numerator grew, or because the denominator shrank - and those are opposite news. February''s "improvement" is a traffic collapse.
+
+**Always publish a ratio with both of its parts.** A conversion rate without the visitor count is uninterpretable, and a dashboard that shows only the rate will celebrate an outage.
+
+The same applies to averages over a changing population:
+
+```python
+import pandas as pd
+
+print(pd.DataFrame({
+    ''month'': [''Jan'', ''Feb''],
+    ''total revenue'': [100_000, 110_000],
+    ''customers'': [1_000, 1_500],
+    ''revenue per customer'': [100.0, 73.3],
+}).to_string(index=False))
+print()
+print(''Revenue up 10%, revenue per customer down 27%: both are true,'')
+print(''and which one is "the number" depends on the decision.'')
+```
 
 ## Leading and lagging
 
-Revenue is a lagging metric: by the time it moves, the thing that caused it happened weeks ago. Trial-to-paid conversion in week one is leading: it moves early and predicts revenue later.
+```python
+import pandas as pd
 
-You need both. Lagging metrics tell you whether the business worked; leading metrics tell you in time to do something.
+print(pd.DataFrame([
+    {''lagging'': ''monthly revenue'', ''leading'': ''trials started this week''},
+    {''lagging'': ''annual churn'', ''leading'': ''support tickets per account''},
+    {''lagging'': ''quarterly NPS'', ''leading'': ''week-one activation rate''},
+    {''lagging'': ''exam pass rate'', ''leading'': ''lessons completed per enrolled week''},
+]).to_string(index=False))
+```
+
+A **lagging** metric tells you what happened and is hard to argue with. A **leading** metric tells you what is about to happen and is easier to influence, at the cost of being a guess.
+
+You need both. A dashboard of only lagging metrics tells you about a fire you can no longer put out; a dashboard of only leading ones never confirms anything.
+
+The test of a leading metric is whether it actually leads. Check it:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(11)
+weeks = 60
+
+# A "leading" indicator that genuinely leads by three weeks, and one
+# that does not lead at all.
+signal = np.cumsum(rng.normal(0, 1, weeks)) + 50
+revenue = np.r_[np.full(3, np.nan), signal[:-3]] + rng.normal(0, 0.4, weeks)
+noise = rng.normal(50, 3, weeks)
+
+df = pd.DataFrame({''signal'': signal, ''noise'': noise, ''revenue'': revenue}).dropna()
+
+for name in [''signal'', ''noise'']:
+    correlations = {lag: df[name].shift(lag).corr(df[''revenue'']) for lag in range(0, 7)}
+    best = max(correlations, key=lambda k: abs(correlations[k]))
+    print(f''{name:<7} best lag {best} weeks, r = {correlations[best]:+.2f}'')
+```
+
+The first leads by three weeks, which the correlation finds. The second leads by nothing, and no lag helps. A leading indicator nobody has checked this way is a hypothesis, not a metric.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=83)
+
+# ---- The definition, versioned. -------------------------------------
+DEFINITION = {
+    ''name'': ''Weekly Active Learners (WAL)'',
+    ''numerator'': ''distinct user_id with >= 1 lesson_completed in the trailing 7 days'',
+    ''window'': ''trailing 7 days ending at 23:59 UTC each day'',
+    ''excluded'': ''internal accounts, unverified accounts'',
+    ''paired_with'': ''lessons completed per active learner (quality)'',
+    ''version'': ''v2, 2026-02-01: completed rather than started'',
+}
+for key, value in DEFINITION.items():
+    print(f''{key:<12} {value}'')
+print()
+
+# ---- Events. --------------------------------------------------------
+days = pd.date_range(''2026-01-01'', periods=120, freq=''D'')
+users = pd.DataFrame({
+    ''user_id'': np.arange(1, 801),
+    ''internal'': rng.random(800) < 0.04,
+    ''verified'': rng.random(800) < 0.9,
+})
+
+rows = []
+for day in days:
+    # A genuine, slow rise in the number of people active.
+    active_today = int(90 + 0.35 * (day - days[0]).days + rng.normal(0, 6))
+    chosen = rng.choice(users[''user_id''], size=max(active_today, 1), replace=False)
+    for user_id in chosen:
+        for _ in range(int(rng.integers(1, 4))):
+            rows.append({''day'': day, ''user_id'': int(user_id), ''event'': ''lesson_completed''})
+events = pd.DataFrame(rows)
+
+# ---- The metric, computed exactly as defined. -----------------------
+eligible = set(users.loc[~users[''internal''] & users[''verified''], ''user_id''])
+events = events[events[''user_id''].isin(eligible)]
+print(f''{len(events):,} qualifying events from {events["user_id"].nunique()} learners'')
+print()
+
+daily = events.groupby(''day'')[''user_id''].agg([''nunique'', ''size'']).rename(
+    columns={''nunique'': ''learners'', ''size'': ''completions''})
+
+trailing = pd.DataFrame(index=days)
+trailing[''wal''] = [
+    events[(events[''day''] > day - pd.Timedelta(''7D'')) & (events[''day''] <= day)][''user_id''].nunique()
+    for day in days
+]
+trailing[''completions''] = daily[''completions''].rolling(7, min_periods=7).sum()
+trailing[''per_learner''] = (trailing[''completions''] / trailing[''wal'']).round(2)
+
+shown = trailing.dropna().iloc[::20]
+print(shown.to_string())
+print()
+
+# ---- The calendar-month trap, demonstrated on the same data. --------
+monthly = daily[''learners''].resample(''ME'').sum().to_frame(''learner_days'')
+monthly[''days''] = daily[''learners''].resample(''ME'').size()
+monthly[''per_day''] = (monthly[''learner_days''] / monthly[''days'']).round(1)
+monthly.index = monthly.index.strftime(''%b'')
+print(monthly.to_string())
+print()
+jan, feb = monthly.loc[''Jan'', ''learner_days''], monthly.loc[''Feb'', ''learner_days'']
+print(f''raw monthly total  Jan -> Feb: {(feb / jan - 1):+.1%}'')
+print(f''per-day            Jan -> Feb: ''
+      f''{(monthly.loc["Feb", "per_day"] / monthly.loc["Jan", "per_day"] - 1):+.1%}'')
+print(''The first number is mostly the length of February.'')
+print()
+
+# ---- The pair: volume AND quality, so gaming one hurts the other. ---
+first, last = trailing.dropna().iloc[0], trailing.dropna().iloc[-1]
+print(f''WAL          {first["wal"]:.0f} -> {last["wal"]:.0f}  ''
+      f''({last["wal"] / first["wal"] - 1:+.1%})'')
+print(f''per learner  {first["per_learner"]:.2f} -> {last["per_learner"]:.2f}  ''
+      f''({last["per_learner"] / first["per_learner"] - 1:+.1%})'')
+print()
+print(''Both published together: a WAL rise driven by counting more'')
+print(''lightly-engaged people would show as a fall in the second number.'')
+```
+
+Two things that example demonstrates rather than asserts. The trailing seven-day window gives a clean rising line where the calendar-month total shows a fictional February decline on exactly the same events. And the paired quality metric is published alongside the volume one, so the pair cannot both be improved by lowering the bar.
 
 ## Write it in a shared place
 
-```
-weekly_active_account:
-  numerator: distinct account_id with >= 1 qualifying_event in the last 7 days
-  qualifying_event: any of lesson_view, quiz_start, playground_run
-  excludes: account.is_internal, account.deleted_at IS NOT NULL
-  timezone: UTC
-  owner: analytics
-  changed: 2026-03-02 added playground_run
-```
+A metric definition that lives in one analyst''s head or one notebook is not a definition. Put it where the number is:
 
-That block, in a document everybody can see, ends more arguments than any dashboard.',
-   'Two analysts computing active users from the same database routinely get different numbers, and both are right. This lesson is about writing a definition precise enough that they cannot, and about the properties that separate a useful metric from a vanity one.',
-   11, 430, '55555555-5555-4555-8555-555555555555', 'published',
+- **In the dashboard**, as a tooltip or a footnote on the tile.
+- **In the data warehouse**, as a view or a dbt model with the logic in one place.
+- **In a document with a version history**, so "the definition changed on 1 February" is a fact rather than an argument.
+
+And when it does change, **annotate the chart on the date it changed**. A step in a line is either news or a definition change, and only the annotation can tell a reader which.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| February always looks bad | Calendar months; use a trailing window |
+| Two teams report different MAU | No written definition |
+| A rate improved while the business worsened | The denominator shrank; publish both parts |
+| A metric rose and nothing else did | It rewards a behaviour you did not want |
+| A leading indicator never led | It was never checked against the lagging one |
+| A step appeared in a chart | A definition change, unannotated |
+| Numbers change after publication | Late-arriving events; state the restatement window |
+| Nobody fixed a drifting metric | No owner |
+
+## A check you can run
+
+Take your most-watched metric and ask: **how would I move this number by 20% this quarter without making anything better?**
+
+If you can answer in under a minute - and you usually can - that is the gaming path, and somebody will find it eventually without meaning to. Then pick the quality metric that would get worse if they did, and publish the two together from now on.
+',
+   'Two analysts computing active users from the same database routinely get different numbers, and both are right. This lesson is about writing a definition precise enough that they cannot, and about the properties that separate a useful metric from a vanity one.', 9, 1883,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000e6',
    'Cohorts and Retention',
    'markdown',
-   'Total active users can be flat while you lose every user you had and replace them with new ones. The total cannot tell you which is happening. A cohort can.
+   'A cohort is a group defined by when it started, followed over time. It is the only way to tell a retention problem from a growth story, because an aggregate hides both.
 
 ## What a cohort is
 
-A group of users who share a starting point - usually the month or week they signed up - followed forward in time. You are asking: of the people who joined in January, how many were still here in month 1, month 2, month 3?
+Group users by the period they joined, then measure each group at the same *age* rather than on the same date.
 
-```
-Cohort     Size   M0     M1     M2     M3
-Jan        1200   100%   42%    31%    28%
-Feb        1450   100%   45%    33%    30%
-Mar        1600   100%   38%    24%    -
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+
+# Two things happening at once: growing sign-ups, and worsening
+# retention. The total active count hides both.
+rows = []
+for month in range(6):
+    signups = 1000 + 400 * month                 # growth
+    retention = 0.55 - 0.04 * month              # decay in quality
+    for age in range(6 - month):
+        active = int(signups * (retention ** 0.5) ** max(age, 0.001)) if age else signups
+        rows.append({''cohort'': month, ''age'': age, ''active'': active})
+panel = pd.DataFrame(rows)
+
+totals = panel.groupby(panel[''cohort''] + panel[''age''])[''active''].sum()
+print(''total active users by calendar month:'')
+print(totals.to_string())
+print()
+print(''That line goes up every month. Nothing in it says retention'')
+print(''is getting worse with every cohort.'')
 ```
 
-Three things are visible here that no total would show.
+The aggregate is the sum of a growing numerator and a shrinking rate. It rises while the product gets worse, and it will keep rising until growth stops - at which point the decline arrives all at once and looks sudden.
+
+## The cohort table
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(11)
+
+# Six monthly cohorts, each with a slightly different retention curve.
+cohorts = pd.date_range(''2026-01-01'', periods=6, freq=''MS'')
+rows = []
+for index, cohort in enumerate(cohorts):
+    size = int(800 + 160 * index)
+    # Later cohorts retain slightly worse.
+    base = 0.46 - 0.025 * index
+    for age in range(len(cohorts) - index):
+        if age == 0:
+            retained = size
+        else:
+            retained = int(size * base * (0.86 ** (age - 1)))
+        rows.append({''cohort'': cohort.strftime(''%Y-%m''), ''size'': size,
+                     ''age'': age, ''retained'': retained})
+panel = pd.DataFrame(rows)
+
+counts = panel.pivot(index=''cohort'', columns=''age'', values=''retained'')
+print(''users retained, by cohort and months since signup:'')
+print(counts.to_string())
+print()
+
+rates = counts.div(counts[0], axis=0).mul(100).round(1)
+print(''retention rate (% of the cohort):'')
+print(rates.to_string())
+```
+
+Read it two ways and each answers a different question.
+
+**Along a row** is one cohort ageing: how does a group behave over its lifetime? That is the retention curve.
+
+**Down a column** is the same age across cohorts: is the product getting better or worse at retaining people? Column 1 falling from 46% to 34% is the thing the aggregate hid.
 
 ## Reading the curve
 
-**It should flatten.** A retention curve that drops and then levels off means you have found a group the product works for. One that keeps falling at a constant rate means there is no such group yet, and growth is a leaky bucket.
+```python
+import numpy as np
+import pandas as pd
 
-**The first interval is the biggest drop, always.** M0 to M1 is where most of the loss is. Improving it is usually the highest-leverage work available, and it is about onboarding rather than about the product''s depth.
+shapes = pd.DataFrame({
+    ''age'': [0, 1, 2, 3, 4, 5, 6],
+    ''healthy'': [100, 48, 41, 38, 37, 36, 36],
+    ''leaky'': [100, 45, 30, 21, 15, 11, 8],
+    ''no product fit'': [100, 22, 12, 7, 5, 4, 3],
+}).set_index(''age'')
+print(shapes.to_string())
+print()
 
-**Compare cohorts, not months.** March looks worse at M1 than February. That is a real signal: something changed for people who joined in March. A total active number would have shown this as a mild dip two months later, by which time the cause is hard to find.
+for name in shapes.columns:
+    values = shapes[name]
+    flattening = values.iloc[-1] / values.iloc[-2]
+    print(f''{name:<16} month 1: {values.iloc[1]:>3}%   ''
+          f''month 6: {values.iloc[-1]:>3}%   ''
+          f''last ratio {flattening:.2f}'')
+```
+
+Three features of a curve tell you three different things:
+
+**The first-period drop** is about onboarding and expectations. Everyone loses people in period one; the question is how many and why.
+
+**Whether it flattens.** A curve that flattens has found a core of people for whom the product works - those users will still be there in a year. A curve that keeps falling at the same rate has no such core, and every user acquired will eventually leave. The second is a far more serious problem than a low first-period number.
+
+**The level it flattens at** is your long-run ceiling. If 36% of each cohort sticks, then steady-state active users are roughly 36% of the sum of all past cohorts.
+
+```python
+import numpy as np
+
+# What the flattening level implies, if acquisition is steady.
+for floor in [0.08, 0.20, 0.36]:
+    monthly_signups = 1000
+    steady_state = monthly_signups * floor / (1 - 0.98)   # with 2% decay of the floor
+    print(f''floor {floor:.0%}: steady state is roughly ''
+          f''{steady_state:,.0f} active users at {monthly_signups:,} signups a month'')
+```
 
 ## The SQL shape
 
 ```sql
+-- Cohort month, age in months, and the count still active.
 WITH first_seen AS (
-  SELECT user_id, DATE_FORMAT(MIN(created_at), ''%Y-%m-01'') AS cohort
-  FROM events GROUP BY user_id
+    SELECT user_id,
+           substr(MIN(occurred_at), 1, 7) AS cohort_month
+    FROM   events
+    GROUP BY user_id
 ),
 activity AS (
-  SELECT DISTINCT user_id, DATE_FORMAT(created_at, ''%Y-%m-01'') AS active_month
-  FROM events
+    SELECT e.user_id,
+           f.cohort_month,
+           substr(e.occurred_at, 1, 7) AS active_month
+    FROM   events e
+    JOIN   first_seen f ON f.user_id = e.user_id
+    GROUP BY e.user_id, f.cohort_month, substr(e.occurred_at, 1, 7)
+),
+sized AS (
+    SELECT cohort_month, COUNT(DISTINCT user_id) AS cohort_size
+    FROM   first_seen
+    GROUP BY cohort_month
 )
-SELECT f.cohort,
-       TIMESTAMPDIFF(MONTH, f.cohort, a.active_month) AS month_number,
-       COUNT(DISTINCT a.user_id) AS users
-FROM first_seen f
-JOIN activity a ON a.user_id = f.user_id
-GROUP BY f.cohort, month_number
-ORDER BY f.cohort, month_number;
+SELECT a.cohort_month,
+       a.active_month,
+       s.cohort_size,
+       COUNT(DISTINCT a.user_id) AS still_active,
+       ROUND(100.0 * COUNT(DISTINCT a.user_id) / s.cohort_size, 1) AS pct
+FROM   activity a
+JOIN   sized s ON s.cohort_month = a.cohort_month
+GROUP BY a.cohort_month, a.active_month, s.cohort_size
+ORDER BY a.cohort_month, a.active_month;
 ```
 
-Divide each row by its cohort size to get the percentages.
+Three parts, always: **establish the cohort** (first event per user), **establish activity per period**, **divide by the cohort size**. The `COUNT(DISTINCT user_id)` matters at every step, because a user with forty events in a month is one active user.
 
 ## Two traps
 
-**The newest cohort is incomplete.** March has no M3 because March was two months ago. Showing it as 0 rather than blank makes a healthy cohort look like a collapse, and somebody will act on it.
+**1. The youngest cohorts have no data yet.** The bottom-right of the table is empty, and treating those blanks as zero produces a cliff that is not real.
 
-**Cohorts are not only signup month.** Cohort by acquisition channel, by plan, by first action taken. "Users who completed onboarding" against "users who did not" is often the most informative split anybody has run.',
-   'A total hides whether you are keeping people or replacing them. A cohort follows one group of users forward in time, which is the only way to see retention, and the shape of the curve says more than any single number.',
-   11, 396, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import numpy as np
+import pandas as pd
+
+counts = pd.DataFrame({
+    0: [1000, 1100, 1200],
+    1: [450, 480, np.nan],
+    2: [380, np.nan, np.nan],
+}, index=[''2026-01'', ''2026-02'', ''2026-03''])
+
+print(''the raw table, with NaN where there is no data yet:'')
+print(counts.to_string())
+print()
+
+print(''mean of column 1, treating NaN as zero:'', np.nan_to_num(counts[1]).mean().round(1))
+print(''mean of column 1, excluding NaN:       '', counts[1].mean().round(1))
+print()
+print(''Only cohorts old enough to HAVE a month-1 number belong in a'')
+print(''month-1 average. The first number is 33% too low.'')
+```
+
+The defence is to **only compare cohorts at ages all of them have reached**, and to show the incomplete cells as blank rather than zero.
+
+**2. The cohort definition changes the answer.** First sign-up, first purchase and first meaningful action give three different tables.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(23)
+n = 3000
+
+users = pd.DataFrame({
+    ''user_id'': np.arange(n),
+    ''signed_up'': rng.integers(0, 6, n),
+})
+# Some users never activate; those who do, do so 0-2 months later.
+users[''activated''] = rng.random(n) < 0.62
+users[''first_action''] = np.where(
+    users[''activated''], users[''signed_up''] + rng.integers(0, 3, n), np.nan)
+
+by_signup = users.groupby(''signed_up'').size()
+by_action = users.dropna(subset=[''first_action'']).groupby(''first_action'').size()
+
+print(''cohort sizes by SIGNUP month:'')
+print(by_signup.to_string())
+print()
+print(''cohort sizes by FIRST ACTION month:'')
+print(by_action.astype(int).to_string())
+print()
+print(f''{(~users["activated"]).sum():,} users are in the first table and'')
+print(''not the second at all. Retention measured on the second looks'')
+print(''far better, and is a different question.'')
+```
+
+Neither is wrong. **Say which you used**, because "60% retention" on activated users and on all sign-ups are numbers that differ by a factor of two.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=181)
+
+# Twelve monthly cohorts. Acquisition grows strongly; retention
+# worsens slightly with each cohort. The total hides both.
+months = pd.period_range(''2026-01'', periods=12, freq=''M'')
+
+rows = []
+for index, cohort in enumerate(months):
+    size = int(600 * (1.14 ** index))                 # 14% monthly growth
+    month_one = 0.44 - 0.012 * index                  # slowly worsening
+    decay = 0.88
+    floor = 0.17
+    for age in range(len(months) - index):
+        if age == 0:
+            rate = 1.0
+        else:
+            rate = floor + (month_one - floor) * (decay ** (age - 1))
+        rows.append({
+            ''cohort'': str(cohort), ''cohort_index'': index, ''age'': age,
+            ''size'': size, ''active'': int(size * rate),
+        })
+panel = pd.DataFrame(rows)
+
+# ---- 1. The aggregate, which is the thing on the dashboard. --------
+panel[''calendar''] = panel[''cohort_index''] + panel[''age'']
+total = panel.groupby(''calendar'')[''active''].sum()
+print(''total active users by calendar month:'')
+print(total.to_string())
+print(f''month 0 to month 11: {total.iloc[0]:,} -> {total.iloc[-1]:,} ''
+      f''({total.iloc[-1] / total.iloc[0] - 1:+.0%})'')
+print(''Looks excellent.'')
+print()
+
+# ---- 2. The cohort table, which is not. ----------------------------
+counts = panel.pivot(index=''cohort'', columns=''age'', values=''active'')
+rates = counts.div(counts[0], axis=0).mul(100).round(1)
+print(''retention rate by cohort age (%):'')
+print(rates.iloc[:, :7].to_string())
+print()
+
+# ---- 3. Read DOWN a column: the same age, across cohorts. ----------
+print(''month-1 retention, by cohort:'')
+month_one = rates[1].dropna()
+print(month_one.to_string())
+print(f''first cohort {month_one.iloc[0]:.1f}%, ''
+      f''latest with data {month_one.iloc[-1]:.1f}%  ''
+      f''({month_one.iloc[-1] - month_one.iloc[0]:+.1f} points)'')
+print(''Every cohort retains worse than the one before it.'')
+print()
+
+# ---- 4. Only compare ages every cohort has reached. ----------------
+complete_age = int(rates.notna().all(axis=0).sum()) - 1
+print(f''all 12 cohorts have reached age {complete_age}'')
+comparable = rates.loc[:, :complete_age]
+print(''the comparable block:'')
+print(comparable.to_string())
+print()
+naive = np.nan_to_num(rates[3].to_numpy()).mean()
+honest = rates[3].dropna().mean()
+print(f''mean month-3 retention, NaN as zero: {naive:.1f}%'')
+print(f''mean month-3 retention, NaN excluded: {honest:.1f}%'')
+print(''The first is wrong by the number of cohorts too young to count.'')
+print()
+
+# ---- 5. Does the curve flatten? ------------------------------------
+first = rates.iloc[0].dropna()
+ratios = (first / first.shift(1)).dropna().round(3)
+print(''cohort 2026-01, ratio of each age to the previous:'')
+print(ratios.to_string())
+print(f''the ratio approaches {ratios.iloc[-1]:.2f}, so the curve is flattening'')
+print(f''the floor looks like roughly {first.iloc[-1]:.0f}% of the cohort'')
+print()
+
+# ---- 6. What the floor implies at steady state. --------------------
+floor_rate = first.iloc[-1] / 100
+monthly_signups = int(counts[0].iloc[-1])
+print(f''at {monthly_signups:,} signups a month and a {floor_rate:.0%} floor,'')
+print(f''long-run active users settle near {monthly_signups * floor_rate / 0.02:,.0f}'')
+print(''- as long as the floor itself does not keep falling, which the'')
+print(''  column reading above says it is doing.'')
+```
+
+The structure of that example is the argument for cohorts. The total active count grows by several hundred percent and looks like a triumph. The cohort table shows month-one retention falling in every single cohort, which means the growth is buying increasingly worse users and the aggregate will turn the moment acquisition slows. Only the second view can say that, and it costs one pivot.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Retention "collapsed" in the newest cohorts | They have not aged yet; blanks read as zero |
+| The total rises while the product worsens | Growth hiding a falling rate; read down the columns |
+| Two teams report different retention | Different cohort definitions; say which |
+| A user with 40 events counted 40 times | Missing `COUNT(DISTINCT user_id)` |
+| The curve never flattens | No core of retained users - the serious case |
+| Month 0 is not 100% | The cohort size and the activity source disagree |
+| A cohort is tiny and swings wildly | Small samples; show the size beside the rate |
+| Monthly cohorts hide a weekly pattern | Choose the period to match the behaviour |
+
+## A check you can run
+
+Take your retention number and ask: **is that a row or a column?**
+
+A row is one cohort ageing, which tells you about the product''s lifecycle. A column is the same age across cohorts, which tells you whether things are getting better or worse. Most dashboards show neither - they show an aggregate - and the column is almost always the one that answers the question being asked.
+',
+   'A total hides whether you are keeping people or replacing them. A cohort follows one group of users forward in time, which is the only way to see retention, and the shape of the curve says more than any single number.', 9, 1777,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000e7',
    'Segmentation, and Simpson Paradox',
    'markdown',
-   'An average over a mixed population usually describes nobody in it. Segmentation is splitting that population into groups that behave differently, and it is the most reliable way to turn a flat number into a finding.
+   'Splitting a number by a dimension is the most productive thing an analyst does and the easiest way to find something that is not there. This lesson is where to split, the reversal that has a name, and when to stop.
 
 ## Where to split
 
-- **By acquisition.** Paid search, organic, referral. These almost always retain differently, and a blended number is a weighted average of two unrelated businesses.
-- **By platform.** Mobile and desktop behave differently enough that a combined funnel is usually meaningless.
-- **By tenure.** New and long-standing users want different things and fail at different steps.
-- **By geography**, which is often a proxy for language, payment method and time zone all at once.
+A useful split has three properties: the segments behave differently, somebody can act on the difference, and each segment is big enough to measure.
 
-Start with the split you would act on differently. If you would do the same thing either way, it is not a useful segmentation.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(5)
+n = 20_000
+
+users = pd.DataFrame({
+    ''user_id'': np.arange(n),
+    ''plan'': rng.choice([''free'', ''pro'', ''team''], n, p=[.70, .22, .08]),
+    ''device'': rng.choice([''mobile'', ''desktop''], n, p=[.62, .38]),
+    ''signup_quarter'': rng.choice([''2025-Q3'', ''2025-Q4'', ''2026-Q1''], n),
+    ''eye_colour'': rng.choice([''blue'', ''brown'', ''green''], n),
+})
+
+# Conversion genuinely depends on plan and device, and not at all on
+# the third dimension - which is there to show what noise looks like.
+base = np.select(
+    [users[''plan''] == ''team'', users[''plan''] == ''pro''],
+    [0.31, 0.19], default=0.07)
+base = base * np.where(users[''device''] == ''desktop'', 1.35, 1.0)
+users[''converted''] = rng.random(n) < base
+
+for dimension in [''plan'', ''device'', ''eye_colour'']:
+    table = users.groupby(dimension).agg(
+        users=(''user_id'', ''size''), rate=(''converted'', ''mean''))
+    spread = table[''rate''].max() - table[''rate''].min()
+    print(f''{dimension} (spread {spread:.1%}):'')
+    print(table.assign(rate=lambda d: (d[''rate''] * 100).round(2)).to_string())
+    print()
+```
+
+The first two splits separate the population; the third does not, and its small apparent spread is sampling noise. A dimension worth keeping is one where the spread is large relative to the intervals around each segment.
+
+The dimensions that are usually worth trying, in order:
+
+- **How they pay** - plan, tier, contract size.
+- **When they arrived** - cohort. This one is so often the answer that it has its own lesson.
+- **Where they came from** - acquisition channel, campaign, referrer.
+- **What they do** - usage band, feature adoption, activity level.
+- **Platform** - device, operating system, browser, app version.
+- **Geography and language**, when the product or the market differs.
 
 ## The reversal that has a name
 
-```
-                 Treatment A        Treatment B
-Mobile           10/100   = 10%     40/400  = 10%
-Desktop          80/400   = 20%     30/150  = 20%
-Overall          90/500   = 18%     70/550  = 12.7%
+Simpson''s paradox: a relationship that holds in every subgroup can reverse when the subgroups are combined.
+
+```python
+import pandas as pd
+
+# Two treatments for kidney stones - the classic real example.
+data = pd.DataFrame([
+    {''treatment'': ''A'', ''stone'': ''small'', ''successes'': 81,  ''cases'': 87},
+    {''treatment'': ''A'', ''stone'': ''large'', ''successes'': 192, ''cases'': 263},
+    {''treatment'': ''B'', ''stone'': ''small'', ''successes'': 234, ''cases'': 270},
+    {''treatment'': ''B'', ''stone'': ''large'', ''successes'': 55,  ''cases'': 80},
+])
+data[''rate''] = data[''successes''] / data[''cases'']
+
+print(''within each stone size:'')
+print(data.assign(rate=lambda d: (d[''rate''] * 100).round(1))
+      .pivot(index=''treatment'', columns=''stone'', values=''rate'').to_string())
+print()
+
+overall = data.groupby(''treatment'').agg(
+    successes=(''successes'', ''sum''), cases=(''cases'', ''sum''))
+overall[''rate''] = (overall[''successes''] / overall[''cases''] * 100).round(1)
+print(''overall:'')
+print(overall.to_string())
+print()
+print(''A is better for small stones AND better for large stones,'')
+print(''and worse overall. Both statements are arithmetically true.'')
 ```
 
-A and B perform identically in every segment. Overall, A looks far better. Nothing is wrong with the arithmetic: A happened to get more desktop users, and desktop converts better regardless of treatment.
+The mechanism is always the same: the groups have different base rates, and the treatments are **unevenly distributed across them**. Treatment A was given mostly to the hard cases.
 
-That is Simpson''s paradox, and it is not a curiosity - it appears whenever the mix differs between the groups being compared. If someone shows you a difference between two periods, two channels or two experiment arms, the first question is whether the mix changed.
+```python
+import pandas as pd
+
+data = pd.DataFrame([
+    {''treatment'': ''A'', ''stone'': ''small'', ''cases'': 87},
+    {''treatment'': ''A'', ''stone'': ''large'', ''cases'': 263},
+    {''treatment'': ''B'', ''stone'': ''small'', ''cases'': 270},
+    {''treatment'': ''B'', ''stone'': ''large'', ''cases'': 80},
+])
+mix = data.pivot(index=''treatment'', columns=''stone'', values=''cases'')
+mix[''large_share''] = (mix[''large''] / (mix[''small''] + mix[''large'']) * 100).round(1)
+print(mix.to_string())
+print()
+print(''75% of A patients had large stones; 23% of B patients did.'')
+print(''The "overall" comparison is mostly a comparison of case mix.'')
+```
+
+This happens constantly in business data, with the same shape:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(29)
+
+# A new checkout is better on BOTH devices, and worse overall,
+# because it was rolled out mostly to mobile - where rates are lower.
+rows = []
+for device, rate_old, rate_new, old_n, new_n in [
+    (''mobile'',  0.040, 0.048, 2_000, 18_000),
+    (''desktop'', 0.110, 0.125, 18_000, 2_000),
+]:
+    rows.append({''variant'': ''old'', ''device'': device, ''n'': old_n,
+                 ''converted'': rng.binomial(old_n, rate_old)})
+    rows.append({''variant'': ''new'', ''device'': device, ''n'': new_n,
+                 ''converted'': rng.binomial(new_n, rate_new)})
+data = pd.DataFrame(rows)
+data[''rate''] = data[''converted''] / data[''n'']
+
+print(''by device:'')
+print(data.pivot(index=''variant'', columns=''device'', values=''rate'')
+      .mul(100).round(2).to_string())
+print()
+totals = data.groupby(''variant'').agg(n=(''n'', ''sum''), converted=(''converted'', ''sum''))
+totals[''rate''] = (totals[''converted''] / totals[''n''] * 100).round(2)
+print(''overall:'')
+print(totals.to_string())
+print()
+mix = data.pivot(index=''variant'', columns=''device'', values=''n'')
+mix[''mobile_share''] = (mix[''mobile''] / (mix[''mobile''] + mix[''desktop'']) * 100).round(0)
+print(''traffic mix:'')
+print(mix.to_string())
+```
 
 ## The practical defence
 
-**Check the mix before believing the difference.** If the proportion of mobile users changed between the periods, compare within platform first.
+**Standardise the mix.** Apply each group''s segment-level rates to one common population, so the comparison is of rates rather than of composition.
 
-**Prefer a weighted comparison.** Compute the metric per segment and then combine using a fixed reference mix, so a change in composition cannot move the headline on its own.
+```python
+import numpy as np
+import pandas as pd
 
-**Be suspicious of a metric that moved without any segment moving.** That is the signature.
+rows = [
+    {''variant'': ''old'', ''device'': ''mobile'',  ''n'': 2_000,  ''rate'': 0.040},
+    {''variant'': ''old'', ''device'': ''desktop'', ''n'': 18_000, ''rate'': 0.110},
+    {''variant'': ''new'', ''device'': ''mobile'',  ''n'': 18_000, ''rate'': 0.048},
+    {''variant'': ''new'', ''device'': ''desktop'', ''n'': 2_000,  ''rate'': 0.125},
+]
+data = pd.DataFrame(rows)
+
+# The common population: the overall traffic mix.
+common = data.groupby(''device'')[''n''].sum()
+weights = common / common.sum()
+print(''standard population:'')
+print(weights.round(3).to_string())
+print()
+
+for variant, group in data.groupby(''variant''):
+    rates = group.set_index(''device'')[''rate'']
+    crude = np.average(rates, weights=group.set_index(''device'')[''n''])
+    standardised = float((rates * weights).sum())
+    print(f''{variant}:  crude {crude:.3%}   standardised {standardised:.3%}'')
+print()
+print(''The crude rates reverse; the standardised ones do not.'')
+```
+
+Direct standardisation is the proper fix and it is five lines. The weaker defences, in order:
+
+- **Always report the segment table with the total.** A reader who can see the mix can spot the problem.
+- **Check whether the mix changed** between the periods or groups being compared. If it did, the aggregate is suspect.
+- **Randomise**, which makes the mix equal by construction. This is the reason an A/B test is immune to Simpson''s paradox.
 
 ## Do not split until it is noise
 
-Segment far enough and every group has twelve people in it and a dramatic-looking rate. A segment that small cannot distinguish a real effect from a coin flip, and the most extreme-looking segments in any analysis are almost always the smallest ones. Show the count beside every rate, and treat anything under a few hundred as a hypothesis rather than a finding.',
-   'An average over a mixed population describes nobody. Splitting it is the most reliable way to find something - and occasionally the split reverses the conclusion entirely, which is a real effect with a name and a straightforward explanation.',
-   11, 388, '55555555-5555-4555-8555-555555555555', 'published',
+Each split multiplies the number of comparisons and divides the sample.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(31)
+n = 20_000
+
+TRUE_RATE = 0.09
+users = pd.DataFrame({
+    ''plan'': rng.choice([''free'', ''pro'', ''team''], n, p=[.7, .22, .08]),
+    ''device'': rng.choice([''mobile'', ''desktop''], n),
+    ''country'': rng.choice([''GB'', ''US'', ''FR'', ''DE'', ''ES''], n),
+    ''converted'': rng.random(n) < TRUE_RATE,          # SAME rate everywhere
+})
+
+levels = [
+    (''whole population'', []),
+    (''one dimension'', [''plan'']),
+    (''two dimensions'', [''plan'', ''device'']),
+    (''three dimensions'', [''plan'', ''device'', ''country'']),
+]
+for label, keys in levels:
+    if keys:
+        table = users.groupby(keys).agg(n=(''converted'', ''size''), rate=(''converted'', ''mean''))
+    else:
+        table = pd.DataFrame({''n'': [len(users)], ''rate'': [users[''converted''].mean()]})
+    smallest = int(table[''n''].min())
+    spread = table[''rate''].max() - table[''rate''].min()
+    half_width = 1.96 * np.sqrt(TRUE_RATE * (1 - TRUE_RATE) / max(smallest, 1))
+    print(f''{label:<18} cells {len(table):>3}  smallest {smallest:>6,}  ''
+          f''spread {spread:>6.1%}  noise +/-{half_width:.1%}'')
+print()
+print(f''every cell has the same true rate of {TRUE_RATE:.0%}'')
+print(''the spread at three dimensions is entirely sampling noise'')
+```
+
+Three rules that follow:
+
+- **Stop when the smallest cell is below a few hundred.** Below that the interval is wider than any difference you would act on.
+- **Compare the spread with the noise.** If the spread between segments is smaller than the interval on the smallest one, there is nothing there.
+- **Decide the dimensions before looking.** Trying twenty splits and reporting the interesting one is the same error as running twenty A/B variants.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=199)
+
+# A support team''s resolution rate, before and after a process change.
+# The change genuinely helps on every ticket type. The mix of ticket
+# types also shifted, which is what causes the paradox.
+TYPES = {
+    ''password'': {''before'': 0.93, ''after'': 0.95, ''n_before'': 6_000, ''n_after'': 2_000},
+    ''billing'':  {''before'': 0.71, ''after'': 0.76, ''n_before'': 3_000, ''n_after'': 3_000},
+    ''bug'':      {''before'': 0.38, ''after'': 0.45, ''n_before'': 1_000, ''n_after'': 5_000},
+}
+
+rows = []
+for ticket_type, spec in TYPES.items():
+    for period in [''before'', ''after'']:
+        n = spec[f''n_{period}'']
+        rows.append({
+            ''period'': period, ''type'': ticket_type, ''tickets'': n,
+            ''resolved'': int(rng.binomial(n, spec[period])),
+        })
+data = pd.DataFrame(rows)
+data[''rate''] = data[''resolved''] / data[''tickets'']
+
+# ---- 1. The headline, which is bad news. ---------------------------
+totals = data.groupby(''period'').agg(
+    tickets=(''tickets'', ''sum''), resolved=(''resolved'', ''sum''))
+totals[''rate''] = totals[''resolved''] / totals[''tickets'']
+totals = totals.loc[[''before'', ''after'']]
+print(''overall first-contact resolution:'')
+print(totals.assign(rate=lambda d: (d[''rate''] * 100).round(2)).to_string())
+crude_change = (totals.loc[''after'', ''rate''] - totals.loc[''before'', ''rate'']) * 100
+print(f''change {crude_change:+.2f} points - "the process change made things worse"'')
+print()
+
+# ---- 2. The segment table, which is good news everywhere. ----------
+by_type = data.pivot(index=''type'', columns=''period'', values=''rate'')[[''before'', ''after'']]
+by_type[''change_points''] = ((by_type[''after''] - by_type[''before'']) * 100).round(2)
+print(''by ticket type:'')
+print(by_type.assign(**{c: (by_type[c] * 100).round(2) for c in [''before'', ''after'']})
+      .to_string())
+print()
+print(''Every single type improved. The total fell.'')
+print()
+
+# ---- 3. The mix, which is the explanation. -------------------------
+mix = data.pivot(index=''period'', columns=''type'', values=''tickets'').loc[[''before'', ''after'']]
+share = mix.div(mix.sum(axis=1), axis=0).mul(100).round(1)
+print(''share of tickets by type (%):'')
+print(share.to_string())
+print()
+print(''Bugs went from 10% of tickets to 50%. Bugs are the hardest to'')
+print(''resolve. The mix changed far more than the rates did.'')
+print()
+
+# ---- 4. Standardise, to compare like with like. --------------------
+standard = mix.sum(axis=0)
+weights = standard / standard.sum()
+print(''standard population (both periods combined):'')
+print(weights.round(3).to_string())
+print()
+
+standardised = {}
+for period in [''before'', ''after'']:
+    rates = data[data[''period''] == period].set_index(''type'')[''rate'']
+    standardised[period] = float((rates * weights).sum())
+
+print(f''crude:         before {totals.loc["before", "rate"]:.2%}  ''
+      f''after {totals.loc["after", "rate"]:.2%}  ''
+      f''({crude_change:+.2f} points)'')
+print(f''standardised:  before {standardised["before"]:.2%}  ''
+      f''after {standardised["after"]:.2%}  ''
+      f''({(standardised["after"] - standardised["before"]) * 100:+.2f} points)'')
+print()
+
+# ---- 5. Check the segments are big enough to believe. --------------
+data[''half_width''] = 1.96 * np.sqrt(data[''rate''] * (1 - data[''rate'']) / data[''tickets''])
+check = data.pivot(index=''type'', columns=''period'', values=''half_width'').mul(100).round(2)
+check.columns = [f''+/-{c}'' for c in check.columns]
+print(''95% interval half-widths, in points:'')
+print(check.to_string())
+print(''All comfortably narrower than the improvements above.'')
+print()
+
+# ---- 6. The sentence. ----------------------------------------------
+print(f''First-contact resolution fell {abs(crude_change):.1f} points overall, ''
+      f''but rose in every ticket type (+{by_type["change_points"].min():.1f} to ''
+      f''+{by_type["change_points"].max():.1f} points). The fall is a change in ''
+      f''mix: bug reports went from {share.loc["before", "bug"]:.0f}% to ''
+      f''{share.loc["after", "bug"]:.0f}% of tickets and are the hardest type to ''
+      f''resolve. Standardised to a common ticket mix, resolution rose ''
+      f''{(standardised["after"] - standardised["before"]) * 100:+.1f} points.'')
+```
+
+That is the complete pattern: the headline says one thing, every segment says the opposite, the mix explains it, and the standardised comparison gives the number you should actually report. Without the segment table the team would have rolled back a process change that worked.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Every segment improved and the total fell | Simpson''s paradox; the mix changed |
+| A comparison is really a comparison of mix | Standardise to a common population |
+| A tiny segment is the best performer | Small samples sit at the extremes |
+| Twenty splits produced one striking result | Expected by chance; choose splits in advance |
+| Segments do not sum to the total | A missing or null category |
+| A segment''s rate swings weekly | Too few observations; widen the period |
+| An A/B test showed a paradox | It should not; check the randomisation |
+| A split of a split of a split | Each level divides the sample; stop earlier |
+
+## A check you can run
+
+Take any aggregate that moved and split it by your largest dimension - plan, device, channel, whichever has three or four values.
+
+Then compute two things: the rate in each segment, and the share of the population each segment holds. If the shares moved more than the rates did, the aggregate change is a mix change, and the number you should report is the standardised one. That check is five lines of pandas and it is the difference between rolling back a working change and shipping it.
+',
+   'An average over a mixed population describes nobody. Splitting it is the most reliable way to find something - and occasionally the split reverses the conclusion entirely, which is a real effect with a name and a straightforward explanation.', 9, 1844,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000e9',
    'Comparing Two Groups Honestly',
    'markdown',
-   'Variant B converted at 4.4%, A at 4.1%. Is B better?
-
-The honest answer is that you cannot tell from those two numbers, and most of what determines the answer was decided before the test ran.
+   'An A/B test is the only tool that gives a causal answer from observational-looking data, and it is easy to run in a way that produces a confident wrong one. This lesson is the arithmetic and the five failures that matter.
 
 ## Why a difference is not a result
 
-Flip two fair coins a hundred times each and they will not both land on fifty. Random variation produces differences; the question is whether this difference is larger than variation alone would usually produce.
+```python
+import numpy as np
 
-That is all a p-value is: the probability of seeing a difference at least this large if there were really no difference at all. A small p-value means the result would be surprising under "no effect". It does **not** mean the effect is large, or important, or that you have a 95% chance of being right.
+rng = np.random.default_rng(5)
+
+# Both variants are IDENTICAL. Same page, same rate, no difference.
+TRUE_RATE = 0.10
+N = 1000
+
+differences = []
+for _ in range(1000):
+    a = rng.binomial(N, TRUE_RATE) / N
+    b = rng.binomial(N, TRUE_RATE) / N
+    differences.append(b - a)
+differences = np.array(differences)
+
+print(f''two identical variants, n={N} each, 1000 repeats'')
+print(f''mean difference    {differences.mean():+.4f}'')
+print(f''largest "win"      {differences.max():+.2%}'')
+print(f''largest "loss"     {differences.min():+.2%}'')
+print(f''apparent lift > 2 points: {(np.abs(differences) > 0.02).mean():.1%} of runs'')
+```
+
+Two identical pages, and in a meaningful fraction of runs one "beat" the other by more than two percentage points. Stop a test early, at a moment that looks good, and you can manufacture any result you like.
 
 ## Decide the sample size first
 
-A test that runs until it looks good is not a test. Looking repeatedly and stopping at the first significant moment ("peeking") inflates the false positive rate badly - run it long enough and almost any A/A test will cross the line at some point.
+The sample size you need depends on three things you must choose before starting: the baseline rate, the smallest lift worth detecting, and how often you are willing to be wrong in each direction.
 
-Before starting, fix:
+```python
+import numpy as np
 
-- the **metric**, exactly one, defined as in Level 2;
-- the **minimum effect worth detecting** - 0.1 percentage points may be real and still not worth shipping;
-- the **sample size**, computed from that effect and your baseline rate;
-- the **stopping date**, and then stop then.
+def sample_size(baseline: float, lift: float, power: float = 0.80,
+                alpha: float = 0.05) -> int:
+    """Per-group sample size for a two-sided test of two proportions.
+    z values: 1.96 for alpha=0.05, 0.84 for power=0.80."""
+    z_alpha = 1.959964
+    z_beta = 0.841621 if power == 0.80 else 1.281552      # 0.80 or 0.90
+    p1 = baseline
+    p2 = baseline * (1 + lift)
+    p_bar = (p1 + p2) / 2
+    numerator = (z_alpha * np.sqrt(2 * p_bar * (1 - p_bar))
+                 + z_beta * np.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) ** 2
+    return int(np.ceil(numerator / (p2 - p1) ** 2))
 
-As a rough shape: detecting small relative changes on a 4% baseline takes tens of thousands of users per arm. If you have hundreds, you are not going to detect a 5% improvement, and running the test anyway produces a number rather than knowledge.
+
+print(f''{"baseline":>9} {"lift":>6} {"per group":>12} {"total":>12}'')
+for baseline in [0.02, 0.10]:
+    for lift in [0.02, 0.05, 0.10, 0.20]:
+        n = sample_size(baseline, lift)
+        print(f''{baseline:>8.0%} {lift:>6.0%} {n:>12,} {2 * n:>12,}'')
+```
+
+Two facts fall out of that table and both change how tests get planned.
+
+**A smaller lift costs quadratically more.** Detecting a 5% relative lift costs about four times as much traffic as a 10% one, and a 2% lift costs twenty-five times as much.
+
+**A lower baseline costs more.** At a 2% conversion rate you need five times the traffic you would need at 10% for the same relative lift.
+
+Which means: **compute this before the test, and if the traffic is not available, do not run it.** A test that cannot reach its sample size will end in an argument about an inconclusive result, having cost weeks.
+
+```python
+import numpy as np
+
+def sample_size(baseline, lift, power=0.80):
+    z_alpha, z_beta = 1.959964, 0.841621
+    p1, p2 = baseline, baseline * (1 + lift)
+    p_bar = (p1 + p2) / 2
+    return int(np.ceil(((z_alpha * np.sqrt(2 * p_bar * (1 - p_bar))
+                         + z_beta * np.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) ** 2)
+                       / (p2 - p1) ** 2))
+
+WEEKLY_TRAFFIC = 24_000
+for lift in [0.05, 0.10, 0.20]:
+    n = sample_size(0.08, lift)
+    weeks = 2 * n / WEEKLY_TRAFFIC
+    verdict = ''feasible'' if weeks <= 4 else ''too slow - do not start''
+    print(f''{lift:>4.0%} lift: {2 * n:>9,} visitors, {weeks:>5.1f} weeks  {verdict}'')
+```
 
 ## Confidence intervals say more than p-values
 
-"B is better, p = 0.03" tells you almost nothing about size. "B is 0.3 points higher, 95% interval from 0.05 to 0.55" tells you it is probably real and probably small. The interval answers the question people actually have.
+```python
+import numpy as np
 
-A wide interval that crosses zero is not "no effect" - it is "this test could not tell", which is a different and more useful statement.
+def compare(successes_a, trials_a, successes_b, trials_b):
+    a, b = successes_a / trials_a, successes_b / trials_b
+    se = np.sqrt(a * (1 - a) / trials_a + b * (1 - b) / trials_b)
+    difference = b - a
+    low, high = difference - 1.96 * se, difference + 1.96 * se
+    # A z-test on the pooled proportion, for the p-value.
+    pooled = (successes_a + successes_b) / (trials_a + trials_b)
+    se_pooled = np.sqrt(pooled * (1 - pooled) * (1 / trials_a + 1 / trials_b))
+    z = difference / se_pooled if se_pooled else 0.0
+    return {''a'': a, ''b'': b, ''difference'': difference,
+            ''low'': low, ''high'': high, ''z'': z}
+
+
+for label, args in [
+    (''clearly better'', (800, 10_000, 920, 10_000)),
+    (''probably better'', (800, 10_000, 860, 10_000)),
+    (''no idea'',         (80, 1_000, 92, 1_000)),
+]:
+    r = compare(*args)
+    print(f''{label}'')
+    print(f''  A {r["a"]:.2%}  B {r["b"]:.2%}  difference {r["difference"]:+.2%}'')
+    print(f''  95% CI [{r["low"]:+.2%}, {r["high"]:+.2%}]   z = {r["z"]:+.2f}'')
+    print(f''  interval excludes zero: {not (r["low"] < 0 < r["high"])}'')
+    print()
+```
+
+The third case has the largest apparent lift and tells you the least: the interval runs from -1.5 points to +3.9 points, so the change could be a meaningful win or a meaningful loss.
+
+**Report the interval, not a verdict.** "B is better" is a claim; "B is between 0.4 and 2.0 points better" is a result, and it lets the reader decide whether 0.4 points would be worth shipping.
 
 ## The practical failures, in order of frequency
 
-1. **Peeking and stopping early.** Overwhelmingly the most common.
-2. **Testing many metrics and reporting the one that moved.** Twenty metrics at a 5% threshold means one false positive on average, every time.
-3. **Broken randomisation.** Users assigned by a bucketing that correlates with something - signup date, device - are not two comparable groups.
-4. **Novelty.** A change performs well for a week because it is new. Run long enough to see it settle.
-5. **Ignoring the segments.** An overall wash can hide a large gain on mobile and a loss on desktop.
+**1. Peeking.** Checking the result repeatedly and stopping when it looks good.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(23)
+
+# Both variants identical. Peek every 500 visitors and stop at the
+# first "significant" moment.
+def run_with_peeking(checks, per_check=500, seed=0):
+    generator = np.random.default_rng(seed)
+    a_success = b_success = 0
+    for check in range(1, checks + 1):
+        a_success += generator.binomial(per_check, 0.10)
+        b_success += generator.binomial(per_check, 0.10)
+        n = check * per_check
+        pa, pb = a_success / n, b_success / n
+        pooled = (a_success + b_success) / (2 * n)
+        se = np.sqrt(pooled * (1 - pooled) * 2 / n)
+        if se and abs(pb - pa) / se > 1.96:
+            return True, check
+    return False, checks
+
+false_positives = sum(run_with_peeking(20, seed=s)[0] for s in range(400))
+print(f''20 peeks, 400 identical A/A tests'')
+print(f''"significant" at some point: {false_positives / 400:.1%}'')
+print(''The advertised false-positive rate is 5%.'')
+```
+
+Peeking twenty times turns a 5% error rate into something several times larger. The fix is to **fix the sample size in advance and look once**, or to use a sequential method designed for continuous monitoring.
+
+**2. Unequal populations.** The split must be random and must happen before any difference can occur.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(29)
+n = 20_000
+
+users = pd.DataFrame({
+    ''user_id'': np.arange(n),
+    ''is_mobile'': rng.random(n) < 0.6,
+    ''is_returning'': rng.random(n) < 0.35,
+})
+users[''variant''] = rng.choice([''A'', ''B''], n)
+
+# The sanity check to run BEFORE looking at the outcome.
+check = users.groupby(''variant'').agg(
+    users=(''user_id'', ''size''),
+    mobile=(''is_mobile'', ''mean''),
+    returning=(''is_returning'', ''mean''),
+).round(4)
+print(check.to_string())
+print()
+split = check[''users''] / check[''users''].sum()
+print(f''split {split.iloc[0]:.1%} / {split.iloc[1]:.1%}'')
+print(''If the covariates differ, the randomisation is broken and the'')
+print(''result is uninterpretable - check this first, every time.'')
+```
+
+**3. Stopping when the result arrives rather than when the sample does.** Same failure as peeking, wearing a different hat.
+
+**4. Measuring the wrong thing.** A button that gets more clicks and fewer purchases is a loss. Always have one primary metric, declared in advance, and a guardrail that would catch the obvious harm.
+
+**5. Testing many variants and reporting the winner.** Twenty variants against one control, at a 5% error rate, gives you roughly one false winner by construction.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(37)
+
+# Twenty variants, ALL identical to the control.
+n = 5_000
+control = rng.binomial(n, 0.10) / n
+winners = 0
+for _ in range(20):
+    variant = rng.binomial(n, 0.10) / n
+    se = np.sqrt(2 * 0.10 * 0.90 / n)
+    if (variant - control) / se > 1.96:
+        winners += 1
+
+print(f''20 identical variants, {winners} "beat" the control'')
+print(''With a 5% threshold, one false winner per twenty is the'')
+print(''expected outcome, not bad luck.'')
+```
+
+The fix is a correction - divide your threshold by the number of comparisons - or, better, to test fewer things and have a reason for each.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=149)
+
+# ---- 1. Plan, before any data exists. -------------------------------
+BASELINE = 0.082
+MIN_LIFT = 0.08              # 8% relative - the smallest worth shipping
+WEEKLY_TRAFFIC = 26_000
+
+def sample_size(baseline, lift, power=0.80):
+    z_alpha, z_beta = 1.959964, 0.841621
+    p1, p2 = baseline, baseline * (1 + lift)
+    p_bar = (p1 + p2) / 2
+    return int(np.ceil(((z_alpha * np.sqrt(2 * p_bar * (1 - p_bar))
+                         + z_beta * np.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) ** 2)
+                       / (p2 - p1) ** 2))
+
+per_group = sample_size(BASELINE, MIN_LIFT)
+weeks = 2 * per_group / WEEKLY_TRAFFIC
+
+PLAN = {
+    ''primary metric'': ''checkout completion rate'',
+    ''guardrail'': ''refund rate within 30 days must not rise'',
+    ''baseline'': f''{BASELINE:.1%}'',
+    ''minimum lift worth shipping'': f''{MIN_LIFT:.0%} relative'',
+    ''sample size per group'': f''{per_group:,}'',
+    ''planned duration'': f''{weeks:.1f} weeks'',
+    ''analysis'': ''once, at the planned sample size - no peeking'',
+}
+for key, value in PLAN.items():
+    print(f''{key:<28} {value}'')
+print()
+
+# ---- 2. Run it. The TRUE lift here is 6%, below the threshold. ------
+TRUE_A, TRUE_B = BASELINE, BASELINE * 1.06
+n = per_group
+
+assignments = pd.DataFrame({
+    ''user_id'': np.arange(2 * n),
+    ''variant'': np.repeat([''A'', ''B''], n),
+    ''is_mobile'': rng.random(2 * n) < 0.61,
+    ''is_returning'': rng.random(2 * n) < 0.34,
+})
+rates = np.where(assignments[''variant''] == ''A'', TRUE_A, TRUE_B)
+assignments[''converted''] = rng.random(2 * n) < rates
+assignments[''refunded''] = assignments[''converted''] & (rng.random(2 * n) < 0.031)
+
+# ---- 3. Sanity checks, BEFORE the outcome. --------------------------
+balance = assignments.groupby(''variant'').agg(
+    users=(''user_id'', ''size''),
+    mobile=(''is_mobile'', ''mean''),
+    returning=(''is_returning'', ''mean''),
+).round(4)
+print(''randomisation check:'')
+print(balance.to_string())
+split = balance[''users''] / balance[''users''].sum()
+print(f''split {split.iloc[0]:.2%} / {split.iloc[1]:.2%}  ''
+      f''(expect 50/50 within a fraction of a point)'')
+print()
+
+# ---- 4. The result, as an interval. ---------------------------------
+result = assignments.groupby(''variant'').agg(
+    users=(''user_id'', ''size''),
+    conversions=(''converted'', ''sum''),
+    refunds=(''refunded'', ''sum''),
+)
+result[''rate''] = result[''conversions''] / result[''users'']
+result[''refund_rate''] = result[''refunds''] / result[''conversions'']
+
+a, b = result.loc[''A''], result.loc[''B'']
+difference = b[''rate''] - a[''rate'']
+se = np.sqrt(a[''rate''] * (1 - a[''rate'']) / a[''users'']
+             + b[''rate''] * (1 - b[''rate'']) / b[''users''])
+low, high = difference - 1.96 * se, difference + 1.96 * se
+relative = difference / a[''rate'']
+
+print(''primary metric: checkout completion'')
+print(f''  A {a["rate"]:.3%} ({int(a["conversions"]):,} of {int(a["users"]):,})'')
+print(f''  B {b["rate"]:.3%} ({int(b["conversions"]):,} of {int(b["users"]):,})'')
+print(f''  difference {difference:+.3%} ({relative:+.1%} relative)'')
+print(f''  95% CI [{low:+.3%}, {high:+.3%}]'')
+print(f''  excludes zero: {not (low < 0 < high)}'')
+print()
+
+# ---- 5. The guardrail. ----------------------------------------------
+gd = b[''refund_rate''] - a[''refund_rate'']
+gse = np.sqrt(a[''refund_rate''] * (1 - a[''refund_rate'']) / max(a[''conversions''], 1)
+              + b[''refund_rate''] * (1 - b[''refund_rate'']) / max(b[''conversions''], 1))
+print(''guardrail: refund rate'')
+print(f''  A {a["refund_rate"]:.2%}   B {b["refund_rate"]:.2%}   ''
+      f''difference {gd:+.2%} (95% CI [{gd - 1.96 * gse:+.2%}, {gd + 1.96 * gse:+.2%}])'')
+print()
+
+# ---- 6. The decision, against the threshold set in advance. ---------
+minimum_absolute = BASELINE * MIN_LIFT
+print(f''threshold set in advance: {minimum_absolute:+.3%} absolute'')
+print(f''observed:                 {difference:+.3%}'')
+print(f''the interval includes the threshold: {low <= minimum_absolute <= high}'')
+print()
+if low > minimum_absolute:
+    print(''SHIP: the whole interval is above the threshold.'')
+elif high < 0:
+    print(''DO NOT SHIP: the whole interval is a loss.'')
+else:
+    print(''INCONCLUSIVE at the planned sample size.'')
+    print(''The true lift is 6%, below the 8% we said was worth shipping,'')
+    print(''so the test was never powered to resolve it - which is the'')
+    print(''correct outcome, and the reason to set the threshold first.'')
+```
+
+The outcome there is the honest one, and the one teams find hardest: a real but small lift, below the threshold that was set in advance, with an interval that cannot rule out zero. Without the pre-registered threshold this would have become an argument. With it, the answer is a sentence.
 
 ## When you cannot run a test
 
-Plenty of changes cannot be A/B tested: pricing, brand, anything affecting everyone at once. Then you are comparing before and after, and you have to argue away everything else that changed - seasonality, a campaign, a release. Say that explicitly rather than presenting it as if it were a test.',
-   'Checkout B converted at 4.4% against 4.1%. Whether that is a win, noise, or an artefact of when you stopped looking is the entire question, and the answer depends on decisions made before the test started.',
-   12, 512, '55555555-5555-4555-8555-555555555555', 'published',
+Sometimes randomisation is impossible - a pricing change, a legal requirement, a launch that affects everyone at once. The alternatives, in descending order of trustworthiness:
+
+- **A staged rollout by region or cohort**, which is a randomised test with a coarser unit.
+- **Difference-in-differences**: compare the change in the exposed group with the change in an unexposed one over the same period, which cancels out anything that affected both.
+- **An interrupted time series**: fit the trend before the change and compare what followed with the extrapolation.
+- **A before-and-after comparison**, which is the weakest and confounds the change with everything else that happened that week.
+
+All four are weaker than a randomised test. Say which one you used, and say what it cannot rule out.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A clear winner that did not replicate | Stopped early, or peeked |
+| An "inconclusive" result after weeks | Underpowered; compute n first |
+| The variants differ before the change | Broken randomisation; check covariates |
+| The winner lost money | The primary metric was the wrong one |
+| One of twenty variants won | Expected by chance; correct for comparisons |
+| The split is 53/47 | Assignment is not random; investigate |
+| A big lift with a tiny sample | Noise; look at the interval |
+| The result is reported as a verdict | Report the interval and the threshold |
+
+## A check you can run
+
+Take the last A/B test your team ran and ask two questions: **what sample size was agreed before it started**, and **how many times was the dashboard checked?**
+
+If the answer to the first is "we didn''t" and the second is "daily", the result is not evidence, whatever it showed. Computing the sample size takes the ten lines above and five minutes, and doing it before the test is the difference between an experiment and an anecdote.
+',
+   'Checkout B converted at 4.4% against 4.1%. Whether that is a win, noise, or an artefact of when you stopped looking is the entire question, and the answer depends on decisions made before the test started.', 11, 2204,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000ea',
    'Confidence, Sample Size and Noise',
    'markdown',
-   'Every number computed from a sample is an estimate. It has a range around it, and that range is usually wider than people expect.
+   'Every number computed from a sample is a guess with a range around it. This lesson is about how wide that range is, how to compute it without a statistics library, and the three places a dashboard pretends it does not exist.
 
 ## Where the range comes from
 
-If 40 out of 1,000 visitors converted, the rate is 4%. Run the same week again with the same product and you would get 3.7%, or 4.3%. Nothing changed; the visitors are a sample.
+If you measure a conversion rate on a thousand visitors, you did not measure *the* conversion rate. You measured one sample, and a different thousand visitors would have given a different answer. The range is how much that answer would wobble.
 
-The width of that range depends almost entirely on the count of the thing you are measuring, not on the size of the population. For a proportion, a reasonable mental model is that the uncertainty shrinks with the square root of the number of events - so to halve the range you need four times the data.
+You can see the wobble directly by simulating it:
 
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+
+TRUE_RATE = 0.12
+SAMPLE = 1000
+
+# A thousand parallel universes, each with a thousand visitors.
+samples = rng.binomial(SAMPLE, TRUE_RATE, size=1000) / SAMPLE
+
+print(f''true rate        {TRUE_RATE:.3f}'')
+print(f''mean of samples  {samples.mean():.3f}'')
+print(f''spread (std)     {samples.std():.4f}'')
+print(f''middle 95%       {np.percentile(samples, 2.5):.3f} to ''
+      f''{np.percentile(samples, 97.5):.3f}'')
+print(f''lowest seen      {samples.min():.3f}'')
+print(f''highest seen     {samples.max():.3f}'')
 ```
-40 conversions out of 1,000   -> 4%, roughly plus or minus 1.2 points
-400 out of 10,000             -> 4%, roughly plus or minus 0.4 points
-4,000 out of 100,000          -> 4%, roughly plus or minus 0.12 points
+
+Nothing changed between those thousand universes except luck, and the measured rate ranged from roughly 9% to 15%. Any single one of them, reported on its own, would look like a fact.
+
+## Computing the interval without simulating
+
+For a proportion there is a formula, and it is worth being able to write from memory:
+
+```python
+import numpy as np
+
+def proportion_interval(successes: int, trials: int, z: float = 1.96) -> tuple:
+    """A 95% confidence interval for a proportion. z=1.96 for 95%,
+    2.58 for 99%, 1.64 for 90%."""
+    p = successes / trials
+    standard_error = np.sqrt(p * (1 - p) / trials)
+    return p - z * standard_error, p + z * standard_error
+
+
+for trials in [100, 1_000, 10_000, 100_000]:
+    low, high = proportion_interval(int(trials * 0.12), trials)
+    print(f''n={trials:>7,}  12.0%  [{low:.2%}, {high:.2%}]  ''
+          f''width {100 * (high - low):.2f} points'')
 ```
 
-That table is the whole lesson. With a thousand visitors, a move from 4% to 4.5% is invisible. With a hundred thousand, it is obvious.
+Two things to take from that table.
+
+**The width shrinks with the square root of n.** To halve the interval you need four times the data; to make it ten times narrower you need a hundred times the data. That is why "collect more data" has a cost curve, and why a 2% lift needs a very large sample to detect.
+
+**At n=100 the interval is ±6 points.** A rate reported as "12%" from a hundred observations is really "somewhere between 6% and 18%", which is almost no information at all.
+
+For a mean rather than a proportion, the same shape:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(7)
+values = rng.normal(240, 60, 400)
+
+mean = values.mean()
+standard_error = values.std(ddof=1) / np.sqrt(len(values))
+low, high = mean - 1.96 * standard_error, mean + 1.96 * standard_error
+
+print(f''mean {mean:.1f}  se {standard_error:.2f}  95% CI [{low:.1f}, {high:.1f}]'')
+print(f''the interval is +/- {1.96 * standard_error / mean:.1%} of the mean'')
+```
+
+## The bootstrap, for everything else
+
+The formulas above assume a shape. The bootstrap assumes nothing: resample your own data, with replacement, and look at how much the answer moves.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(11)
+
+# A heavily skewed quantity, where the formula for a mean is shaky.
+order_value = rng.lognormal(3.6, 1.1, 800)
+
+def bootstrap(values, statistic, draws=2000, seed=0):
+    generator = np.random.default_rng(seed)
+    n = len(values)
+    return np.array([
+        statistic(generator.choice(values, size=n, replace=True))
+        for _ in range(draws)
+    ])
+
+for name, statistic in [(''mean'', np.mean), (''median'', np.median),
+                        (''p90'', lambda v: np.percentile(v, 90))]:
+    draws = bootstrap(order_value, statistic)
+    point = statistic(order_value)
+    low, high = np.percentile(draws, [2.5, 97.5])
+    print(f''{name:<7} {point:7.2f}  95% CI [{low:7.2f}, {high:7.2f}]  ''
+          f''width {high - low:6.2f}'')
+```
+
+The median''s interval is far narrower than the mean''s, on exactly the same data, because the median is not dragged about by the tail. That is a second, quantitative argument for the median on skewed data.
+
+The bootstrap works for any statistic you can compute - a ratio, a percentile, a difference between two groups, the output of a whole pipeline. It costs a few seconds and it removes the need to remember which formula applies.
 
 ## The weekly dashboard problem
 
-A metric with a plus or minus 1.2 point range, reported weekly without that range, will appear to move every week. Teams then explain each movement - a campaign, a release, the weather - and the explanations are fiction, because nothing moved.
+```python
+import numpy as np
+import pandas as pd
 
-Two fixes, both cheap:
+rng = np.random.default_rng(13)
 
-- **Put the interval on the chart.** A band rather than a line changes the conversation from "why is it down" to "it is not down".
-- **Use a longer window.** A 28-day rolling figure has four times the data of a 7-day one and roughly half the noise.
+# 52 weeks with NO underlying change at all: a constant 8% rate.
+TRUE = 0.08
+VISITS = 1200
+
+weekly = rng.binomial(VISITS, TRUE, 52) / VISITS
+changes = np.diff(weekly) / weekly[:-1]
+
+print(f''true rate {TRUE:.1%}, constant all year'')
+print(f''weekly rate ranged {weekly.min():.2%} to {weekly.max():.2%}'')
+print()
+print(f''weeks "up" more than 10%:   {(changes > 0.10).sum()}'')
+print(f''weeks "down" more than 10%: {(changes < -0.10).sum()}'')
+print(f''biggest weekly swing:       {changes.max():+.1%}'')
+print(f''biggest weekly drop:        {changes.min():+.1%}'')
+```
+
+Nothing changed, and the dashboard showed a double-digit move in a large fraction of weeks. Somebody will have been asked to explain each of them, and will have found an explanation, because there is always an explanation available after the fact.
+
+The defence is to put the interval on the chart:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(13)
+VISITS = 1200
+weekly = rng.binomial(VISITS, 0.08, 8) / VISITS
+half_width = 1.96 * np.sqrt(0.08 * 0.92 / VISITS)
+
+for week, rate in enumerate(weekly, start=1):
+    low, high = rate - half_width, rate + half_width
+    bar = '' '' * int(low * 500) + ''['' + ''-'' * max(int((high - low) * 500) - 1, 1) + '']''
+    print(f''week {week}  {rate:.2%}  {bar}'')
+print()
+print(f''every interval is +/- {half_width:.2%}; they all overlap, so no week'')
+print(''is distinguishable from any other'')
+```
+
+Once the bands are drawn, "week 5 was down" stops being a story, because week 5''s band overlaps every other week''s.
 
 ## Small segments are mostly noise
 
-The most extreme-looking rows of any segmented table are almost always the smallest ones, because small samples vary more. Sort a table by conversion rate and the top is populated by segments with eleven users.
+```python
+import numpy as np
+import pandas as pd
 
-Always show the denominator next to the rate. A reader who can see `11 users` will discount it automatically; one who sees only `63%` will not.
+rng = np.random.default_rng(17)
+
+TRUE = 0.10
+segments = pd.DataFrame({
+    ''segment'': [''enterprise'', ''mid-market'', ''small'', ''trial'', ''edu'', ''partner''],
+    ''users'': [40, 180, 2200, 9000, 25, 70],
+})
+segments[''converted''] = [rng.binomial(n, TRUE) for n in segments[''users'']]
+segments[''rate''] = segments[''converted''] / segments[''users'']
+segments[''half_width''] = 1.96 * np.sqrt(
+    segments[''rate''] * (1 - segments[''rate'']) / segments[''users''])
+segments[''low''] = (segments[''rate''] - segments[''half_width'']).clip(0)
+segments[''high''] = segments[''rate''] + segments[''half_width'']
+
+view = segments.assign(
+    rate=lambda d: (d[''rate''] * 100).round(1),
+    low=lambda d: (d[''low''] * 100).round(1),
+    high=lambda d: (d[''high''] * 100).round(1),
+)[[''segment'', ''users'', ''converted'', ''rate'', ''low'', ''high'']]
+print(view.sort_values(''rate'', ascending=False).to_string(index=False))
+print()
+print(f''every segment has the SAME true rate of {TRUE:.0%}'')
+print(''the "best" and "worst" segments differ only by sample size'')
+```
+
+Every segment was generated from the same 10% rate. The ranking is pure noise, and the small segments sit at the extremes because small samples vary more. A dashboard that ranks segments by rate will put the smallest ones at the top and the bottom, every time, forever.
+
+**The rule: do not rank a segment with fewer than a few hundred observations, and never without its interval.**
 
 ## Rounding and false precision
 
-Reporting 4.17% from 1,000 visitors claims a precision you do not have. Round to the precision your sample supports - here, one decimal at most - because an extra digit is a claim about certainty.
+```python
+rate = 0.1237419
+n = 1200
+half_width = 0.0187
+
+print(f''reported as {rate:.5%}  - six significant figures from 1200 observations'')
+print(f''reported as {rate:.1%}  - honest'')
+print(f''with its interval: {rate:.1%} (95% CI {rate - half_width:.1%} to {rate + half_width:.1%})'')
+print()
+print(''The interval is +/- 1.9 points. Every digit after the first'')
+print(''decimal place is noise dressed as precision.'')
+```
+
+A good rule: **report to one more significant figure than the interval justifies, and no more.** If the interval is ±2 points, "12%" is right and "12.37%" is a lie about how much you know.
 
 ## The question to ask of any difference
 
-"How many events is this based on, and how big is the range?" If that cannot be answered, the difference is not yet a finding. It is an observation worth checking with more data.',
-   'Every number computed from a sample has a range around it, and ignoring that range is how a dashboard produces a weekly meeting about nothing. How big that range is, how to shrink it, and when a difference is too small to discuss.',
-   11, 434, '55555555-5555-4555-8555-555555555555', 'published',
+Given two numbers that differ, ask them in this order:
+
+1. **How big is the difference, in the units people care about?** Not "15% better" - "1.8 percentage points, which is about 340 more conversions a month".
+2. **How big is the uncertainty?** If the intervals overlap substantially, the difference may be nothing.
+3. **Is it big enough to act on?** A real difference that is too small to change a decision is not a finding.
+
+```python
+import numpy as np
+
+def compare(label, successes_a, trials_a, successes_b, trials_b):
+    a, b = successes_a / trials_a, successes_b / trials_b
+    se = np.sqrt(a * (1 - a) / trials_a + b * (1 - b) / trials_b)
+    difference = b - a
+    low, high = difference - 1.96 * se, difference + 1.96 * se
+    overlaps_zero = low < 0 < high
+    print(f''{label}'')
+    print(f''  A {a:.2%} (n={trials_a:,})   B {b:.2%} (n={trials_b:,})'')
+    print(f''  difference {difference:+.2%}  95% CI [{low:+.2%}, {high:+.2%}]'')
+    print(f''  could be zero: {overlaps_zero}'')
+    print()
+
+compare(''tiny sample'', 12, 100, 18, 100)
+compare(''same rates, big sample'', 1200, 10_000, 1260, 10_000)
+compare(''clear difference'', 1200, 10_000, 1450, 10_000)
+```
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=131)
+
+# A year of weekly conversion data for four segments. The TRUE rates
+# are fixed and known here - which is what makes the noise visible.
+TRUE_RATES = {''enterprise'': 0.21, ''mid-market'': 0.14, ''small'': 0.11, ''trial'': 0.11}
+WEEKLY_TRAFFIC = {''enterprise'': 35, ''mid-market'': 260, ''small'': 2600, ''trial'': 7800}
+
+weeks = pd.date_range(''2026-01-05'', periods=52, freq=''W-MON'')
+rows = []
+for segment, rate in TRUE_RATES.items():
+    traffic = WEEKLY_TRAFFIC[segment]
+    for week in weeks:
+        rows.append({
+            ''week'': week, ''segment'': segment, ''visits'': traffic,
+            ''conversions'': int(rng.binomial(traffic, rate)),
+        })
+data = pd.DataFrame(rows)
+print(f''{len(data)} segment-weeks, {data["visits"].sum():,} visits'')
+print()
+
+# 1. The whole-year rate per segment, with an interval.
+def interval(successes, trials, z=1.96):
+    p = successes / trials
+    se = np.sqrt(p * (1 - p) / trials)
+    return p, max(p - z * se, 0.0), p + z * se
+
+annual = data.groupby(''segment'', as_index=False).agg(
+    visits=(''visits'', ''sum''), conversions=(''conversions'', ''sum''))
+annual[[''rate'', ''low'', ''high'']] = annual.apply(
+    lambda r: pd.Series(interval(r[''conversions''], r[''visits''])), axis=1)
+annual[''true''] = annual[''segment''].map(TRUE_RATES)
+annual[''covers_truth''] = (annual[''low''] <= annual[''true'']) & (annual[''true''] <= annual[''high''])
+
+print(''annual rates, with 95% intervals:'')
+print(annual.assign(**{c: (annual[c] * 100).round(2) for c in [''rate'', ''low'', ''high'', ''true'']})
+      [[''segment'', ''visits'', ''rate'', ''low'', ''high'', ''true'', ''covers_truth'']]
+      .to_string(index=False))
+print()
+print(''"small" and "trial" have the same true rate; the data agrees ''
+      ''because both intervals overlap.'')
+print()
+
+# 2. The weekly view, which is where the noise lives.
+weekly = data.copy()
+weekly[''rate''] = weekly[''conversions''] / weekly[''visits'']
+spread = weekly.groupby(''segment'')[''rate''].agg(
+    worst=''min'', best=''max'', std=''std'')
+spread[''range_points''] = ((spread[''best''] - spread[''worst'']) * 100).round(1)
+spread[''true''] = spread.index.map(TRUE_RATES)
+print(''weekly rates, by segment (true rate constant all year):'')
+print(spread.assign(**{c: (spread[c] * 100).round(1) for c in [''worst'', ''best'', ''true'']})
+      [[''true'', ''worst'', ''best'', ''range_points'']].to_string())
+print()
+print(''The 35-visit segment swung across tens of percentage points'')
+print(''with nothing changing. The 7,800-visit one barely moved.'')
+print()
+
+# 3. How often a weekly chart would have shown a "significant" move.
+alarms = {}
+for segment, group in weekly.groupby(''segment''):
+    changes = group[''rate''].pct_change().dropna()
+    alarms[segment] = int((changes.abs() > 0.20).sum())
+print(''weeks that moved more than 20% from the previous week:'')
+for segment, count in alarms.items():
+    print(f''  {segment:<12} {count:>2} of 51'')
+print(''Every one of those would have been explained in a meeting.'')
+print()
+
+# 4. Bootstrap the difference between two segments, with no formula.
+def bootstrap_difference(a_rows, b_rows, draws=2000, seed=0):
+    generator = np.random.default_rng(seed)
+    out = np.empty(draws)
+    a_conv, a_vis = a_rows[''conversions''].to_numpy(), a_rows[''visits''].to_numpy()
+    b_conv, b_vis = b_rows[''conversions''].to_numpy(), b_rows[''visits''].to_numpy()
+    for i in range(draws):
+        ia = generator.integers(0, len(a_conv), len(a_conv))
+        ib = generator.integers(0, len(b_conv), len(b_conv))
+        out[i] = (b_conv[ib].sum() / b_vis[ib].sum()) - (a_conv[ia].sum() / a_vis[ia].sum())
+    return out
+
+same = bootstrap_difference(data[data.segment == ''small''], data[data.segment == ''trial''])
+different = bootstrap_difference(data[data.segment == ''small''],
+                                 data[data.segment == ''mid-market''])
+
+for label, draws in [(''small vs trial (truly equal)'', same),
+                     (''small vs mid-market (truly different)'', different)]:
+    low, high = np.percentile(draws, [2.5, 97.5])
+    print(f''{label}'')
+    print(f''  difference {draws.mean():+.3%}  95% CI [{low:+.3%}, {high:+.3%}]  ''
+          f''excludes zero: {not (low < 0 < high)}'')
+print()
+
+# 5. How much data would be needed to see a one-point difference.
+for n in [1_000, 5_000, 20_000, 100_000]:
+    se = np.sqrt(2 * 0.11 * 0.89 / n)
+    print(f''n={n:>7,} per group: 95% interval on a difference is ''
+          f''+/-{1.96 * se * 100:.2f} points'')
+print()
+print(''A one-point difference needs roughly 20,000 per group to be'')
+print(''distinguishable from nothing. That is the cost of precision.'')
+```
+
+Five things that example establishes with numbers rather than assertion. The annual intervals cover the true rates, which is the interval doing its job. Two segments with identical true rates produce overlapping intervals, correctly. The 35-visit segment swings wildly while the 7,800-visit one does not. The bootstrap separates a real difference from a fake one with no formula. And the last table prices precision: a one-point difference costs about twenty thousand observations per group to see.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A weekly metric swings and nobody knows why | Sampling noise; put the interval on the chart |
+| The smallest segments are always the extremes | Small samples vary more; do not rank them |
+| A rate is reported to four decimal places | False precision; round to the interval |
+| Two overlapping intervals were called different | Overlap means it may be nothing |
+| "We need more data" with no number | Width shrinks as the square root; price it |
+| A skewed mean has a wide interval | It is dragged by the tail; use the median |
+| A formula does not fit the statistic | Bootstrap it instead |
+| A difference is real but tiny | Statistically detectable is not the same as useful |
+
+## A check you can run
+
+Take any percentage on your dashboard, find its denominator, and compute `1.96 * sqrt(p * (1 - p) / n)`.
+
+That is the half-width of its 95% interval. Compare it with the week-on-week movement everybody has been discussing. In my experience the movement is inside the interval more often than not, which means the discussion has been about noise - and the fix is one band drawn on one chart.
+',
+   'Every number computed from a sample has a range around it, and ignoring that range is how a dashboard produces a weekly meeting about nothing. How big that range is, how to shrink it, and when a difference is too small to discuss.', 11, 2190,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000eb',
    'Correlation, Causation and the Missing Variable',
    'markdown',
-   'Users who use feature X retain better. The temptation is to build more of feature X. Before that, there are three other explanations, and one of them is usually right.
+   '"Correlation is not causation" is where most people stop. The useful part is knowing *what else* it could be, how to name the alternative in your specific case, and what evidence would actually support the causal claim.
 
 ## The three alternatives
 
-**1. Reverse causation.** Engaged users use more features. The feature did not cause the engagement; the engagement caused the feature use. This is extremely common with anything optional.
+Whenever X and Y move together, there are four possibilities and only one is the one you hoped for:
 
-**2. A confounder.** Something causes both. Teams on the enterprise plan use feature X and also retain better - because they are enterprise teams with a contract and an administrator, not because of the feature.
+1. **X causes Y** - the claim.
+2. **Y causes X** - reverse causation.
+3. **Z causes both** - a confounder.
+4. **Coincidence** - or a selection effect in how the data was gathered.
 
-**3. Selection.** The people who chose the feature differ systematically from those who did not, in ways you did not measure. Self-selection is a confounder you cannot see.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+n = 1000
+
+# A pure confounder: company size drives BOTH support tickets and
+# revenue. Neither causes the other.
+size = rng.lognormal(3.0, 0.8, n)
+tickets = size * 0.9 + rng.normal(0, 2, n)
+revenue = size * 140 + rng.normal(0, 200, n)
+
+frame = pd.DataFrame({''size'': size, ''tickets'': tickets, ''revenue'': revenue})
+print(frame[[''tickets'', ''revenue'']].corr().round(3))
+print()
+print(f''tickets vs revenue: r = {frame["tickets"].corr(frame["revenue"]):.3f}'')
+print(''"Customers who raise more tickets spend more. Should we'')
+print(''encourage ticket-raising?"'')
+```
+
+The correlation is strong and the conclusion is nonsense. Company size explains both, and nothing you do to ticket volume will change revenue.
+
+Controlling for the confounder makes it disappear:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+n = 1000
+size = rng.lognormal(3.0, 0.8, n)
+tickets = size * 0.9 + rng.normal(0, 2, n)
+revenue = size * 140 + rng.normal(0, 200, n)
+frame = pd.DataFrame({''size'': size, ''tickets'': tickets, ''revenue'': revenue})
+
+# Within a narrow band of company size, is there still a relationship?
+frame[''band''] = pd.qcut(frame[''size''], 5, labels=[f''q{i}'' for i in range(1, 6)])
+within = frame.groupby(''band'', observed=True).apply(
+    lambda g: g[''tickets''].corr(g[''revenue'']), include_groups=False)
+
+print(f''overall correlation        {frame["tickets"].corr(frame["revenue"]):+.3f}'')
+print(''within each size quintile:'')
+print(within.round(3).to_string())
+print()
+print(f''mean within-band correlation {within.mean():+.3f}'')
+print(''The relationship was entirely company size.'')
+```
+
+That stratification is the cheapest confounder check there is: split by the suspected confounder and see whether the relationship survives inside the strata.
 
 ## Naming it, in the specific case
 
-The useful discipline is not "correlation is not causation" - everyone knows that and it stops no one. It is to say out loud what the confounder would be, concretely:
+The general warning is useless. The useful move is to name a plausible confounder for *your* claim and then go and look.
 
-> Accounts that enabled single sign-on retain 30 points better. The confounder is company size: SSO is an enterprise feature, enterprise accounts have annual contracts, and an annual contract retains by definition.
+```python
+import pandas as pd
 
-Once stated, it can be checked. Compare within company size and see whether the gap survives.
+claims = pd.DataFrame([
+    {''claim'': ''users who use feature X retain better'',
+     ''reverse'': ''engaged users find X; X does not create engagement'',
+     ''confounder'': ''tenure - older accounts use more features and retain more''},
+    {''claim'': ''customers who call support churn more'',
+     ''reverse'': ''people about to churn call support'',
+     ''confounder'': ''product problems cause both''},
+    {''claim'': ''the email campaign lifted sales'',
+     ''reverse'': ''intent to buy drives opening the email'',
+     ''confounder'': ''the campaign ran in the week of a holiday''},
+    {''claim'': ''teams using our tool ship faster'',
+     ''reverse'': ''fast teams adopt tools'',
+     ''confounder'': ''engineering maturity causes both''},
+    {''claim'': ''the redesign increased sign-ups'',
+     ''reverse'': ''none plausible'',
+     ''confounder'': ''a press mention in the same week''},
+])
+for _, row in claims.iterrows():
+    print(f''claim      {row["claim"]}'')
+    print(f''  reverse  {row["reverse"]}'')
+    print(f''  confound {row["confounder"]}'')
+    print()
+```
+
+Writing those two lines for every causal claim takes a minute and changes the conversation from "is this causal" to "here is the specific thing we need to rule out".
+
+## Selection is the sneakiest one
+
+A correlation can appear purely because of who ended up in the data.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(11)
+n = 5000
+
+# Two genuinely INDEPENDENT qualities of a candidate.
+skill = rng.normal(0, 1, n)
+interview = rng.normal(0, 1, n)
+print(f''in the whole population, r = {np.corrcoef(skill, interview)[0, 1]:+.3f}'')
+
+# Hire anyone who is good at EITHER. Among the hired, the two become
+# negatively correlated - with nothing having caused anything.
+hired = (skill + interview) > 1.2
+print(f''among those hired,      r = ''
+      f''{np.corrcoef(skill[hired], interview[hired])[0, 1]:+.3f}'')
+print(f''({hired.sum()} of {n} hired)'')
+print()
+print(''"Our best interviewers are the weakest engineers" is an artefact'')
+print(''of the hiring rule, not a fact about people.'')
+```
+
+This is why "among our customers" findings are so often misleading. The customers are a selected group, and the selection can create or destroy relationships that do not exist in the population you want to generalise to.
 
 ## Evidence that does support a causal claim
 
 In descending order of strength:
 
-1. **A randomised experiment.** Assignment is random, so the groups differ only by chance. This is why A/B tests matter: randomisation handles confounders you never thought of.
-2. **A natural experiment.** Something assigned the groups for reasons unrelated to the outcome - a staged rollout by region, a bug that disabled a feature for some users.
-3. **Comparison within strata.** If the effect holds in every company size, the confounder has been accounted for - but only that one, and only if measured well.
-4. **A plausible mechanism plus timing.** The weakest. Useful for forming a hypothesis, not for concluding.
+**1. A randomised experiment.** Assignment is random, so nothing can confound it. This is the only method that rules out confounders you have not thought of.
+
+**2. A staged rollout.** A randomised experiment with a coarser unit - by region, by cohort, by account. Weaker because the units are few and may differ.
+
+**3. Difference-in-differences.** Compare the change in an exposed group with the change in an unexposed one over the same period. Anything affecting both cancels out.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(17)
+
+# Two regions. The feature ships in North only, in week 13.
+weeks = np.arange(1, 27)
+rows = []
+for region, base, effect in [(''North'', 100, 12), (''South'', 85, 0)]:
+    for week in weeks:
+        seasonal = 8 * np.sin(week / 4)          # affects BOTH regions
+        treated = effect if (region == ''North'' and week >= 13) else 0
+        rows.append({''region'': region, ''week'': week,
+                     ''value'': base + seasonal + treated + rng.normal(0, 3)})
+data = pd.DataFrame(rows)
+data[''period''] = np.where(data[''week''] >= 13, ''after'', ''before'')
+
+cell = data.pivot_table(index=''region'', columns=''period'', values=''value'', aggfunc=''mean'')
+cell[''change''] = cell[''after''] - cell[''before'']
+print(cell.round(1).to_string())
+print()
+
+naive = cell.loc[''North'', ''change'']
+did = cell.loc[''North'', ''change''] - cell.loc[''South'', ''change'']
+print(f''before-and-after in North only: {naive:+.1f}'')
+print(f''difference-in-differences:      {did:+.1f}'')
+print(f''the true effect is:             +12.0'')
+print()
+print(''The naive number includes the seasonal swing that hit both'')
+print(''regions. Subtracting the control removes it.'')
+```
+
+**4. A dose-response relationship.** More of the cause produces more of the effect, consistently.
+
+**5. A mechanism.** A plausible story for *how* X would cause Y, which can itself be tested.
+
+**6. Replication.** The same effect, in a different population, at a different time.
+
+Observational evidence can be persuasive when several of these line up. One correlation is not.
 
 ## The time-ordering check
 
-Does the behaviour precede the outcome? If users show the retention difference before they adopt the feature, the feature is a marker rather than a cause. This is a cheap check and it kills a surprising number of claims.
+The cause must precede the effect. It is an obvious requirement and it is violated constantly, usually by a window that includes the outcome.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(23)
+n = 3000
+
+users = pd.DataFrame({
+    ''user_id'': np.arange(n),
+    ''signup_week'': rng.integers(1, 20, n),
+})
+users[''active_weeks''] = rng.poisson(6, n) + 1
+users[''retained''] = users[''active_weeks''] >= 8
+
+# The broken measure: feature use counted over the user''s WHOLE life.
+users[''feature_uses_lifetime''] = rng.poisson(users[''active_weeks''] * 0.8)
+
+# The honest measure: feature use in the FIRST TWO WEEKS only.
+users[''feature_uses_first_2w''] = rng.poisson(1.6, n)
+
+for column in [''feature_uses_lifetime'', ''feature_uses_first_2w'']:
+    used = users[column] > 0
+    rate_used = users.loc[used, ''retained''].mean()
+    rate_not = users.loc[~used, ''retained''].mean()
+    print(f''{column}'')
+    print(f''  used     {rate_used:.1%} retained  (n={used.sum():,})'')
+    print(f''  not used {rate_not:.1%} retained  (n={(~used).sum():,})'')
+    print(f''  gap      {rate_used - rate_not:+.1%}'')
+    print()
+print(''The lifetime measure is circular: retained users had more weeks'')
+print(''in which to use the feature. The two-week measure is not.'')
+```
+
+**The rule: measure the cause in a window that closes before the outcome window opens.** A feature-usage measure that includes the period you are predicting cannot say anything.
 
 ## How to say it
 
-Not "feature X drives retention". Instead: "accounts using X retain 30 points better; this is largely explained by plan size, and within the enterprise plan the gap is 4 points, which we have not tested causally."
+The language matters because it determines what people do next.
 
-That sentence is longer and less satisfying, and it is the one that will not have to be retracted.',
-   'Two things moving together is the beginning of a question, not the end of one. This lesson covers the three alternatives to causation, how to name the confounder in a specific case, and what evidence actually supports a causal claim.',
-   11, 426, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''instead of'': ''X drives retention'',
+     ''say'': ''X use is associated with higher retention; we have not tested whether it causes it''},
+    {''instead of'': ''the campaign increased sales 12%'',
+     ''say'': ''sales were 12% higher in campaign weeks; a holiday fell in the same window''},
+    {''instead of'': ''support calls cause churn'',
+     ''say'': ''churned accounts called support more in their final month''},
+    {''instead of'': ''we should make everyone use X'',
+     ''say'': ''an experiment on X would cost two weeks and would answer this''},
+]).to_string(index=False))
+```
+
+The last row is the most useful move available. When the observational evidence is suggestive, the right output is usually not a conclusion but a proposed experiment with a cost attached.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=167)
+
+# A product team believes: "users who join a team workspace retain
+# better, so we should push everyone into workspaces."
+#
+# The data is generated so we KNOW the truth: workspace membership has
+# a small real effect (+4 points), and company size drives both
+# workspace use and retention much more strongly.
+
+n = 6000
+company_size = rng.lognormal(2.4, 0.9, n)                  # the confounder
+size_band = pd.qcut(company_size, 4, labels=[''tiny'', ''small'', ''medium'', ''large''])
+
+# Bigger companies are far likelier to use a workspace...
+workspace_probability = 0.08 + 0.72 * (company_size / (company_size + 12))
+in_workspace = rng.random(n) < workspace_probability
+
+# ...and bigger companies retain much better, independently.
+retention_probability = (0.22 + 0.55 * (company_size / (company_size + 10))
+                         + 0.04 * in_workspace)            # the TRUE effect
+retained = rng.random(n) < retention_probability
+
+users = pd.DataFrame({
+    ''company_size'': company_size, ''band'': size_band,
+    ''workspace'': in_workspace, ''retained'': retained,
+})
+
+# ---- 1. The naive comparison, which is what gets presented. --------
+naive = users.groupby(''workspace'')[''retained''].agg([''mean'', ''size''])
+gap = naive.loc[True, ''mean''] - naive.loc[False, ''mean'']
+print(''naive comparison:'')
+print(naive.assign(mean=lambda d: (d[''mean''] * 100).round(1)).to_string())
+print(f''gap {gap:+.1%} - "workspaces lift retention by {gap * 100:.0f} points"'')
+print(f''the TRUE effect built into this data is +4.0 points'')
+print()
+
+# ---- 2. Name the confounder, then stratify. ------------------------
+within = users.groupby([''band'', ''workspace''], observed=True)[''retained''].agg(
+    [''mean'', ''size'']).unstack()
+within.columns = [''no workspace'', ''workspace'', ''n no'', ''n yes'']
+within[''gap_points''] = ((within[''workspace''] - within[''no workspace'']) * 100).round(1)
+print(''within each company-size band:'')
+print(within.assign(**{c: (within[c] * 100).round(1)
+                       for c in [''no workspace'', ''workspace'']}).to_string())
+print()
+weighted = np.average(within[''gap_points''], weights=within[''n no''] + within[''n yes''])
+print(f''size-weighted gap within bands: {weighted:+.1f} points'')
+print(f''naive gap:                      {gap * 100:+.1f} points'')
+print(f''true effect:                    +4.0 points'')
+print()
+print(''Most of the headline gap was company size. The within-band'')
+print(''estimate is close to the truth.'')
+print()
+
+# ---- 3. Reverse causation: is it plausible here? -------------------
+print(''reverse causation check:'')
+print(''  Could retaining cause workspace use rather than the reverse?'')
+print(''  Yes - a user who stays has more opportunity to be invited.'')
+print(''  The stratified estimate does not rule that out.'')
+print()
+
+# ---- 4. Selection: who is even in this data? -----------------------
+print(''selection check:'')
+print(f''  {len(users):,} users, {users["workspace"].mean():.1%} in a workspace'')
+print(''  Users who left before day 7 are not in the retention table at'')
+print(''  all, and they are disproportionately small companies.'')
+print()
+
+# ---- 5. What would settle it, with a cost. -------------------------
+BASELINE = float(users.loc[~users[''workspace''], ''retained''].mean())
+def sample_size(baseline, absolute_lift):
+    z_alpha, z_beta = 1.959964, 0.841621
+    p1, p2 = baseline, baseline + absolute_lift
+    p_bar = (p1 + p2) / 2
+    return int(np.ceil(((z_alpha * np.sqrt(2 * p_bar * (1 - p_bar))
+                         + z_beta * np.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) ** 2)
+                       / (p2 - p1) ** 2))
+
+per_group = sample_size(BASELINE, 0.04)
+print(''what would settle it:'')
+print(f''  Randomly prompt half of new users to create a workspace.'')
+print(f''  To detect a 4-point lift from a {BASELINE:.0%} baseline needs'')
+print(f''  {per_group:,} users per group, {2 * per_group:,} in total.'')
+print()
+
+# ---- 6. The sentence, written honestly. ----------------------------
+print(''Workspace members retain ''
+      f''{gap * 100:.0f} points better than non-members ''
+      f''({naive.loc[True, "mean"]:.0%} against {naive.loc[False, "mean"]:.0%}), ''
+      ''but company size explains most of that: within size bands the gap ''
+      f''falls to {weighted:.0f} points. We have not ruled out that staying ''
+      ''causes workspace membership rather than the reverse. A randomised ''
+      f''prompt to {2 * per_group:,} new users would answer it in a few weeks.'')
+```
+
+The structure of that example is the one to reuse. State the naive finding. Name a specific confounder and stratify by it. Say whether reverse causation is plausible. Say who is missing from the data. Then propose the experiment with a number attached, so the conversation moves from arguing to deciding whether to spend the traffic.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A strong correlation with a silly conclusion | A confounder driving both |
+| The effect vanished when controlled | It was the confounder all along |
+| "Users who do X retain better" | Usually reverse causation or tenure |
+| A relationship exists only among customers | Selection effect; check the population |
+| A before/after shows a large lift | Seasonality; use a control group |
+| The predictor includes the outcome window | Circular; close the window first |
+| Every segment contradicts the total | Simpson''s paradox; see the segmentation lesson |
+| A causal word in the summary | Say "associated with" unless you randomised |
+
+## A check you can run
+
+Take the last causal claim in a deck or a document and write one sentence for each of the three alternatives: what reverse causation would look like, what a confounder would be, and who is missing from the data.
+
+If any of the three is plausible and unaddressed, change the verb from "drives" to "is associated with" and add the experiment that would settle it. That edit takes two minutes and it is the difference between a finding and a decision made on a coincidence.
+',
+   'Two things moving together is the beginning of a question, not the end of one. This lesson covers the three alternatives to causation, how to name the confounder in a specific case, and what evidence actually supports a causal claim.', 11, 2140,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000ed',
    'Dashboards People Actually Use',
    'markdown',
-   'Most dashboards are built, shown once, and never opened again. The ones that survive have a few things in common, and none of them are chart types.
+   'A dashboard that nobody opens twice has failed, however accurate it is. This lesson is about the handful of design decisions that decide which kind it is.
 
 ## Build it for one recurring question
 
-"Everything about sales" is not a question, and a dashboard that answers it has forty charts and no reader. "Did anything change this week that I should look into?" is a question, and it supports maybe six.
+```python
+import pandas as pd
 
-If you cannot say who opens it, how often, and what they do differently as a result, it is a report rather than a dashboard, and a report is better as a document that goes to them.
+print(pd.DataFrame([
+    {''kind'': ''recurring question'',
+     ''example'': ''"are we on track for the quarter?" - asked every Monday'',
+     ''belongs in'': ''a dashboard''},
+    {''kind'': ''one-off question'',
+     ''example'': ''"why did March dip?" - asked once'',
+     ''belongs in'': ''an analysis, shared as a document''},
+    {''kind'': ''exploration'',
+     ''example'': ''"what drives retention?" - open-ended'',
+     ''belongs in'': ''a notebook''},
+    {''kind'': ''everything we have'',
+     ''example'': ''"all the numbers, just in case"'',
+     ''belongs in'': ''nowhere''},
+]).to_string(index=False))
+```
+
+The fourth row is how most dashboards are built and why most are abandoned. A dashboard is for a **question somebody asks repeatedly**, and its design should make that question answerable in seconds.
+
+Write the question at the top of the dashboard, literally. It focuses the thing, and it tells a new reader what they are looking at.
 
 ## Show change, not level
 
-A number on its own cannot be interpreted. Every metric needs a comparison baked into the view: against last week, against the same week last year, against target. The most useful dashboards show a sparkline and a delta and almost nothing else.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+weeks = pd.date_range(''2026-01-05'', periods=12, freq=''W-MON'')
+revenue = pd.Series((np.linspace(82_000, 96_000, 12) + rng.normal(0, 2_500, 12)).round(),
+                    index=weeks)
+
+latest = revenue.iloc[-1]
+previous = revenue.iloc[-2]
+year_base = revenue.iloc[0]
+
+print(''a tile that says only the level:'')
+print(f''   Revenue   {latest:,.0f}'')
+print()
+print(''the same tile, with context:'')
+print(f''   Revenue   {latest:,.0f}'')
+print(f''             {latest / previous - 1:+.1%} vs last week'')
+print(f''             {latest / year_base - 1:+.1%} vs 12 weeks ago'')
+print(f''             4-week mean {revenue.tail(4).mean():,.0f}'')
+```
+
+A number on its own is unreadable. Is 96,000 good? Nobody knows without the previous value, the trend, or the target. **Every tile needs at least one comparison**, and the useful ones are: the previous period, the same period last year, the target, and the recent average.
+
+The sparkline is the cheapest context there is:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(5)
+
+def sparkline(values):
+    blocks = '' .:-=+*#''
+    low, high = min(values), max(values)
+    span = high - low or 1
+    return ''''.join(blocks[int((v - low) / span * (len(blocks) - 1))] for v in values)
+
+metrics = {
+    ''revenue'': np.linspace(82, 96, 20) + rng.normal(0, 2, 20),
+    ''signups'': np.linspace(400, 380, 20) + rng.normal(0, 12, 20),
+    ''churn'': np.linspace(2.1, 2.0, 20) + rng.normal(0, 0.25, 20),
+}
+for name, values in metrics.items():
+    change = values[-1] / values[0] - 1
+    print(f''{name:<9} {values[-1]:>8.1f}  {change:>+7.1%}  |{sparkline(values)}|'')
+print()
+print(''Twenty data points in twenty characters. The direction is'')
+print(''visible without anybody clicking into a chart.'')
+```
 
 ## Make broken look different from bad
 
-The most important failure mode is a pipeline that stops. A chart that flatlines at zero because the job failed looks exactly like a catastrophic business week, and the reaction is wrong in both directions.
+```python
+import numpy as np
+import pandas as pd
 
-- Show the **data freshness** - "last updated 14 minutes ago" - on every page.
-- Draw **no data** differently from **zero**. A gap in the line, not a point at the bottom.
-- Add a **row count** panel. A sudden drop in rows processed is the earliest signal of a broken upstream.
+rng = np.random.default_rng(7)
+days = pd.date_range(''2026-03-01'', periods=14, freq=''D'')
+orders = pd.Series(rng.normal(1000, 50, 14).round(), index=days)
+orders.iloc[-1] = 0          # the pipeline did not run
+orders.iloc[-4] = 620        # a genuine bad day
+
+median = orders.rolling(7, min_periods=3).median().shift(1)
+
+for day, value in orders.items():
+    expected = median.get(day, np.nan)
+    if value == 0:
+        state = ''NO DATA - pipeline did not run''
+    elif not np.isnan(expected) and value < expected * 0.7:
+        state = f''low ({value / expected - 1:+.0%} vs typical)''
+    else:
+        state = ''''
+    print(f''{day.date()}  {value:>6,.0f}  {state}'')
+print()
+print(''A zero and a bad day look identical on a line chart. They need'')
+print(''different treatment, because they need different actions.'')
+```
+
+Three states a tile must be able to show, and most dashboards show only one:
+
+- **A value.** Normal.
+- **No data.** The pipeline has not run, or has not run yet. This must look obviously different from zero.
+- **Stale.** The data is old. Put the "as of" timestamp on every tile, and make it turn a colour when it is older than expected.
+
+A zero that means "the pipeline failed" rendered as a zero that means "nothing happened" is the single most expensive dashboard bug, because it generates a panic and then a loss of trust.
 
 ## Keep the definitions attached
 
-Every metric on a dashboard should link to its definition - the block from Level 2. Without it, the dashboard becomes the definition, and the definition is then whatever the SQL happens to do after six people have edited it.
+```python
+DEFINITIONS = {
+    ''Weekly active learners'': {
+        ''definition'': ''distinct learners with >= 1 lesson completed, trailing 7 days'',
+        ''excludes'': ''internal accounts, unverified accounts'',
+        ''source'': ''warehouse.fct_lesson_events'',
+        ''refreshed'': ''daily 04:00 UTC'',
+        ''restated'': ''up to 3 days, for late events'',
+        ''owner'': ''growth analytics'',
+        ''version'': ''v3 since 2026-02-01'',
+    },
+}
+for metric, fields in DEFINITIONS.items():
+    print(metric)
+    for key, value in fields.items():
+        print(f''  {key:<12} {value}'')
+```
+
+Every tile needs a tooltip with that content. The alternative is a weekly conversation about what the number means, and two teams reporting different values for the same name.
+
+The "restated" line in particular. If today''s number will change tomorrow because events arrive late, say so on the tile, or somebody will screenshot it and quote it in a meeting.
 
 ## Fewer numbers, chosen
 
-Six good charts are read; forty are scanned. If something has not been looked at in a month, delete it. A dashboard that has grown continuously for two years is a dashboard nobody trusts, because nobody can say which parts are still correct.
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''tiles'': ''5-8'', ''result'': ''everything visible at once; people return to it''},
+    {''tiles'': ''15-25'', ''result'': ''people look at three and ignore the rest''},
+    {''tiles'': ''40+'', ''result'': ''nobody can tell what is important; abandoned''},
+]).to_string(index=False))
+print()
+print(''The hard part is deleting, not adding.'')
+```
+
+A good dashboard has one headline number, three or four supporting ones, and a way to get to the detail. Everything else belongs on a second page or in a query.
+
+The test for whether a tile earns its place: **when this number moves, does somebody do something different?** If not, it is decoration, and it is competing for attention with the numbers that do matter.
+
+```python
+import pandas as pd
+
+tiles = pd.DataFrame([
+    {''tile'': ''weekly revenue'', ''action if it moves'': ''adjust forecast, alert sales''},
+    {''tile'': ''week-one activation'', ''action if it moves'': ''investigate onboarding''},
+    {''tile'': ''p95 page load'', ''action if it moves'': ''page the on-call engineer''},
+    {''tile'': ''total page views'', ''action if it moves'': ''none - moves with marketing''},
+    {''tile'': ''database row count'', ''action if it moves'': ''none''},
+    {''tile'': ''cumulative signups'', ''action if it moves'': ''none - always goes up''},
+])
+tiles[''keep''] = tiles[''action if it moves''] != ''none''
+print(tiles.to_string(index=False))
+print()
+print(f''{tiles["keep"].sum()} of {len(tiles)} tiles survive the test.'')
+```
+
+Cumulative charts deserve a special mention: a line that only goes up conveys no information about whether things are improving. The weekly rate does. Replace every cumulative total with its rate of change.
 
 ## Let people leave with the data
 
-An export button, or the query behind each chart. Analysts will need to go further than any dashboard allows, and hiding the query means they rebuild it - slightly differently - and now there are two definitions.',
-   'Most dashboards are opened twice. The ones that survive answer a specific recurring question, show change rather than level, and make it obvious when a number is broken rather than merely low.',
-   10, 386, '55555555-5555-4555-8555-555555555555', 'published',
+Every dashboard generates the question "can I see the rows behind this?". Answer it in the dashboard:
+
+- **A download link** on every table.
+- **The query**, visible or linked, so an analyst can take it and modify it.
+- **A drill-down** from an aggregate to the records.
+
+Without these, every interesting number becomes a request to the analytics team, which is a tax on both sides and the reason dashboards stop being used.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=233)
+
+# The data behind a weekly dashboard for one question:
+# "are we on track for the quarter, and is anything broken?"
+# Ten complete weeks of a thirteen-week quarter.
+WEEKS_DONE, QUARTER_WEEKS = 10, 13
+weeks = pd.date_range(''2026-01-05'', periods=WEEKS_DONE, freq=''W-MON'')
+revenue = pd.Series((np.linspace(78_000, 92_000, WEEKS_DONE)
+                     + rng.normal(0, 3_000, WEEKS_DONE)).round(), index=weeks)
+activation = pd.Series(np.linspace(0.38, 0.41, WEEKS_DONE)
+                       + rng.normal(0, 0.012, WEEKS_DONE), index=weeks)
+p95_latency = pd.Series((np.linspace(900, 790, WEEKS_DONE)
+                         + rng.normal(0, 40, WEEKS_DONE)).round(), index=weeks)
+signups = pd.Series((np.linspace(2100, 2050, WEEKS_DONE)
+                     + rng.normal(0, 90, WEEKS_DONE)).round(), index=weeks)
+
+# The latest week''s pipeline has not finished.
+signups.iloc[-1] = np.nan
+
+QUARTER_TARGET = 1_150_000
+AS_OF = ''2026-03-16 04:00 UTC''
+
+def sparkline(values):
+    blocks = '' .:-=+*#''
+    clean = [v for v in values if not np.isnan(v)]
+    low, high = min(clean), max(clean)
+    span = high - low or 1
+    return ''''.join('' '' if np.isnan(v) else
+                   blocks[int((v - low) / span * (len(blocks) - 1))] for v in values)
+
+def tile(name, series, fmt, definition, higher_is_better=True):
+    latest = series.iloc[-1]
+    if np.isnan(latest):
+        print(f''{name:<22} NO DATA YET      |{sparkline(series.to_numpy())}|'')
+        print(f''{"":<22} last complete week: {fmt(series.dropna().iloc[-1])}'')
+        print(f''{"":<22} {definition}'')
+        print()
+        return
+    previous = series.dropna().iloc[-2]
+    change = latest / previous - 1
+    direction = ''+'' if change >= 0 else ''-''
+    if abs(change) < 0.005:
+        verdict = ''flat''
+    else:
+        verdict = ''as hoped'' if (change > 0) == higher_is_better else ''wrong direction''
+    print(f''{name:<22} {fmt(latest):>12}   {direction}{abs(change):.1%} wk/wk  ''
+          f''({verdict})'')
+    print(f''{"":<22} |{sparkline(series.to_numpy())}|  ''
+          f''4wk mean {fmt(series.dropna().tail(4).mean())}'')
+    print(f''{"":<22} {definition}'')
+    print()
+
+
+print(''='' * 78)
+print(''ARE WE ON TRACK FOR Q1, AND IS ANYTHING BROKEN?''.center(78))
+print(f''as of {AS_OF}''.center(78))
+print(''='' * 78)
+print()
+
+# ---- The headline: one number, against a target. -------------------
+to_date = revenue.sum()
+weeks_done = len(revenue)
+projected = to_date / weeks_done * QUARTER_WEEKS
+print(f''{"Q1 revenue to date":<22} {to_date:>12,.0f}'')
+print(f''{"":<22} {to_date / QUARTER_TARGET:>11.1%} of the ''
+      f''{QUARTER_TARGET:,.0f} target, {weeks_done} of {QUARTER_WEEKS} weeks done'')
+print(f''{"":<22} at this run rate the quarter closes at {projected:,.0f} ''
+      f''({projected / QUARTER_TARGET - 1:+.1%})'')
+print(f''{"":<22} |{sparkline(revenue.to_numpy())}|'')
+print()
+print(''-'' * 78)
+print()
+
+# ---- Three or four supporting tiles, each with an action. ----------
+tile(''Weekly revenue'', revenue, lambda v: f''{v:,.0f}'',
+     ''complete orders, excl. refunds. v2 since 2026-01-01.'')
+tile(''Week-one activation'', activation, lambda v: f''{v:.1%}'',
+     ''verified signups completing >= 1 lesson in 7 days.'')
+tile(''p95 page load'', p95_latency, lambda v: f''{v:,.0f}ms'',
+     ''all pages, all regions. Pages on-call above 1200ms.'',
+     higher_is_better=False)
+tile(''Weekly signups'', signups, lambda v: f''{v:,.0f}'',
+     ''verified, external. Restated for up to 3 days.'')
+
+print(''-'' * 78)
+print()
+
+# ---- Data health, so broken is distinguishable from bad. -----------
+print(''DATA HEALTH'')
+health = []
+for name, series in [(''revenue'', revenue), (''activation'', activation),
+                     (''latency'', p95_latency), (''signups'', signups)]:
+    missing = int(series.isna().sum())
+    median = series.dropna().median()
+    latest = series.dropna().iloc[-1]
+    state = ''MISSING LATEST'' if np.isnan(series.iloc[-1]) else (
+        ''anomalous'' if abs(latest / median - 1) > 0.5 else ''ok'')
+    health.append({''metric'': name, ''weeks'': len(series), ''missing'': missing,
+                   ''state'': state})
+print(pd.DataFrame(health).to_string(index=False))
+print()
+print(''Signups shows NO DATA YET rather than zero, which is the whole'')
+print(''point: a zero would have read as a catastrophe.'')
+print()
+
+# ---- The tiles that did not make it, and why. ----------------------
+print(''-'' * 78)
+print()
+print(''DELIBERATELY NOT ON THIS DASHBOARD'')
+for name, reason in [
+    (''cumulative signups'', ''only goes up; the weekly rate says more''),
+    (''total page views'', ''moves with marketing spend; nobody acts on it''),
+    (''average page load'', ''the p95 is the one that pages someone''),
+    (''revenue by 14 regions'', ''most are too small to read; drill down instead''),
+]:
+    print(f''  {name:<22} {reason}'')
+print()
+print(''Every one of those was requested. Each would have competed for'')
+print(''attention with the four numbers somebody acts on.'')
+```
+
+Five decisions make that readable. The question is written at the top. There is one headline with a target and a run rate, then four supporting tiles. Every tile has a week-on-week change, a sparkline and a one-line definition. The missing week shows as NO DATA YET rather than zero. And the tiles that were left out are listed with the reason, which is the part that keeps a dashboard from growing to forty tiles over a year.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Nobody opens it twice | It answers no recurring question |
+| A number means nothing on its own | No comparison; add period-on-period |
+| A pipeline failure looked like a crash | Zero rendered as a value; show NO DATA |
+| Two teams quote different values | The definition is not on the tile |
+| A screenshot was quoted after restatement | No "restated for N days" note |
+| Forty tiles and nobody reads any | Nothing was ever deleted |
+| A cumulative chart that only rises | Show the rate of change instead |
+| Every number generates a request | No download or drill-down |
+
+## A check you can run
+
+Open your team''s dashboard and, for each tile, ask: **when this number moves, what does somebody do?**
+
+Delete every tile with no answer. In my experience that is half of them, and the remaining half become readable for the first time - which is the whole point, because a dashboard competes for a few seconds of attention and every unnecessary number spends some of it.
+',
+   'Most dashboards are opened twice. The ones that survive answer a specific recurring question, show change rather than level, and make it obvious when a number is broken rather than merely low.', 10, 1940,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000ee',
    'Definitions Drift, and Data Breaks Quietly',
    'markdown',
-   'The loud failures are easy: a job crashes and somebody gets paged. The expensive ones are silent - a number that is wrong but plausible, for weeks.
+   'Numbers rarely break loudly. They drift, and the chart keeps drawing. This lesson is about the ways that happens, the tests that catch them, and what to do once you find out a published number was wrong.
 
 ## How numbers go wrong quietly
 
-- **A tracking change.** The mobile app starts firing an event on launch rather than on interaction. Active users rises 8%, everyone celebrates, nothing happened.
-- **A schema change.** A column goes from NOT NULL to nullable. Rows that used to be counted now have a NULL that a filter rejects.
-- **A backfill.** Someone reloads six months of history with slightly different logic, and your dashboard changes retrospectively.
-- **A definition edit.** A filter is added to a shared query to fix one report, and every other report using it moves.
+Six failures account for most of it, and none of them produces an error:
 
-None of these produce an error. All produce a number.
+**1. An upstream column changes meaning.** `status` gains a new value, `region` is renamed, a currency becomes minor units. The query runs; the filter silently matches less.
+
+```python
+import pandas as pd
+
+before = pd.DataFrame({''status'': [''complete''] * 80 + [''cancelled''] * 20})
+after = pd.DataFrame({''status'': [''completed''] * 78 + [''cancelled''] * 20 + [''refunded''] * 2})
+
+for label, frame in [(''before'', before), (''after'', after)]:
+    matched = (frame[''status''] == ''complete'').sum()
+    print(f''{label:<7} rows {len(frame):>3}  matching "complete" {matched:>3}  ''
+          f''rate {matched / len(frame):.0%}'')
+print()
+print(''A one-letter change upstream and the metric reads zero. No error.'')
+```
+
+**2. A join starts multiplying.** A lookup table gains a duplicate key and every total inflates.
+
+**3. Late-arriving data.** Events for Monday arrive on Wednesday, so Monday looks low until it is restated - and a chart built on Tuesday is wrong.
+
+**4. A partial load.** The pipeline failed halfway, wrote what it had, and the day looks like a 40% drop.
+
+**5. A timezone shift.** A source starts sending UTC instead of local time, and every day boundary moves by hours.
+
+**6. The definition changed.** Somebody improved the query. The step in the chart looks like news.
 
 ## Tests that catch them
 
-Treat data like code, with assertions that run on every refresh:
+The useful tests are boring, run every load, and fail loudly.
 
-```sql
--- Volume: today should look like recent days
-SELECT COUNT(*) FROM events WHERE day = CURRENT_DATE;   -- alert if < 50% of the 7-day median
+```python
+import numpy as np
+import pandas as pd
 
--- Uniqueness: the key is actually a key
-SELECT COUNT(*) - COUNT(DISTINCT order_id) FROM orders;  -- must be 0
+def check(frame: pd.DataFrame, expectations: dict) -> list:
+    """Returns a list of failures, empty if everything passed."""
+    failures = []
 
--- Range: values that cannot be
-SELECT COUNT(*) FROM orders WHERE amount < 0 OR amount > 100000;
+    rows = len(frame)
+    low, high = expectations[''row_range'']
+    if not low <= rows <= high:
+        failures.append(f''row count {rows:,} outside expected {low:,}-{high:,}'')
 
--- Freshness: is the newest row recent
-SELECT TIMESTAMPDIFF(HOUR, MAX(created_at), NOW()) FROM events;  -- alert over 6
+    for column in expectations[''not_null'']:
+        missing = int(frame[column].isna().sum())
+        if missing:
+            failures.append(f''{column} has {missing} null(s)'')
 
--- Referential: orphans
-SELECT COUNT(*) FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE u.id IS NULL;
+    for column in expectations[''unique'']:
+        duplicates = int(frame[column].duplicated().sum())
+        if duplicates:
+            failures.append(f''{column} has {duplicates} duplicate(s)'')
+
+    for column, allowed in expectations[''values''].items():
+        unexpected = set(frame[column].dropna().unique()) - set(allowed)
+        if unexpected:
+            failures.append(f''{column} has unexpected values {sorted(unexpected)}'')
+
+    for column, (low, high) in expectations[''ranges''].items():
+        out = int(((frame[column] < low) | (frame[column] > high)).sum())
+        if out:
+            failures.append(f''{column} has {out} value(s) outside [{low}, {high}]'')
+
+    return failures
+
+
+EXPECTATIONS = {
+    ''row_range'': (900, 1200),
+    ''not_null'': [''order_id'', ''placed_on'', ''region'', ''revenue''],
+    ''unique'': [''order_id''],
+    ''values'': {''region'': [''North'', ''South'', ''East'', ''West''],
+               ''status'': [''complete'', ''cancelled'', ''pending'']},
+    ''ranges'': {''revenue'': (0, 100_000), ''units'': (1, 1000)},
+}
+
+rng = np.random.default_rng(5)
+good = pd.DataFrame({
+    ''order_id'': np.arange(1000),
+    ''placed_on'': pd.Timestamp(''2026-03-01''),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], 1000),
+    ''status'': rng.choice([''complete'', ''cancelled'', ''pending''], 1000),
+    ''units'': rng.integers(1, 60, 1000),
+    ''revenue'': rng.gamma(4, 120, 1000).round(2),
+})
+
+print(''good load:'', check(good, EXPECTATIONS) or ''all checks passed'')
+print()
+
+broken = good.copy()
+broken.loc[0, ''region''] = ''Nord''                 # a renamed value
+broken.loc[1, ''revenue''] = np.nan                # a null
+broken.loc[2, ''order_id''] = broken.loc[3, ''order_id'']    # a duplicate key
+broken = broken.iloc[:500]                       # a partial load
+
+for failure in check(broken, EXPECTATIONS):
+    print('' -'', failure)
 ```
 
-Five checks, each one line, each catching a class of failure that otherwise reaches a slide.
+Five checks, forty lines, and they catch four of the six failure modes on the way in. Run them on every load and fail the pipeline rather than publishing.
+
+The other two - late data and definition changes - need a different kind of check:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(11)
+
+# A daily volume series, with a partial load on one day and a
+# genuine drop on another.
+days = pd.date_range(''2026-02-01'', periods=40, freq=''D'')
+volume = pd.Series(rng.normal(4800, 180, 40).round(), index=days)
+volume.iloc[25] = 1900          # a partial load
+volume.iloc[33] = 4100          # a real but modest dip
+
+# A robust band from the trailing median and MAD, which a couple of
+# bad days cannot widen the way a mean and std would.
+median = volume.rolling(14, min_periods=7).median().shift(1)
+mad = (volume - median).abs().rolling(14, min_periods=7).median().shift(1)
+score = (volume - median) / (1.4826 * mad)
+
+alerts = volume[score.abs() > 4].dropna()
+print(''days flagged as anomalous:'')
+for day, value in alerts.items():
+    print(f''  {day.date()}  {value:,.0f}  ''
+          f''(expected about {median[day]:,.0f}, z={score[day]:+.1f})'')
+print()
+print(''The partial load is flagged. The genuine 15% dip is not, which'')
+print(''is correct: a volume alert is for breakage, not for business.'')
+```
+
+The volume check is the single highest-value test there is, because a partial load is the commonest failure and it is invisible in any rate or average.
 
 ## Version the definitions
 
-Metric definitions belong in version control with the rest of the code, so a change is a reviewed diff with a date on it. When a metric moves, the first question is "what changed in the definition", and a git log answers it in seconds.
+```python
+import pandas as pd
+
+history = pd.DataFrame([
+    {''version'': 1, ''effective'': ''2025-06-01'',
+     ''change'': ''first definition: any session counts as active''},
+    {''version'': 2, ''effective'': ''2025-11-15'',
+     ''change'': ''excluded sessions under 3 seconds (bot traffic)''},
+    {''version'': 3, ''effective'': ''2026-02-01'',
+     ''change'': ''excluded internal accounts''},
+])
+print(history.to_string(index=False))
+print()
+print(''A step in the chart on any of those dates is a definition'')
+print(''change, not news - and the only way to know is this table.'')
+```
+
+Keep the definition in version control next to the query, with a date on every change. Then when somebody asks why the number stepped on 15 November, the answer takes ten seconds rather than a day.
+
+Where possible, **restate history** under the new definition so the series is comparable, and keep the old series alongside for one period so the two can be compared.
 
 ## Annotate the charts
 
-Mark the deploy, the tracking change, the backfill on the timeline. A step change with no annotation gets explained as behaviour for ever afterwards.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(17)
+days = pd.date_range(''2026-01-01'', periods=90, freq=''D'')
+series = pd.Series(np.r_[rng.normal(1000, 40, 45), rng.normal(880, 40, 45)].round(),
+                   index=days, name=''active'')
+
+ANNOTATIONS = {
+    ''2026-02-15'': ''definition v3: internal accounts excluded'',
+    ''2026-03-02'': ''marketing campaign started'',
+}
+
+print(''daily actives, with annotations:'')
+for day in days[::10]:
+    key = day.strftime(''%Y-%m-%d'')
+    note = ANNOTATIONS.get(key, '''')
+    bar = ''#'' * int(series[day] / 40)
+    print(f''{key}  {series[day]:>6,.0f}  {bar}  {note}'')
+print()
+print(''The step at 2026-02-15 is a definition change. Without the'')
+print(''annotation it is an incident, and somebody spends a day on it.'')
+```
+
+An unexplained step in a chart costs somebody a day, every time, until it is annotated. The annotation costs one line.
 
 ## When you find out it was wrong
 
-Say so quickly, in plain terms: what was wrong, which period, which direction, what the corrected number is, and what will stop it recurring. Quietly fixing a dashboard is worse than the original error - someone made a decision on the old number and nobody told them.
+This happens, and how it is handled matters more than the error.
 
-The credibility cost of announcing an error is small and recoverable. The cost of someone else finding it is not.',
-   'The hardest failures in analytics are the silent ones: a tracking change, a renamed column, a filter somebody added. This lesson is about tests on data, the checks worth running every day, and what to do when the numbers were wrong for a month.',
-   11, 420, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''step'': ''1. stop the bleeding'',
+     ''action'': ''pause the dashboard or mark it stale before anyone else uses it''},
+    {''step'': ''2. establish the blast radius'',
+     ''action'': ''which numbers, which dates, which decisions used them''},
+    {''step'': ''3. tell people, early'',
+     ''action'': ''a short note with the wrong number, the right one, and why''},
+    {''step'': ''4. fix forward'',
+     ''action'': ''correct the pipeline and restate the affected history''},
+    {''step'': ''5. add the test'',
+     ''action'': ''the check that would have caught it, before closing the issue''},
+]).to_string(index=False))
+```
+
+Three things about step three. **Say the size of the error, not just that there was one** - "actives were overstated by 12% from 1 February" is useful; "there was a data issue" is not. **Name the decisions that may be affected**, so people can revisit them. And **do it before somebody else finds it**, because the credibility cost of self-reporting is a fraction of the cost of being caught.
+
+Step five is the one teams skip. An incident without a new test is an incident that will recur.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=227)
+
+# Sixty days of loads, with three deliberate faults planted.
+days = pd.date_range(''2026-01-01'', periods=60, freq=''D'')
+
+frames = []
+for index, day in enumerate(days):
+    n = int(rng.normal(1000, 60))
+    frame = pd.DataFrame({
+        ''order_id'': np.arange(index * 2000, index * 2000 + n),
+        ''placed_on'': day,
+        ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n),
+        ''status'': rng.choice([''complete'', ''cancelled'', ''pending''], n, p=[.8, .1, .1]),
+        ''units'': rng.integers(1, 60, n),
+        ''revenue'': rng.gamma(4, 120, n).round(2),
+    })
+    # Fault 1: a partial load on day 20.
+    if index == 20:
+        frame = frame.iloc[:380]
+    # Fault 2: a renamed category from day 35.
+    if index >= 35:
+        frame.loc[frame[''region''] == ''North'', ''region''] = ''Nord''
+    # Fault 3: duplicated rows on day 48.
+    if index == 48:
+        frame = pd.concat([frame, frame.head(120)], ignore_index=True)
+    frames.append(frame)
+
+EXPECTED_REGIONS = {''North'', ''South'', ''East'', ''West''}
+EXPECTED_STATUSES = {''complete'', ''cancelled'', ''pending''}
+
+# ---- Per-load checks. ----------------------------------------------
+report = []
+for frame in frames:
+    day = frame[''placed_on''].iloc[0]
+    failures = []
+    if frame[''order_id''].duplicated().any():
+        failures.append(f''{int(frame["order_id"].duplicated().sum())} duplicate ids'')
+    unexpected = set(frame[''region''].unique()) - EXPECTED_REGIONS
+    if unexpected:
+        failures.append(f''unexpected regions {sorted(unexpected)}'')
+    if set(frame[''status''].unique()) - EXPECTED_STATUSES:
+        failures.append(''unexpected status'')
+    if frame[''revenue''].isna().any():
+        failures.append(''null revenue'')
+    report.append({''day'': day, ''rows'': len(frame), ''failures'': failures})
+
+checks = pd.DataFrame(report).set_index(''day'')
+
+# ---- Volume check, against a robust trailing band. ------------------
+volume = checks[''rows'']
+median = volume.rolling(14, min_periods=7).median().shift(1)
+mad = (volume - median).abs().rolling(14, min_periods=7).median().shift(1)
+checks[''z''] = ((volume - median) / (1.4826 * mad)).round(1)
+
+flagged = checks[(checks[''failures''].str.len() > 0) | (checks[''z''].abs() > 4)]
+print(f''{len(flagged)} of {len(checks)} loads flagged:'')
+for day, row in flagged.iterrows():
+    reasons = list(row[''failures''])
+    if abs(row[''z'']) > 4:
+        reasons.append(f''volume z={row["z"]:+.1f} (rows {row["rows"]:,}, ''
+                       f''expected about {median[day]:,.0f})'')
+    print(f''  {day.date()}  '' + ''; ''.join(reasons))
+print()
+
+# ---- What the fault cost, if it had gone unnoticed. -----------------
+combined = pd.concat(frames, ignore_index=True)
+daily = combined.groupby(''placed_on'').agg(
+    rows=(''order_id'', ''size''),
+    unique_orders=(''order_id'', ''nunique''),
+    north=(''region'', lambda s: int((s == ''North'').sum())),
+    revenue=(''revenue'', ''sum''),
+)
+
+print(''the three faults, as a reader of the dashboard would see them:'')
+print()
+print(''1. partial load'')
+print(f''   {days[20].date()}: {daily.loc[days[20], "rows"]:,} rows against a ''
+      f''typical {int(daily["rows"].median()):,} - a 62% "drop" in orders'')
+print()
+print(''2. renamed category'')
+north_before = daily.loc[days[30], ''north'']
+north_after = daily.loc[days[40], ''north'']
+print(f''   North orders: {north_before} on {days[30].date()}, ''
+      f''{north_after} on {days[40].date()}'')
+print(''   The North region vanished from every chart that filters on it,'')
+print(''   and the total was unaffected - so no volume alert would fire.'')
+print()
+print(''3. duplicated rows'')
+day48 = daily.loc[days[48]]
+inflation = day48[''rows''] / day48[''unique_orders''] - 1
+print(f''   {days[48].date()}: {day48["rows"]:,} rows for ''
+      f''{day48["unique_orders"]:,} distinct orders ({inflation:+.0%} inflation)'')
+print(f''   revenue overstated by roughly {inflation:.0%} for that day'')
+print()
+
+# ---- The lesson: which check caught which. --------------------------
+print(''which test caught which fault:'')
+print(''  partial load   -> the volume band'')
+print(''  renamed value  -> the allowed-values check (the volume band missed it)'')
+print(''  duplicate rows -> the uniqueness check (the volume band was marginal)'')
+print()
+print(''No single test catches all three. That is why there are five.'')
+```
+
+The second fault is the one worth dwelling on. Renaming `North` to `Nord` changed no totals at all - the row count is normal, the revenue is normal, every aggregate is correct. Only the allowed-values check notices, and without it the North region silently reads zero on every filtered chart for as long as it takes somebody to ask.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A metric went to zero | An upstream value was renamed |
+| Yesterday looks terrible every morning | Late-arriving data; state the restatement window |
+| One day is 40% down | A partial load; add a volume check |
+| Totals jumped with no new customers | A join multiplied; add a uniqueness check |
+| A step appeared on a round date | A definition change; annotate it |
+| Day boundaries moved by hours | A timezone change upstream |
+| The same incident happened twice | No test was added the first time |
+| Nobody trusts the dashboard | A wrong number that was never acknowledged |
+
+## A check you can run
+
+Pick your most important daily table and write down three numbers: the typical row count, the set of allowed values for your main categorical column, and the primary key.
+
+Then write the three assertions and run them over the last ninety days of history. In my experience this finds at least one day that was already wrong and nobody noticed - and that day is in somebody''s quarterly chart.
+',
+   'The hardest failures in analytics are the silent ones: a tracking change, a renamed column, a filter somebody added. This lesson is about tests on data, the checks worth running every day, and what to do when the numbers were wrong for a month.', 10, 1901,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000ef',
    'Forecasting Without Pretending',
    'markdown',
-   'A forecast is a range. A forecast presented as a single line is a forecast that will be wrong in a way nobody planned for.
+   'A forecast is a range with a date on it. Most forecasting that goes wrong went wrong by producing a single number, by fitting the noise, or by never checking the error on data the model had not seen.
 
 ## The three parts of most business series
 
-**Trend** - the slow direction. **Seasonality** - the repeating pattern, usually weekly and yearly. **Noise** - the rest.
+```python
+import numpy as np
+import pandas as pd
 
-Separating them is most of forecasting:
+rng = np.random.default_rng(7)
 
-- A weekly pattern is almost always there in anything consumer-facing. Comparing Monday to Sunday and calling it a decline is the single most common mistake.
-- A yearly pattern needs at least two years of history to see at all, and three to trust.
-- What is left after removing both is the part worth explaining.
+weeks = pd.date_range(''2024-01-07'', periods=156, freq=''W-SUN'')
+t = np.arange(len(weeks))
+
+trend = 1000 + 7.5 * t
+seasonal = 180 * np.sin(2 * np.pi * t / 52) + 60 * np.sin(2 * np.pi * t / 13)
+noise = rng.normal(0, 45, len(weeks))
+series = pd.Series(trend + seasonal + noise, index=weeks, name=''revenue'')
+
+parts = pd.DataFrame({''trend'': trend, ''seasonal'': seasonal, ''noise'': noise},
+                     index=weeks)
+print(parts.describe().loc[[''mean'', ''std'', ''min'', ''max'']].round(1).to_string())
+print()
+print(''share of total variation:'')
+total_variance = series.var()
+for name in parts.columns:
+    print(f''  {name:<9} {parts[name].var() / total_variance:.1%}'')
+```
+
+Almost every business series decomposes into those three: a **trend** that is the actual news, a **seasonal** pattern that repeats, and **noise** that is nothing at all. The work of forecasting is separating them, and the work of reporting is not mistaking the third for the first.
+
+A quick visual decomposition, with no library:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(7)
+weeks = pd.date_range(''2024-01-07'', periods=156, freq=''W-SUN'')
+t = np.arange(len(weeks))
+series = pd.Series(
+    1000 + 7.5 * t + 180 * np.sin(2 * np.pi * t / 52) + rng.normal(0, 45, len(weeks)),
+    index=weeks)
+
+# Trend: a centred rolling mean over one full season.
+trend = series.rolling(52, center=True, min_periods=26).mean()
+detrended = series - trend
+# Seasonal: the average detrended value for each week of the year.
+seasonal = detrended.groupby(detrended.index.isocalendar().week).transform(''mean'')
+residual = detrended - seasonal
+
+print(f''series std   {series.std():7.1f}'')
+print(f''trend std    {trend.std():7.1f}'')
+print(f''seasonal std {seasonal.std():7.1f}'')
+print(f''residual std {residual.std():7.1f}'')
+print()
+print(''The residual is what no model can predict. If your forecast'')
+print(''error is near it, you are done; if it is far above, there is'')
+print(''structure left to find.'')
+```
 
 ## Start with the dumb baselines
 
-Before any model, compute these:
+Before any model, compute what three trivial rules would have predicted. A model that cannot beat them is not worth deploying.
 
-```
-naive:        tomorrow = today
-seasonal:     next Monday = last Monday
-drift:        extend the straight line through the last 8 weeks
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(13)
+weeks = pd.date_range(''2024-01-07'', periods=156, freq=''W-SUN'')
+t = np.arange(len(weeks))
+series = pd.Series(
+    1000 + 7.5 * t + 180 * np.sin(2 * np.pi * t / 52) + rng.normal(0, 45, len(weeks)),
+    index=weeks)
+
+HORIZON = 26
+train, test = series[:-HORIZON], series[-HORIZON:]
+
+baselines = {
+    ''last value'': np.repeat(train.iloc[-1], HORIZON),
+    ''mean of train'': np.repeat(train.mean(), HORIZON),
+    ''same week last year'': series.shift(52)[-HORIZON:].to_numpy(),
+    ''drift'': train.iloc[-1] + (train.iloc[-1] - train.iloc[0]) / (len(train) - 1)
+             * np.arange(1, HORIZON + 1),
+}
+
+def mae(actual, predicted):
+    return float(np.mean(np.abs(np.asarray(actual) - np.asarray(predicted))))
+
+def mape(actual, predicted):
+    actual = np.asarray(actual)
+    return float(np.mean(np.abs(actual - np.asarray(predicted)) / np.abs(actual)))
+
+for name, prediction in baselines.items():
+    print(f''{name:<22} MAE {mae(test, prediction):7.1f}   MAPE {mape(test, prediction):6.2%}'')
 ```
 
-A model that cannot beat "the same day last week" is not earning its complexity, and a surprising number cannot. Always report your model''s error alongside the baselines''; a forecast without that comparison has no scale.
+The four baselines, and what each is for:
+
+- **Last value (naive).** The right baseline for anything close to a random walk - prices, stock levels.
+- **Seasonal naive** - the same period last year. The right baseline for anything with a strong yearly pattern, and it is remarkably hard to beat.
+- **Mean.** The right baseline when there is no trend at all.
+- **Drift.** Last value plus the average change so far. A trend baseline that costs one line.
+
+Publish the baseline''s error beside your model''s, always. "Our model has 6% error" is meaningless; "our model has 6% error against the seasonal naive''s 9%" is a result.
 
 ## Measure the error on data the model has not seen
 
-Fit on everything up to a cut-off, predict the period after it, compare. Measuring error on the data you fitted tells you how well the model memorised, which is not the question.
+```python
+import numpy as np
+import pandas as pd
 
-For business series, mean absolute error in the units people think in ("out by about 40 orders a day") communicates better than a percentage, which explodes when the actual value is near zero.
+rng = np.random.default_rng(17)
+weeks = pd.date_range(''2024-01-07'', periods=156, freq=''W-SUN'')
+t = np.arange(len(weeks))
+series = pd.Series(
+    1000 + 7.5 * t + 180 * np.sin(2 * np.pi * t / 52) + rng.normal(0, 45, len(weeks)),
+    index=weeks)
+
+def fit_predict(train_values, horizon, degree):
+    """A polynomial through the training data, extended forwards."""
+    x = np.arange(len(train_values))
+    coefficients = np.polyfit(x, train_values, degree)
+    future = np.arange(len(train_values), len(train_values) + horizon)
+    return np.polyval(coefficients, x), np.polyval(coefficients, future)
+
+HORIZON = 26
+train, test = series[:-HORIZON], series[-HORIZON:]
+
+print(f''{"degree":>7} {"train MAE":>11} {"test MAE":>11}'')
+for degree in [1, 2, 3, 6, 12, 20]:
+    fitted, predicted = fit_predict(train.to_numpy(), HORIZON, degree)
+    train_error = float(np.mean(np.abs(train.to_numpy() - fitted)))
+    test_error = float(np.mean(np.abs(test.to_numpy() - predicted)))
+    print(f''{degree:>7} {train_error:>11.1f} {test_error:>11.1f}'')
+print()
+print(''Training error falls with every added degree. Test error does'')
+print(''not, and past a point it explodes. That gap is overfitting.'')
+```
+
+A model is evaluated **only** on data it did not see. For a time series that means a split in time, never a random one - a random split lets the model see the future, and the error it reports is a fiction.
+
+Rolling-origin evaluation is the honest version, because it tests the model at several points rather than one:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(19)
+weeks = pd.date_range(''2024-01-07'', periods=156, freq=''W-SUN'')
+t = np.arange(len(weeks))
+series = pd.Series(
+    1000 + 7.5 * t + 180 * np.sin(2 * np.pi * t / 52) + rng.normal(0, 45, len(weeks)),
+    index=weeks)
+
+def seasonal_naive(train_values, horizon, period=52):
+    tail = train_values[-period:]
+    return np.array([tail[i % period] for i in range(horizon)])
+
+def drift(train_values, horizon):
+    step = (train_values[-1] - train_values[0]) / (len(train_values) - 1)
+    return train_values[-1] + step * np.arange(1, horizon + 1)
+
+HORIZON = 13
+errors = {''seasonal naive'': [], ''drift'': [], ''both averaged'': []}
+
+for origin in range(104, len(series) - HORIZON, 13):
+    train = series.iloc[:origin].to_numpy()
+    actual = series.iloc[origin:origin + HORIZON].to_numpy()
+    a = seasonal_naive(train, HORIZON)
+    b = drift(train, HORIZON)
+    errors[''seasonal naive''].append(np.mean(np.abs(actual - a)))
+    errors[''drift''].append(np.mean(np.abs(actual - b)))
+    errors[''both averaged''].append(np.mean(np.abs(actual - (a + b) / 2)))
+
+print(f''{len(errors["drift"])} origins, {HORIZON}-week horizon'')
+for name, values in errors.items():
+    print(f''  {name:<16} MAE {np.mean(values):7.1f}  (worst {np.max(values):7.1f})'')
+print()
+print(''Averaging two weak forecasts often beats either. That is the'')
+print(''cheapest improvement available in forecasting.'')
+```
 
 ## The band is the output
 
-```
-Next week: 1,240 orders expected, likely between 1,080 and 1,400.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(23)
+weeks = pd.date_range(''2024-01-07'', periods=156, freq=''W-SUN'')
+t = np.arange(len(weeks))
+series = pd.Series(
+    1000 + 7.5 * t + 180 * np.sin(2 * np.pi * t / 52) + rng.normal(0, 45, len(weeks)),
+    index=weeks)
+
+HORIZON = 13
+train = series.iloc[:-HORIZON]
+
+# Estimate the error at each horizon from history, then use it as the
+# band. No distributional assumption beyond "the past is a guide".
+residuals = {h: [] for h in range(1, HORIZON + 1)}
+for origin in range(104, len(series) - HORIZON):
+    history = series.iloc[:origin].to_numpy()
+    step = (history[-1] - history[0]) / (len(history) - 1)
+    for h in range(1, HORIZON + 1):
+        predicted = history[-1] + step * h
+        residuals[h].append(series.iloc[origin + h - 1] - predicted)
+
+step = (train.iloc[-1] - train.iloc[0]) / (len(train) - 1)
+rows = []
+for h in range(1, HORIZON + 1):
+    point = train.iloc[-1] + step * h
+    spread = np.percentile(residuals[h], [10, 90])
+    rows.append({''weeks ahead'': h, ''point'': point,
+                 ''low'': point + spread[0], ''high'': point + spread[1]})
+band = pd.DataFrame(rows).round(0)
+band[''width''] = band[''high''] - band[''low'']
+print(band.to_string(index=False))
+print()
+print(f''the band widens from {band["width"].iloc[0]:.0f} at one week to ''
+      f''{band["width"].iloc[-1]:.0f} at thirteen'')
+print(''A forecast whose band does not widen with the horizon is lying.'')
 ```
 
-The range is what makes the forecast usable - it is what tells somebody whether to staff for 1,100 or 1,400. A point estimate alone invites a conversation about why the actual was not exactly that.
+Three things follow:
 
-And the range should widen with distance. A forecast six months out with the same band as next week is not a forecast; it is a straight line with error bars drawn on.
+**Always publish a range.** A point forecast is a number somebody will treat as a commitment. A range is a forecast.
+
+**The range must widen with the horizon.** Predicting next week is easier than predicting next quarter, and the picture should say so.
+
+**Say what the range means.** An 80% interval means you expect to be outside it one time in five - which is often, and saying so in advance prevents the conversation where being outside it once is treated as failure.
 
 ## When not to forecast
 
-If the series is driven by events rather than momentum - launches, campaigns, contracts - a statistical forecast will extrapolate the past through a future that does not resemble it. Say that, and forecast the known events instead.
+```python
+import pandas as pd
 
-The honest version is often: "the baseline continues at about 1,200 a week; the question is entirely whether the March campaign repeats, which is a decision rather than a prediction."',
-   'A forecast is a range with a story, not a line. Trend and seasonality, why a confidence band is the point rather than a decoration, and the small number of honest checks that stop a forecast being an extrapolation of last Tuesday.',
-   11, 419, '55555555-5555-4555-8555-555555555555', 'published',
+print(pd.DataFrame([
+    {''situation'': ''fewer than two full seasonal cycles of history'',
+     ''why'': ''you cannot separate seasonality from trend''},
+    {''situation'': ''the thing being forecast is a decision'',
+     ''why'': ''the forecast will change the decision and invalidate itself''},
+    {''situation'': ''a structural break just happened'',
+     ''why'': ''history is no longer a guide; the model will miss it entirely''},
+    {''situation'': ''the series is dominated by a few huge events'',
+     ''why'': ''you are forecasting whether an event occurs, not a level''},
+    {''situation'': ''nobody will act differently on any value'',
+     ''why'': ''it is a number for a slide, not a forecast''},
+]).to_string(index=False))
+```
+
+The structural-break case deserves emphasis. Every model in this lesson assumes the future resembles the past. A pricing change, a competitor launch, a regulation or a pandemic breaks that assumption, and no amount of model sophistication helps. **Say so in the forecast** rather than discovering it afterwards.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=211)
+
+# Three years of weekly orders: a trend, a yearly season, a December
+# spike, and noise.
+weeks = pd.date_range(''2023-01-01'', periods=157, freq=''W-SUN'')
+t = np.arange(len(weeks))
+week_of_year = weeks.isocalendar().week.to_numpy()
+
+trend = 2400 + 11 * t
+seasonal = 300 * np.sin(2 * np.pi * (t - 8) / 52)
+december = np.where((week_of_year >= 48) & (week_of_year <= 52), 900, 0)
+noise = rng.normal(0, 110, len(weeks))
+orders = pd.Series((trend + seasonal + december + noise).round(), index=weeks, name=''orders'')
+
+print(f''{len(orders)} weeks, {orders.index.min().date()} to {orders.index.max().date()}'')
+print(f''mean {orders.mean():,.0f}  std {orders.std():,.0f}'')
+print()
+
+# ---- 1. Decompose, to see what is there. ---------------------------
+trend_estimate = orders.rolling(52, center=True, min_periods=26).mean()
+detrended = orders - trend_estimate
+seasonal_estimate = detrended.groupby(week_of_year).transform(''mean'')
+residual = (detrended - seasonal_estimate).dropna()
+
+print(''variation accounted for:'')
+print(f''  trend     std {trend_estimate.std():7.1f}'')
+print(f''  seasonal  std {seasonal_estimate.std():7.1f}'')
+print(f''  residual  std {residual.std():7.1f}  <- the floor on any forecast'')
+print()
+
+# ---- 2. Rolling-origin evaluation of four methods. -----------------
+HORIZON = 13
+
+def naive(history, horizon):
+    return np.repeat(history[-1], horizon)
+
+def drift(history, horizon):
+    step = (history[-1] - history[0]) / (len(history) - 1)
+    return history[-1] + step * np.arange(1, horizon + 1)
+
+def seasonal_naive(history, horizon, period=52):
+    tail = history[-period:]
+    return np.array([tail[i % period] for i in range(horizon)])
+
+def seasonal_with_drift(history, horizon, period=52):
+    base = seasonal_naive(history, horizon, period)
+    recent = history[-period:].mean()
+    previous = history[-2 * period:-period].mean() if len(history) >= 2 * period else recent
+    yearly_growth = recent - previous
+    return base + yearly_growth * np.arange(1, horizon + 1) / period
+
+METHODS = {''naive'': naive, ''drift'': drift,
+           ''seasonal naive'': seasonal_naive, ''seasonal + drift'': seasonal_with_drift}
+
+results = {name: [] for name in METHODS}
+origins = list(range(110, len(orders) - HORIZON, 4))
+for origin in origins:
+    history = orders.iloc[:origin].to_numpy()
+    actual = orders.iloc[origin:origin + HORIZON].to_numpy()
+    for name, method in METHODS.items():
+        predicted = method(history, HORIZON)
+        results[name].append(np.mean(np.abs(actual - predicted)))
+
+print(f''rolling-origin evaluation: {len(origins)} origins, {HORIZON}-week horizon'')
+print(f''{"method":<20} {"MAE":>8} {"vs baseline":>12}'')
+baseline_mae = np.mean(results[''seasonal naive''])
+for name, errors in sorted(results.items(), key=lambda kv: np.mean(kv[1])):
+    mae = np.mean(errors)
+    print(f''{name:<20} {mae:>8.1f} {mae / baseline_mae:>11.2f}x'')
+print()
+print(f''the residual floor is {residual.std():.0f}, so even the best method'')
+print(''is close to the irreducible noise'')
+print()
+
+# ---- 3. The chosen method, with an empirical band. -----------------
+best = min(results, key=lambda k: np.mean(results[k]))
+print(f''chosen: {best}'')
+
+per_horizon = {h: [] for h in range(1, HORIZON + 1)}
+for origin in origins:
+    history = orders.iloc[:origin].to_numpy()
+    predicted = METHODS[best](history, HORIZON)
+    actual = orders.iloc[origin:origin + HORIZON].to_numpy()
+    for h in range(1, HORIZON + 1):
+        per_horizon[h].append(actual[h - 1] - predicted[h - 1])
+
+history = orders.to_numpy()
+point = METHODS[best](history, HORIZON)
+future = pd.date_range(orders.index[-1] + pd.Timedelta(''7D''), periods=HORIZON, freq=''W-SUN'')
+
+rows = []
+for h in range(1, HORIZON + 1):
+    low, high = np.percentile(per_horizon[h], [10, 90])
+    rows.append({
+        ''week'': future[h - 1].date(), ''point'': round(point[h - 1]),
+        ''low'': round(point[h - 1] + low), ''high'': round(point[h - 1] + high),
+    })
+forecast = pd.DataFrame(rows)
+forecast[''width''] = forecast[''high''] - forecast[''low'']
+print(forecast.to_string(index=False))
+print()
+print(f''band width: {forecast["width"].iloc[0]:,} at 1 week, ''
+      f''{forecast["width"].iloc[-1]:,} at {HORIZON} weeks'')
+print()
+
+# ---- 4. Check the band is honest, on history. ----------------------
+inside = 0
+tested = 0
+for origin in origins:
+    history_slice = orders.iloc[:origin].to_numpy()
+    predicted = METHODS[best](history_slice, HORIZON)
+    actual = orders.iloc[origin:origin + HORIZON].to_numpy()
+    for h in range(1, HORIZON + 1):
+        low, high = np.percentile(per_horizon[h], [10, 90])
+        tested += 1
+        if predicted[h - 1] + low <= actual[h - 1] <= predicted[h - 1] + high:
+            inside += 1
+print(f''coverage of the 80% band on history: {inside / tested:.1%} of {tested} points'')
+print(''(it should be near 80%; well above means the band is too wide,'')
+print('' well below means it is too narrow and will embarrass you)'')
+print()
+
+# ---- 5. The sentence. ----------------------------------------------
+quarter_total = forecast[''point''].sum()
+quarter_low, quarter_high = forecast[''low''].sum(), forecast[''high''].sum()
+print(f''Orders for the next {HORIZON} weeks are forecast at ''
+      f''{quarter_total:,.0f} in total (80% interval {quarter_low:,.0f} to ''
+      f''{quarter_high:,.0f}), using {best} evaluated over {len(origins)} ''
+      f''rolling origins. This assumes no structural change: a pricing ''
+      f''change, a competitor launch or a supply interruption would put ''
+      f''the outcome outside this range.'')
+```
+
+Five things make that a forecast rather than a guess. The decomposition establishes a floor on achievable error. Four methods are compared on data none of them saw, at many origins rather than one. The band comes from the model''s own historical errors rather than a distributional assumption. The band''s coverage is checked against history. And the final sentence names the assumption that would invalidate it.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Excellent fit, terrible forecast | Overfitting; evaluate out of sample |
+| The error was computed on training data | Split in time, never randomly |
+| A complex model lost to "last year''s number" | The seasonal naive is hard to beat |
+| The band never widens | The uncertainty is not being modelled |
+| The forecast was treated as a commitment | A point estimate; publish a range |
+| The model missed a step change | No model extrapolates a break; say so |
+| Seasonality was mistaken for trend | Fewer than two full cycles of history |
+| Being outside the band caused a crisis | Nobody said an 80% band is outside 20% of the time |
+
+## A check you can run
+
+Take your current forecast and compute what "the same period last year" would have predicted.
+
+If the seasonal naive is within a few percent of your model, the model is adding nothing, and the honest move is to ship the one-line baseline and spend the effort elsewhere. In my experience it beats the model more often than anyone expects, and finding that out costs five lines.
+',
+   'A forecast is a range with a story, not a line. Trend and seasonality, why a confidence band is the point rather than a decoration, and the small number of honest checks that stop a forecast being an extrapolation of last Tuesday.', 12, 2322,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
