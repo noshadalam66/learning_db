@@ -430,7 +430,17 @@ dense array of `undefined` instead, which behaves the way you expect.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 2 - Intermediate
@@ -741,7 +751,17 @@ module with extra syntax.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 3 - Advanced
@@ -1065,7 +1085,17 @@ A default export is worth it when a file genuinely has one subject.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 4 - Expert
@@ -1402,6 +1432,16 @@ or a `Map`, use that instead.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 CALL catalog_refresh_course_rollup('c0000001-0000-4000-8000-000000000006');

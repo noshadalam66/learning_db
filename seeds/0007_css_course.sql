@@ -533,7 +533,17 @@ feeling goes away.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 2 - Intermediate
@@ -1013,7 +1023,17 @@ container queries are for, and they are waiting in level four.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 3 - Advanced
@@ -1563,7 +1583,17 @@ is always wrong for someone.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Level 4 - Expert
@@ -2053,7 +2083,17 @@ still the highest-value change on most sites.',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), body_html = NULL,
-  excerpt = VALUES(excerpt), revision = content_articles.revision + 1;
+  excerpt = VALUES(excerpt),
+  -- The counts, because a seed must update every column it owns.
+  --
+  -- They were missing. Rewriting an article's body therefore left word_count
+  -- and reading_time_minutes at whatever they were when the row was first
+  -- inserted, so a lesson that had grown from 300 words to 1,300 went on
+  -- telling every reader it was a two-minute read - and the body was visibly
+  -- longer, which makes the stale number look like a bug in the page rather
+  -- than in this clause.
+  reading_time_minutes = VALUES(reading_time_minutes), word_count = VALUES(word_count),
+  revision = content_articles.revision + 1;
 
 -- ---------------------------------------------------------------------------
 -- Refresh the denormalised counters and re-index for search.
