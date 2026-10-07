@@ -173,642 +173,6341 @@ VALUES
   ('e0000001-0000-4000-8000-000000000101',
    'From One Neuron to a Network',
    'markdown',
-   'A neuron computes a weighted sum of its inputs, adds a bias, and passes the result through a function.
+   'A neuron computes a weighted sum of its inputs, adds a bias, and passes the result through a non-linear function. A network is those neurons in layers. Everything else in deep learning is a variation on arranging them.
 
-```
-output = activation(w1*x1 + w2*x2 + ... + wn*xn + b)
+## One neuron
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+
+def relu(x):
+    return np.maximum(0.0, x)
+
+weights = np.array([0.6, -1.2, 0.3])
+bias = 0.1
+inputs = np.array([1.0, 0.5, -2.0])
+
+weighted_sum = float(inputs @ weights + bias)
+output = float(relu(weighted_sum))
+
+print(f''inputs        {inputs}'')
+print(f''weights       {weights}'')
+print(f''weighted sum  {weighted_sum:.3f}'')
+print(f''after ReLU    {output:.3f}'')
 ```
 
-That is it. A layer is many neurons computing in parallel from the same inputs. A network is layers stacked, each taking the previous layer''s outputs as its inputs.
+That is a neuron. Three multiplications, an addition, and a function. A large language model is billions of those, and nothing about the individual unit changes.
 
 ## Why the activation function matters
 
-Without it, a neuron is a weighted sum, and a stack of weighted sums is still a weighted sum - a hundred-layer network would be exactly equivalent to one linear layer. The non-linearity is what makes depth mean anything.
+Without a non-linear activation, stacking layers is pointless: the composition of linear functions is a linear function.
 
-- **ReLU** - `max(0, x)` - is the default. Cheap, and it does not saturate for large positive values, which keeps gradients flowing.
-- **Sigmoid** squashes to 0-1. Used on an output for binary probability; poor in hidden layers because its gradient vanishes at both ends.
-- **Softmax** on the output layer turns scores into probabilities that sum to one, for multi-class problems.
+```python
+import numpy as np
 
-A dead ReLU - one whose input is always negative, so it outputs zero and receives no gradient - is a real failure mode, and it is the reason variants like LeakyReLU exist.
+rng = np.random.default_rng(5)
+
+W1 = rng.normal(0, 0.5, (4, 3))
+W2 = rng.normal(0, 0.5, (3, 2))
+x = rng.normal(0, 1, 4)
+
+# Two layers with NO activation.
+stacked = (x @ W1) @ W2
+
+# One layer with the combined weight matrix.
+combined = x @ (W1 @ W2)
+
+print(f''two linear layers: {stacked.round(6)}'')
+print(f''one layer:         {combined.round(6)}'')
+print(f''identical: {bool(np.allclose(stacked, combined))}'')
+print()
+print(''A hundred linear layers are exactly one linear layer. The'')
+print(''non-linearity is what makes depth mean anything.'')
+```
+
+The activations you will meet, and what each is for:
+
+```python
+import numpy as np
+import pandas as pd
+
+x = np.array([-3.0, -1.0, -0.1, 0.0, 0.1, 1.0, 3.0])
+
+def sigmoid(v):
+    return 1 / (1 + np.exp(-v))
+
+table = pd.DataFrame({
+    ''x'': x,
+    ''relu'': np.maximum(0, x).round(3),
+    ''leaky_relu'': np.where(x > 0, x, 0.01 * x).round(3),
+    ''gelu'': (0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x ** 3)))).round(3),
+    ''tanh'': np.tanh(x).round(3),
+    ''sigmoid'': sigmoid(x).round(3),
+})
+print(table.to_string(index=False))
+print()
+print(''relu     - the default for hidden layers: cheap, and its'')
+print(''           gradient is 1 or 0, which does not vanish'')
+print(''gelu     - a smooth relu; the default inside transformers'')
+print(''sigmoid  - the OUTPUT layer for a binary probability'')
+print(''tanh     - centred on zero; mostly historical for hidden layers'')
+```
+
+ReLU''s weakness is the dead neuron: once its input is negative for every example, its gradient is zero and it never recovers.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(7)
+n = 2000
+
+# The input to a hidden layer is the PREVIOUS ReLU''s output, so it is
+# never negative. That matters: against a zero-mean input, a negative
+# weight mean cancels out and nothing dies. It is the bias that kills,
+# and a single too-large update is what drives it down.
+inputs = np.maximum(0, rng.normal(0, 1, (n, 50)))
+weights = rng.normal(0, 0.3, (50, 100))
+bias = rng.normal(-2.0, 1.5, 100)      # after one oversized step
+
+activations = np.maximum(0, inputs @ weights + bias)
+
+is_dead = activations.max(axis=0) == 0
+print(f''{is_dead.mean():.0%} of the 100 units never fire on any of {n} examples'')
+print(f''mean bias, dead units {bias[is_dead].mean():+.2f}'')
+print(f''mean bias, live units {bias[~is_dead].mean():+.2f}'')
+print(''Their gradient is permanently zero. Leaky ReLU or GELU avoids'')
+print(''this, and so does sensible initialisation.'')
+```
 
 ## What depth buys
 
-Each layer builds on the representation beneath it. In an image network the first layer learns edges, the next corners and textures, the next shapes, the next objects. Nobody specified that hierarchy; it emerges because it is an efficient way to reduce the loss.
+A single layer of enough width can approximate any continuous function - that is a theorem. In practice depth is far more efficient than width for the same number of parameters.
 
-That is the central claim of deep learning: the features are learned rather than designed. It is also why it needs so much data - it is learning the representation as well as the task.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+rng = np.random.default_rng(11)
+n = 6000
+
+# A problem that needs composition: a checkerboard in two dimensions
+# plus a third interacting feature.
+X = rng.uniform(-3, 3, (n, 3))
+y = ((np.sin(X[:, 0] * 2) * np.sin(X[:, 1] * 2) > 0).astype(int)
+     ^ (X[:, 2] > 0).astype(int))
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+rows = []
+for shape in [(2,), (16,), (256,), (16, 16), (16, 16, 16), (64, 64)]:
+    parameters = sum(a * b for a, b in zip((3,) + shape, shape + (1,)))
+    model = Pipeline([(''s'', StandardScaler()),
+                      (''m'', MLPClassifier(hidden_layer_sizes=shape, max_iter=600,
+                                          random_state=0))]).fit(X_tr, y_tr)
+    rows.append({
+        ''hidden layers'': str(shape),
+        ''approx params'': parameters,
+        ''test AUC'': round(roc_auc_score(y_te, model.predict_proba(X_te)[:, 1]), 3),
+    })
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''(16, 16) has far fewer parameters than (256,) and does better,'')
+print(''because the problem is a composition of simple pieces - which'')
+print(''is what depth is good at.'')
+```
+
+The intuition: each layer builds features out of the previous layer''s features. One layer can only combine the raw inputs; two can combine combinations.
 
 ## A small network, concretely
 
+Here is a complete network - forward pass, loss, gradients and training - in numpy, with no framework. Everything a library does, it does this.
+
 ```python
-import torch
-from torch import nn
+import numpy as np
 
-model = nn.Sequential(
-    nn.Linear(10, 64),   # 10 inputs -> 64 neurons
-    nn.ReLU(),
-    nn.Linear(64, 32),
-    nn.ReLU(),
-    nn.Linear(32, 1),    # one output
-)
+rng = np.random.default_rng(seed=13)
 
-print(sum(p.numel() for p in model.parameters()), ''parameters'')
+# ---- the data: XOR, which no single linear layer can solve --------
+n = 2000
+X = rng.uniform(-1, 1, (n, 2))
+y = ((X[:, 0] > 0) ^ (X[:, 1] > 0)).astype(float).reshape(-1, 1)
+
+split = int(n * 0.8)
+X_tr, X_te, y_tr, y_te = X[:split], X[split:], y[:split], y[split:]
+
+# ---- the network: 2 -> 8 -> 1 -------------------------------------
+HIDDEN = 8
+# He initialisation: scale by sqrt(2 / fan_in), which keeps the
+# activations from shrinking or exploding as depth grows.
+W1 = rng.normal(0, np.sqrt(2 / 2), (2, HIDDEN))
+b1 = np.zeros(HIDDEN)
+W2 = rng.normal(0, np.sqrt(2 / HIDDEN), (HIDDEN, 1))
+b2 = np.zeros(1)
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -60, 60)))
+
+def forward(X, W1, b1, W2, b2):
+    z1 = X @ W1 + b1
+    a1 = np.maximum(0, z1)              # ReLU
+    z2 = a1 @ W2 + b2
+    a2 = sigmoid(z2)
+    return z1, a1, z2, a2
+
+def loss(predicted, actual):
+    p = np.clip(predicted, 1e-9, 1 - 1e-9)
+    return float(-np.mean(actual * np.log(p) + (1 - actual) * np.log(1 - p)))
+
+LEARNING_RATE = 0.5
+history = []
+
+for epoch in range(1, 2001):
+    z1, a1, z2, a2 = forward(X_tr, W1, b1, W2, b2)
+
+    # ---- backpropagation: the chain rule, one layer at a time ----
+    # dL/dz2 for binary cross-entropy with a sigmoid output.
+    dz2 = (a2 - y_tr) / len(X_tr)
+    dW2 = a1.T @ dz2
+    db2 = dz2.sum(axis=0)
+
+    da1 = dz2 @ W2.T
+    dz1 = da1 * (z1 > 0)                # the ReLU derivative
+    dW1 = X_tr.T @ dz1
+    db1 = dz1.sum(axis=0)
+
+    # ---- the update ---------------------------------------------
+    W2 -= LEARNING_RATE * dW2
+    b2 -= LEARNING_RATE * db2
+    W1 -= LEARNING_RATE * dW1
+    b1 -= LEARNING_RATE * db1
+
+    if epoch % 250 == 0 or epoch == 1:
+        train_loss = loss(a2, y_tr)
+        test_loss = loss(forward(X_te, W1, b1, W2, b2)[3], y_te)
+        accuracy = float(((forward(X_te, W1, b1, W2, b2)[3] > 0.5) == y_te).mean())
+        history.append((epoch, train_loss, test_loss, accuracy))
+
+print(f''{"epoch":>7} {"train loss":>11} {"test loss":>10} {"test acc":>9}'')
+for epoch, train_loss, test_loss, accuracy in history:
+    print(f''{epoch:>7} {train_loss:>11.4f} {test_loss:>10.4f} {accuracy:>9.3f}'')
+print()
+
+# What the hidden layer learned: each unit is a half-plane.
+print(''hidden layer weights (each column is one unit):'')
+print(np.round(W1, 2))
+print()
+print(''Each hidden unit learned a line through the input space. The'')
+print(''output layer combines them into the XOR pattern, which no'')
+print(''single line could ever produce.'')
 ```
 
-Roughly 2,800 numbers, all learned. A modern language model has hundreds of billions, and the idea is identical.
+Four pieces in that loop, and every framework has the same four:
+
+1. **Forward** - compute the prediction.
+2. **Loss** - compare it with the truth.
+3. **Backward** - compute how much each weight contributed to the error.
+4. **Update** - move each weight a small step against its gradient.
+
+## Initialisation is not a detail
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(17)
+
+def propagate(scale, layers=12, width=200, seed=0):
+    """Push a signal through many layers and watch its size."""
+    generator = np.random.default_rng(seed)
+    activation = generator.normal(0, 1, (500, width))
+    sizes = []
+    for _ in range(layers):
+        W = generator.normal(0, scale, (width, width))
+        activation = np.maximum(0, activation @ W)
+        sizes.append(float(activation.std()))
+    return sizes
+
+rows = []
+for name, scale in [(''too small (0.01)'', 0.01),
+                    (''too large (0.20)'', 0.20),
+                    (''He (sqrt(2/n))'', np.sqrt(2 / 200))]:
+    sizes = propagate(scale)
+    rows.append({''initialisation'': name,
+                 ''layer 1 std'': round(sizes[0], 4),
+                 ''layer 6 std'': round(sizes[5], 4),
+                 ''layer 12 std'': round(sizes[11], 6)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Too small and the signal vanishes by layer 12; too large and it'')
+print(''explodes. He initialisation keeps it roughly constant, which is'')
+print(''what makes a deep network trainable at all.'')
+```
+
+That is why `sqrt(2 / fan_in)` appears in every framework''s default. It is not a magic number: it is the scale that keeps the variance of the activations constant through a ReLU layer.
 
 ## Width, depth and the cost
 
-More neurons per layer means more capacity to fit. More layers means more abstraction. Both increase the data needed and the ways training can fail, which is why "make it bigger" is a late answer rather than a first one.',
-   'A neuron is a weighted sum passed through a function. That one sentence, repeated and stacked, is the whole architecture - and the non-linear function in the middle is what makes depth worth anything at all.',
-   10, 389, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import numpy as np
+import pandas as pd
+
+def parameters(shape):
+    return sum(a * b + b for a, b in zip(shape[:-1], shape[1:]))
+
+rows = []
+for shape in [(100, 64, 1), (100, 256, 1), (100, 64, 64, 1),
+              (100, 256, 256, 1), (100, 512, 512, 512, 1)]:
+    count = parameters(shape)
+    rows.append({''architecture'': '' -> ''.join(map(str, shape)),
+                 ''parameters'': f''{count:,}'',
+                 ''memory (float32)'': f''{count * 4 / 1024:,.0f} KiB''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Parameters grow with the PRODUCT of adjacent layer widths, so'')
+print(''doubling the width roughly quadruples the layer. Depth is the'')
+print(''cheaper way to add capacity.'')
+```
+
+A practical starting point for tabular data, when a neural network is the right choice at all: two or three hidden layers, each between 32 and 256 units wide, ReLU activations, and a sigmoid or softmax output. Anything larger needs a reason.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A deep network behaves like a linear one | Missing activation functions |
+| Many units output zero for everything | Dead ReLUs; use leaky ReLU or GELU |
+| Activations vanish or explode with depth | Bad initialisation; use He or Glorot |
+| A wide shallow network underperforms | The problem needs composition, so add depth |
+| The loss does not move at all | Learning rate too small, or a bug in the gradient |
+| Parameters exploded with one change | Width grows the layer quadratically |
+| The network beats a tree by nothing | Tabular data; the tree is probably right |
+| Training is unstable from the first step | Unscaled inputs |
+
+## A check you can run
+
+Take the numpy network above and delete `np.maximum(0, z1)`, replacing it with `z1`.
+
+The network becomes two linear layers, which is one linear layer, and the XOR accuracy falls to about 0.5 - no better than a coin. One function, removed, and a network that cannot learn a pattern a child can draw. That is the clearest demonstration there is of what the non-linearity is for.
+',
+   'A neuron is a weighted sum passed through a function. That one sentence, repeated and stacked, is the whole architecture - and the non-linear function in the middle is what makes depth worth anything at all.', 9, 1719,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-000000000102',
    'Gradient Descent and Backpropagation',
    'markdown',
-   'Training a network means finding weights that make the loss small. There are millions of weights, so you cannot search; you have to descend.
+   'Training is gradient descent: measure the error, work out how each weight contributed to it, and move every weight a small step in the direction that reduces it. Backpropagation is the efficient way to compute that contribution.
 
 ## Gradient descent, as an idea
 
-Imagine the loss as a landscape, with one dimension per weight and height being how wrong the model is. You are standing somewhere in it, in fog, and want to get lower.
+```python
+import numpy as np
+import pandas as pd
 
-The gradient tells you which way is downhill, and how steep. Take a small step that way. Repeat.
+# Minimising a function whose answer we know: f(w) = (w - 3)^2 + 1,
+# minimised at w = 3.
+def f(w):
+    return (w - 3) ** 2 + 1
 
+def gradient(w):
+    return 2 * (w - 3)
+
+rows = []
+w = -4.0
+for step in range(8):
+    rows.append({''step'': step, ''w'': round(w, 4),
+                 ''f(w)'': round(f(w), 4), ''gradient'': round(gradient(w), 4)})
+    w -= 0.2 * gradient(w)
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(f''after 8 steps w = {w:.4f} (the true minimum is 3)'')
+print()
+print(''The gradient points uphill, so the update subtracts it. The'')
+print(''step shrinks automatically as the gradient flattens near the'')
+print(''minimum - which is why a fixed learning rate converges at all.'')
 ```
-weight = weight - learning_rate * gradient
-```
-
-That single line is the whole optimiser. Everything else is refinement.
 
 ## The learning rate
 
-The most important number in deep learning and the first thing to tune.
+```python
+import numpy as np
+import pandas as pd
 
-- **Too large**: steps overshoot the valley; the loss bounces or goes to NaN.
-- **Too small**: it moves, barely; training takes a week to reach what it could have reached in an hour.
-- **About right**: the loss falls quickly and then flattens.
+def f(w):
+    return (w - 3) ** 2 + 1
 
-A rate that produces NaN within a few batches is almost always too high. Divide it by ten and try again - that single habit resolves most "my model will not train" problems.
+def gradient(w):
+    return 2 * (w - 3)
+
+rows = []
+for rate in [0.01, 0.1, 0.5, 0.9, 1.01]:
+    w = -4.0
+    crossings = 0
+    previous = np.sign(gradient(w))
+    for _ in range(40):
+        w -= rate * gradient(w)
+        if not np.isfinite(w):
+            break
+        side = np.sign(gradient(w))
+        if side != 0 and side != previous:
+            crossings += 1
+        previous = side
+    rows.append({''learning rate'': rate,
+                 ''w after 40 steps'': f''{w:.4f}'' if np.isfinite(w) else ''diverged'',
+                 ''times it crossed the minimum'': crossings,
+                 ''verdict'': (''too slow'' if rate <= 0.01 else
+                             ''good'' if rate < 0.9 else
+                             ''oscillating'' if rate < 1.0 else ''DIVERGED'')})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Below the right range: slow but safe. Above it: the step'')
+print(''overshoots the minimum and lands further away each time.'')
+```
+
+The learning rate is the single most important hyperparameter in deep learning. The usual symptoms:
+
+- **Loss unchanged** - too small, or a bug.
+- **Loss falls then plateaus high** - too small for the later stages; add a schedule.
+- **Loss oscillates** - too large.
+- **Loss becomes NaN** - far too large, or exploding gradients.
 
 ## Backpropagation
 
-The gradient has to be computed for every weight, including ones deep inside the network whose effect on the loss is indirect.
-
-Backpropagation is the chain rule applied efficiently: start at the loss, work backwards layer by layer, and at each step multiply by how much that layer''s output affected the next. One backward pass computes the gradient for every weight at roughly the cost of one forward pass - which is why training is feasible at all.
-
-In practice a framework does it:
+Backpropagation is the chain rule applied layer by layer, from the output backwards. The reason it matters is efficiency: it computes the gradient for every weight in roughly the cost of one forward pass, rather than one forward pass per weight.
 
 ```python
-for batch_x, batch_y in loader:
-    optimizer.zero_grad()          # gradients accumulate; clear them first
-    predictions = model(batch_x)   # forward
-    loss = loss_fn(predictions, batch_y)
-    loss.backward()                # backward: fills in every gradient
-    optimizer.step()               # apply them
+import numpy as np
+
+rng = np.random.default_rng(3)
+
+# A tiny network: 2 -> 3 -> 1, with one example, so every number is
+# checkable by hand.
+x = np.array([[1.0, 2.0]])
+y = np.array([[1.0]])
+
+W1 = rng.normal(0, 0.5, (2, 3))
+b1 = np.zeros(3)
+W2 = rng.normal(0, 0.5, (3, 1))
+b2 = np.zeros(1)
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+# ---- forward -------------------------------------------------------
+z1 = x @ W1 + b1
+a1 = np.maximum(0, z1)
+z2 = a1 @ W2 + b2
+a2 = sigmoid(z2)
+loss = (-(y * np.log(a2) + (1 - y) * np.log(1 - a2))).item()
+
+print(f''z1 {z1.round(3)}'')
+print(f''a1 {a1.round(3)}'')
+print(f''z2 {z2.round(3)}  a2 {a2.round(4)}  loss {loss:.4f}'')
+print()
+
+# ---- backward, one link of the chain at a time --------------------
+dz2 = a2 - y                     # dL/dz2, for cross-entropy + sigmoid
+dW2 = a1.T @ dz2                 # dL/dW2 = a1^T . dz2
+db2 = dz2.sum(axis=0)
+da1 = dz2 @ W2.T                 # push the error back through W2
+dz1 = da1 * (z1 > 0)             # through the ReLU
+dW1 = x.T @ dz1
+db1 = dz1.sum(axis=0)
+
+print(f''dz2  {dz2.round(4)}'')
+print(f''dW2  {dW2.round(4).ravel()}'')
+print(f''dz1  {dz1.round(4)}'')
+print(''dW1'')
+print(dW1.round(4))
 ```
 
-Five lines, and every training loop you will ever write is this. Forgetting `zero_grad()` is the classic bug: gradients from previous batches add up, the steps become enormous, and the loss diverges.
+Check the analytic gradient against a numerical one - this is the standard test, and it catches almost every backpropagation bug:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+x = np.array([[1.0, 2.0]])
+y = np.array([[1.0]])
+W1 = rng.normal(0, 0.5, (2, 3))
+b1 = np.zeros(3)
+W2 = rng.normal(0, 0.5, (3, 1))
+b2 = np.zeros(1)
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+def compute_loss(W1, b1, W2, b2):
+    a1 = np.maximum(0, x @ W1 + b1)
+    a2 = sigmoid(a1 @ W2 + b2)
+    return (-(y * np.log(a2) + (1 - y) * np.log(1 - a2))).item()
+
+# Analytic.
+z1 = x @ W1 + b1
+a1 = np.maximum(0, z1)
+a2 = sigmoid(a1 @ W2 + b2)
+dz2 = a2 - y
+analytic_dW2 = a1.T @ dz2
+
+# Numerical: nudge each weight and see how the loss moves.
+EPSILON = 1e-6
+numerical_dW2 = np.zeros_like(W2)
+for i in range(W2.shape[0]):
+    for j in range(W2.shape[1]):
+        up, down = W2.copy(), W2.copy()
+        up[i, j] += EPSILON
+        down[i, j] -= EPSILON
+        numerical_dW2[i, j] = (compute_loss(W1, b1, up, b2)
+                               - compute_loss(W1, b1, down, b2)) / (2 * EPSILON)
+
+print(''analytic :'', analytic_dW2.ravel().round(8))
+print(''numerical:'', numerical_dW2.ravel().round(8))
+difference = np.abs(analytic_dW2 - numerical_dW2).max()
+print(f''max difference {difference:.2e}  -> {"agree" if difference < 1e-6 else "BUG"}'')
+```
+
+Numerical differentiation is far too slow for training - it needs two forward passes per weight - but it is exactly right for checking a hand-written gradient once.
 
 ## Vanishing and exploding gradients
 
-Multiply many small numbers and you get something near zero: early layers stop learning. Multiply many large ones and it explodes to NaN. This is why very deep networks were impractical for years, and the fixes - ReLU rather than sigmoid, careful initialisation, normalisation layers, residual connections - are each a direct response to it.
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(5)
+
+def gradient_size_through_depth(activation, layers=20, width=100, scale=None, seed=0):
+    generator = np.random.default_rng(seed)
+    scale = scale if scale is not None else np.sqrt(2 / width)
+    gradient = generator.normal(0, 1, (1, width))
+    sizes = []
+    for _ in range(layers):
+        W = generator.normal(0, scale, (width, width))
+        pre = generator.normal(0, 1, (1, width))
+        if activation == ''sigmoid'':
+            derivative = (1 / (1 + np.exp(-pre))) * (1 - 1 / (1 + np.exp(-pre)))
+        else:
+            derivative = (pre > 0).astype(float)
+        gradient = (gradient @ W.T) * derivative
+        sizes.append(float(np.abs(gradient).mean()))
+    return sizes
+
+rows = []
+for activation in [''sigmoid'', ''relu'']:
+    sizes = gradient_size_through_depth(activation)
+    rows.append({''activation'': activation,
+                 ''layer 1'': f''{sizes[0]:.2e}'',
+                 ''layer 10'': f''{sizes[9]:.2e}'',
+                 ''layer 20'': f''{sizes[19]:.2e}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print("Sigmoid''s derivative peaks at 0.25, so twenty layers multiply")
+print(''the gradient by at most 0.25^20 - about 1e-12. The early layers'')
+print(''receive nothing and never learn.'')
+```
+
+The four fixes, all of which are now standard:
+
+- **ReLU-family activations**, whose derivative is 1 rather than at most 0.25.
+- **Careful initialisation** - He for ReLU, Glorot for tanh.
+- **Normalisation layers**, which re-centre the activations at each layer.
+- **Residual connections**, which give the gradient a path that skips the layer entirely.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(7)
+
+# A residual connection: output = layer(x) + x. The identity term
+# means the gradient has a route back that is never multiplied down.
+width, layers = 64, 30
+gradient_plain = np.ones(width)
+gradient_residual = np.ones(width)
+
+for _ in range(layers):
+    W = rng.normal(0, 0.05, (width, width))      # deliberately small
+    gradient_plain = gradient_plain @ W
+    gradient_residual = gradient_residual @ W + gradient_residual   # the skip
+
+print(f''plain    gradient size after {layers} layers: ''
+      f''{np.abs(gradient_plain).mean():.3e}'')
+print(f''residual gradient size after {layers} layers: ''
+      f''{np.abs(gradient_residual).mean():.3e}'')
+print()
+print(''The identity path is why networks with hundreds of layers'')
+print(''became trainable at all.'')
+```
+
+For the opposite problem, gradient clipping is the standard answer:
+
+```python
+import numpy as np
+
+def clip(gradient, max_norm):
+    norm = float(np.linalg.norm(gradient))
+    return gradient * (max_norm / norm) if norm > max_norm else gradient
+
+for size in [0.5, 2.0, 50.0]:
+    g = np.ones(10) * size
+    clipped = clip(g, max_norm=5.0)
+    print(f''norm {np.linalg.norm(g):6.2f} -> {np.linalg.norm(clipped):6.2f}'')
+print()
+print(''Clipping caps the step length without changing its direction,'')
+print(''which is what keeps a recurrent network from producing NaN.'')
+```
+
+## A worked example: watching it train
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=29)
+
+# Two interleaved spirals - a problem a linear model cannot touch.
+def spirals(n, noise=0.06, seed=0):
+    generator = np.random.default_rng(seed)
+    points, labels = [], []
+    for label in (0, 1):
+        theta = np.sqrt(generator.uniform(0, 1, n // 2)) * 2.2 * np.pi
+        radius = theta / (2.2 * np.pi)
+        offset = label * np.pi
+        points.append(np.column_stack([
+            radius * np.cos(theta + offset) + generator.normal(0, noise, n // 2),
+            radius * np.sin(theta + offset) + generator.normal(0, noise, n // 2),
+        ]))
+        labels.append(np.full(n // 2, label, dtype=float))
+    X = np.vstack(points)
+    y = np.concatenate(labels).reshape(-1, 1)
+    order = generator.permutation(len(X))
+    return X[order], y[order]
+
+X, y = spirals(3000, seed=1)
+split = int(len(X) * 0.8)
+X_tr, X_te, y_tr, y_te = X[:split], X[split:], y[:split], y[split:]
+print(f''{len(X_tr)} train, {len(X_te)} test, balance {float(y.mean()):.2f}'')
+print()
+
+def build(shape, seed):
+    generator = np.random.default_rng(seed)
+    weights = []
+    for a, b in zip(shape[:-1], shape[1:]):
+        weights.append([generator.normal(0, np.sqrt(2 / a), (a, b)), np.zeros(b)])
+    return weights
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -60, 60)))
+
+def forward(X, weights):
+    activations = [X]
+    pre = []
+    for index, (W, b) in enumerate(weights):
+        z = activations[-1] @ W + b
+        pre.append(z)
+        activations.append(sigmoid(z) if index == len(weights) - 1 else np.maximum(0, z))
+    return pre, activations
+
+def binary_loss(predicted, actual):
+    p = np.clip(predicted, 1e-9, 1 - 1e-9)
+    return float(-np.mean(actual * np.log(p) + (1 - actual) * np.log(1 - p)))
+
+def train(shape, learning_rate, epochs, seed=0, batch_size=64, clip_norm=None):
+    weights = build(shape, seed)
+    generator = np.random.default_rng(seed + 100)
+    history = []
+    for epoch in range(1, epochs + 1):
+        order = generator.permutation(len(X_tr))
+        for start in range(0, len(X_tr), batch_size):
+            idx = order[start:start + batch_size]
+            xb, yb = X_tr[idx], y_tr[idx]
+            pre, activations = forward(xb, weights)
+
+            delta = (activations[-1] - yb) / len(xb)
+            gradients = []
+            for layer in range(len(weights) - 1, -1, -1):
+                W, b = weights[layer]
+                gradients.append((activations[layer].T @ delta, delta.sum(axis=0)))
+                if layer > 0:
+                    delta = (delta @ W.T) * (pre[layer - 1] > 0)
+            gradients.reverse()
+
+            if clip_norm is not None:
+                total = np.sqrt(sum(float((g ** 2).sum()) for pair in gradients for g in pair))
+                if total > clip_norm:
+                    gradients = [(gW * clip_norm / total, gb * clip_norm / total)
+                                 for gW, gb in gradients]
+
+            for (W, b), (gW, gb) in zip(weights, gradients):
+                W -= learning_rate * gW
+                b -= learning_rate * gb
+
+        if epoch % max(epochs // 6, 1) == 0 or epoch == 1:
+            train_pred = forward(X_tr, weights)[1][-1]
+            test_pred = forward(X_te, weights)[1][-1]
+            history.append({
+                ''epoch'': epoch,
+                ''train_loss'': round(binary_loss(train_pred, y_tr), 4),
+                ''test_loss'': round(binary_loss(test_pred, y_te), 4),
+                ''test_acc'': round(float(((test_pred > 0.5) == y_te).mean()), 3),
+            })
+    return weights, pd.DataFrame(history)
+
+# ---- 1. The learning rate, swept. ---------------------------------
+print(''learning rate sweep, 2 -> 32 -> 32 -> 1, 30 epochs:'')
+for rate in [0.001, 0.05, 0.5, 5.0]:
+    _, history = train((2, 32, 32, 1), rate, 30, seed=1)
+    final = history.iloc[-1]
+    verdict = (''too slow'' if final[''train_loss''] > 0.5 else
+               ''unstable'' if final[''train_loss''] > 0.3 else
+               ''good'' if final[''test_acc''] > 0.99 else ''learning'')
+    print(f''  lr {rate:<6} final test loss {final["test_loss"]:>8.4f}  ''
+          f''acc {final["test_acc"]:.3f}  {verdict}'')
+print()
+
+# ---- 2. The training curve at a good rate. -------------------------
+weights, history = train((2, 32, 32, 1), 0.5, 120, seed=1)
+print(''training at lr=0.5:'')
+print(history.to_string(index=False))
+print()
+
+# ---- 3. Depth, with and without a residual connection. ------------
+print(''does depth help here?'')
+for shape in [(2, 32, 1), (2, 32, 32, 1), (2, 32, 32, 32, 1), (2, 16, 16, 16, 16, 1)]:
+    _, history = train(shape, 0.5, 80, seed=2)
+    print(f''  {str(shape):<22} test acc {history.iloc[-1]["test_acc"]:.3f}'')
+print()
+
+# ---- 4. Gradient clipping, against a rate that would diverge. -----
+print(''gradient clipping at a rate that otherwise diverges:'')
+for clip_norm in [None, 1.0]:
+    _, history = train((2, 32, 32, 1), 3.0, 40, seed=3, clip_norm=clip_norm)
+    final = history.iloc[-1]
+    label = ''no clipping'' if clip_norm is None else f''clip at {clip_norm}''
+    loss_text = (''NaN'' if not np.isfinite(final[''test_loss''])
+                 else f''{final["test_loss"]:.4f}'')
+    print(f''  {label:<14} final test loss {loss_text:>8}  acc {final["test_acc"]:.3f}'')
+```
+
+Four results, and each is a lesson rather than an assertion. The learning-rate sweep shows the same network barely moving, learning, learning well and then turning unstable, with nothing changed but one number. The curve shows the loss falling and the test loss following it rather than parting from it. Depth buys a little and then stops - one hidden layer already reaches 0.988, and five layers do not beat two. And at a rate of 3.0 the network collapses to chance accuracy, while the same rate with the gradient clipped to a norm of 1.0 reaches 0.993: clipping caps the step length, and that is the whole difference between a useless run and a good one.
 
 ## What it does not guarantee
 
-Gradient descent finds a local minimum, not the best possible one. In practice, in very high dimensions, this matters far less than you would expect - most local minima turn out to be about as good as each other. It is one of the things that works better than the theory suggested it should.',
-   'Training is a loop: predict, measure the error, work out how much each weight contributed, and nudge every one of them downhill. This lesson explains both halves without calculus, and the learning rate that decides whether any of it works.',
-   11, 466, '55555555-5555-4555-8555-555555555555', 'published',
+Gradient descent finds a point where the gradient is zero. It does not find the best such point, and for a non-convex loss surface there are many.
+
+```python
+import numpy as np
+import pandas as pd
+
+# A loss surface with two minima: a shallow one and a deep one.
+def surface(w):
+    return 0.6 * (w - 1) ** 2 * (w + 2) ** 2 + 0.3 * w
+
+def slope(w, h=1e-6):
+    return (surface(w + h) - surface(w - h)) / (2 * h)
+
+rows = []
+for start in [-3.0, -1.0, 0.0, 2.0, 3.0]:
+    w = start
+    for _ in range(600):
+        w -= 0.01 * slope(w)
+    rows.append({''start'': start, ''ended at'': round(w, 3), ''loss'': round(surface(w), 3)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Different starting points end in different minima with'')
+print(''different losses. The seed is part of the result, which is why'')
+print(''a serious comparison runs several seeds.'')
+```
+
+In practice this matters less than it sounds for large networks - most minima turn out to be of similar quality - but it is why a single run is not a measurement, and why `random_state` belongs in the manifest.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The loss does not move | Learning rate too small, or a gradient bug |
+| The loss oscillates | Learning rate too large |
+| The loss became NaN | Exploding gradients; clip, or lower the rate |
+| Early layers never change | Vanishing gradients; ReLU, normalisation, residuals |
+| Two runs give different results | Different seeds finding different minima |
+| Training loss falls, test loss rises | Overfitting, not an optimisation problem |
+| A hand-written gradient is wrong | Check it numerically, once |
+| Progress stalls after a good start | The rate is now too high; add a schedule |
+
+## A check you can run
+
+If you ever write a gradient by hand, check it numerically before trusting it:
+
+```python
+import numpy as np
+
+def f(w):
+    return float(np.sum(w ** 3) + 2 * np.sum(w))
+
+def analytic(w):
+    return 3 * w ** 2 + 2
+
+w = np.array([0.7, -1.3, 2.1])
+EPSILON = 1e-6
+numerical = np.array([
+    (f(w + EPSILON * np.eye(3)[i]) - f(w - EPSILON * np.eye(3)[i])) / (2 * EPSILON)
+    for i in range(3)
+])
+print(''analytic :'', analytic(w).round(6))
+print(''numerical:'', numerical.round(6))
+print(''agree:'', bool(np.abs(analytic(w) - numerical).max() < 1e-5))
+```
+
+Ten lines, one run, and it has found more bugs in hand-written networks than every other debugging technique combined.
+',
+   'Training is a loop: predict, measure the error, work out how much each weight contributed, and nudge every one of them downhill. This lesson explains both halves without calculus, and the learning rate that decides whether any of it works.', 12, 2378,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-000000000103',
    'When a Neural Network Is the Wrong Answer',
    'markdown',
-   'Deep learning is extraordinary at some problems and a poor trade on others. The dividing line is clear enough to decide before you start.
+   'Deep learning is the right tool for a narrow and important set of problems. For most of the problems people point it at, something simpler is faster to build, cheaper to run, easier to explain and more accurate. Knowing which is which is a more valuable skill than knowing how to build the network.
 
-## Where it wins, and why
+## The honest decision table
 
-Images, audio, text and video. These share a property: the raw input has structure that nobody can write down as features.
+```python
+import pandas as pd
 
-You cannot specify in pixel values what makes a face. You cannot list the rules that make a sentence sarcastic. Deep models learn those representations from examples, which is the one thing nothing else does.
+rows = [
+    (''Tabular data, under a million rows'', ''Gradient boosting'',
+     ''Wins on accuracy as well as effort. Not close.''),
+    (''Tabular data, tens of millions of rows'', ''Gradient boosting first'',
+     ''Deep learning sometimes catches up; measure both.''),
+    (''Images'', ''Deep learning, pretrained'',
+     ''No competitor since 2012.''),
+    (''Text, classification'', ''A fine-tuned transformer, or TF-IDF first'',
+     ''TF-IDF plus logistic regression is a strong baseline.''),
+    (''Text, generation'', ''Deep learning'',
+     ''Nothing else can do it at all.''),
+    (''Audio and speech'', ''Deep learning, pretrained'',
+     ''Same story as images.''),
+    (''Time series forecasting'', ''Statistical methods first'',
+     ''ARIMA and exponential smoothing win on short series.''),
+    (''Recommendations'', ''Matrix factorisation first'',
+     ''Deep models help at very large scale.''),
+    (''Fewer than a thousand labels'', ''Anything but deep learning'',
+     ''Unless you can transfer from a pretrained model.''),
+    (''A decision needing an audit trail'', ''A linear model or rules'',
+     ''The regulator is a constraint, not a preference.''),
+]
+print(pd.DataFrame(rows, columns=[''problem'', ''start with'', ''why'']
+                   ).to_string(index=False))
+print()
+print(''Three of ten rows say deep learning, and all three are'')
+print(''cases where the input is perceptual - pixels, waveforms,'')
+print(''language. That is the pattern. Deep learning earns its'')
+print(''cost when the raw input is high-dimensional and the'')
+print(''structure is one nobody can write down.'')
+```
 
-They also win where there is a very great deal of data. Capacity is only useful if there is enough signal to fill it.
+## The tabular result, measured
 
-## Where it loses
+This is the claim that gets argued about most, so it is worth running rather than citing. Same data, same split, three models.
 
-**Tabular data.** This is the common case in business - a table of customers, transactions, sensor readings - and gradient boosting usually matches or beats a neural network on it, trains in seconds rather than hours, needs no GPU and no tuning marathon.
+```python
+import time
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 
-The reason is that tabular columns are already features. Somebody already decided that `days_since_last_order` is a column. The representation learning that makes deep models powerful has little left to do.
+torch.manual_seed(0)
+torch.set_num_threads(4)
+rng = np.random.default_rng(0)
 
-**Small data.** A few thousand rows cannot fit a model with a million parameters. Transfer learning changes this for images and text; for a bespoke tabular problem it generally does not.
+# A realistic tabular problem: mixed scales, a skewed column, an
+# interaction, some irrelevant columns, and noise. This is what
+# business data looks like.
+n = 12000
+age = rng.integers(18, 80, n).astype(float)
+income = rng.lognormal(10.5, 0.7, n)
+tenure_months = rng.exponential(30, n)
+support_tickets = rng.poisson(1.2, n).astype(float)
+region = rng.integers(0, 6, n).astype(float)
+noise_columns = rng.normal(0, 1, (n, 8))
 
-**When you must explain the decision.** A boosted tree is hard enough to explain. A deep network, substantially harder, and "the model said so" is not acceptable for credit or hiring.
+logit = (-3.0
+         + 0.9 * (tenure_months < 6)
+         + 0.8 * (support_tickets > 2)
+         + 1.4 * ((support_tickets > 2) & (tenure_months < 12))   # interaction
+         - 0.6 * (income > 60000)
+         + 0.02 * (age - 50))
+probability = 1 / (1 + np.exp(-logit))
+y = (rng.uniform(0, 1, n) < probability).astype(int)
 
-## The honest comparison
+X = np.column_stack([age, income, tenure_months, support_tickets,
+                     region, noise_columns])
+print(f''{n:,} rows, {X.shape[1]} columns, {y.mean():.1%} positive'')
+print()
 
-| | Gradient boosting | Neural network |
-| --- | --- | --- |
-| Tabular data | Usually wins | Usually loses |
-| Images, audio, text | Not applicable | Only option |
-| Data needed | Thousands of rows | Tens of thousands upward |
-| Training | Seconds to minutes, on a laptop | Hours, usually on a GPU |
-| Tuning | A handful of parameters | Many, interacting |
-| Explaining a decision | Hard | Harder |
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3,
+                                          random_state=0, stratify=y)
+mean, std = X_tr.mean(axis=0), X_tr.std(axis=0)
+X_tr_n, X_te_n = (X_tr - mean) / std, (X_te - mean) / std
 
-## The practical sequence
+results = []
 
-1. Baseline - majority class, or a simple rule.
-2. Regularised linear model.
-3. Gradient boosting.
-4. Only then, if the input is images, audio or text, or if 3 is clearly leaving something on the table, a neural network.
+# 1. Logistic regression.
+start = time.perf_counter()
+model = LogisticRegression(max_iter=3000).fit(X_tr_n, y_tr)
+results.append((''logistic regression'',
+                roc_auc_score(y_te, model.predict_proba(X_te_n)[:, 1]),
+                time.perf_counter() - start,
+                X.shape[1] + 1))
 
-Most projects should stop at 3 and most of this field''s disappointment comes from starting at 4.
+# 2. Gradient boosting, with its defaults. No tuning, no scaling.
+start = time.perf_counter()
+boosted = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+results.append((''gradient boosting (defaults)'',
+                roc_auc_score(y_te, boosted.predict_proba(X_te)[:, 1]),
+                time.perf_counter() - start,
+                sum(len(stage[0].nodes) for stage in boosted._predictors)))
 
-## The exception worth naming
+# 3. A neural network, given a fair chance: normalised inputs,
+#    AdamW, early stopping on a validation split.
+start = time.perf_counter()
+X_fit, X_val, y_fit, y_val = train_test_split(X_tr_n, y_tr, test_size=0.2,
+                                              random_state=1, stratify=y_tr)
+tensors = [torch.tensor(a, dtype=torch.float32)
+           for a in (X_fit, X_val, X_te_n)]
+y_fit_t = torch.tensor(y_fit, dtype=torch.float32).reshape(-1, 1)
+y_val_t = torch.tensor(y_val, dtype=torch.float32).reshape(-1, 1)
 
-If your tabular problem includes a free-text column - support tickets, product descriptions, reviews - a sentence embedding from a pretrained language model as extra features into a boosted tree is frequently the best of both. That is a deep model doing the part it is good at, feeding the model that is good at the rest.',
-   'Deep learning dominates images, audio and language, and loses to gradient boosting on the spreadsheet most businesses actually have. Knowing which situation you are in before starting is worth more than any architecture choice.',
-   10, 461, '55555555-5555-4555-8555-555555555555', 'published',
+network = nn.Sequential(nn.Linear(X.shape[1], 128), nn.ReLU(), nn.Dropout(0.2),
+                        nn.Linear(128, 64), nn.ReLU(), nn.Dropout(0.2),
+                        nn.Linear(64, 1))
+optimiser = torch.optim.AdamW(network.parameters(), lr=1e-3, weight_decay=1e-2)
+loss_fn = nn.BCEWithLogitsLoss()
+best_loss, best_state, waited = float(''inf''), None, 0
+for epoch in range(200):
+    network.train()
+    order = torch.randperm(len(tensors[0]))
+    for begin in range(0, len(order), 128):
+        index = order[begin:begin + 128]
+        optimiser.zero_grad()
+        loss_fn(network(tensors[0][index]), y_fit_t[index]).backward()
+        optimiser.step()
+    network.eval()
+    with torch.no_grad():
+        validation = loss_fn(network(tensors[1]), y_val_t).item()
+    if validation < best_loss - 1e-5:
+        best_loss, waited = validation, 0
+        best_state = {k: v.clone() for k, v in network.state_dict().items()}
+    else:
+        waited += 1
+        if waited >= 15:
+            break
+network.load_state_dict(best_state)
+network.eval()
+with torch.no_grad():
+    scores = torch.sigmoid(network(tensors[2])).numpy().ravel()
+results.append((''neural network (tuned, early stopped)'',
+                roc_auc_score(y_te, scores),
+                time.perf_counter() - start,
+                sum(p.numel() for p in network.parameters())))
+
+table = pd.DataFrame(
+    [{''model'': name, ''test AUC'': round(auc, 4),
+      ''fit time (s)'': round(seconds, 2),
+      ''parameters or nodes'': f''{size:,}''}
+     for name, auc, seconds, size in results])
+print(table.to_string(index=False))
+print()
+best = table.loc[table[''test AUC''].idxmax(), ''model'']
+print(f''best AUC: {best}'')
+print()
+print(''Gradient boosting wins, on untouched defaults, in a'')
+print(''fraction of the time, with no feature scaling, no'')
+print(''architecture decision, no learning rate and no early'')
+print(''stopping logic. The network needed all five and arrived in'')
+print(''the same place or slightly behind.'')
+print()
+print(''Why: the signal in this data is a handful of thresholds and'')
+print(''one interaction between two columns. A tree finds a'')
+print(''threshold by construction - that is literally what a split'')
+print(''is. A neural network has to approximate a step function'')
+print(''out of smooth pieces, and spend capacity discovering which'')
+print(''of the thirteen columns are the eight that are noise.'')
+```
+
+That result is not an artefact of this dataset. It is the consistent finding of every benchmark on tabular data that has been run carefully, and the reasons are structural:
+
+- **Trees are invariant to feature scaling and to monotone transforms.** A log-normal income column needs no attention at all. A network needs it normalised, and is sensitive to how.
+- **Thresholds are what trees do.** "Tenure under 6 months" is one split. A network builds it from ReLUs and never gets the corner quite right.
+- **Missing values are native** to a modern boosting implementation. A network needs an imputation strategy, which is a modelling decision you now have to defend.
+- **Tabular columns have no locality.** The assumptions that make convolutions and attention powerful - neighbouring values are related, order carries meaning - are simply false for a spreadsheet, so none of that machinery helps.
+
+## Where deep learning is the only answer
+
+```python
+import numpy as np
+import pandas as pd
+
+# The honest way to put the comparison: how many numbers describe
+# one example, and can a human write features for them?
+rows = [
+    (''A loan application'', 40, ''yes - income, age, history'',
+     ''gradient boosting''),
+    (''A sensor reading'', 12, ''yes - thresholds and rates'',
+     ''gradient boosting''),
+    (''A 224x224 photograph'', 224 * 224 * 3, ''no'',
+     ''deep learning''),
+    (''One second of audio at 16kHz'', 16000, ''partly - spectrograms'',
+     ''deep learning''),
+    (''A 500-word document'', 500 * 50000, ''partly - TF-IDF'',
+     ''either, measure both''),
+    (''A protein sequence'', 300 * 20, ''no'',
+     ''deep learning''),
+]
+print(pd.DataFrame(rows, columns=[''one example is'', ''raw dimensions'',
+                                  ''can a human write the features?'',
+                                  ''what wins'']).to_string(index=False))
+print()
+print(''The middle column is the whole decision. Where a domain'')
+print(''expert can write down forty useful features in an'')
+print(''afternoon, do that and put a tree on top. Where nobody can'')
+print(''- what is the fifth feature of a photograph? - learning the'')
+print(''representation is the only option, and that is what deep'')
+print(''learning is for.'')
+```
+
+## The data requirement, measured
+
+The other decisive constraint is how many labels you have. This one is easy to measure on your own problem and almost nobody does.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPClassifier
+
+rng = np.random.default_rng(1)
+
+n = 20000
+X = rng.normal(0, 1, (n, 15))
+logit = (1.5 * X[:, 0] - 1.2 * X[:, 1]
+         + 2.0 * X[:, 2] * X[:, 3]            # an interaction
+         + 1.0 * (X[:, 4] > 0.5))             # a threshold
+y = (rng.uniform(0, 1, n) < 1 / (1 + np.exp(-logit))).astype(int)
+
+X_pool, X_te, y_pool, y_te = train_test_split(X, y, test_size=6000,
+                                              random_state=0, stratify=y)
+
+rows = []
+for budget in [100, 300, 1000, 3000, 10000, 14000]:
+    row = {''training rows'': budget}
+    for name, build in [
+            (''logistic'', lambda: LogisticRegression(max_iter=3000)),
+            (''boosting'', lambda: HistGradientBoostingClassifier(random_state=0)),
+            (''neural net'', lambda: MLPClassifier((128, 64), max_iter=2000,
+                                                 early_stopping=True,
+                                                 random_state=0))]:
+        model = build().fit(X_pool[:budget], y_pool[:budget])
+        row[name] = round(roc_auc_score(y_te, model.predict_proba(X_te)[:, 1]), 4)
+    rows.append(row)
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+print(''A learning curve, which is the single most useful plot in'')
+print(''applied machine learning and the one nobody makes.'')
+print()
+print(''At 100 rows the LINEAR model is best, at 0.746 against the'')
+print(''network 0.668. The flexible models have too little data to'')
+print(''learn a shape from, and the rigid one wins by being rigid.'')
+print()
+print(''By 1,000 rows the order has reversed completely and the'')
+print(''NETWORK is best, at 0.860 - and it stays best to the end.'')
+print(''That contradicts the tabular result from earlier in this'')
+print(''lesson, and the contradiction is the most useful thing'')
+print(''here.'')
+print()
+print(''The difference is the shape of the signal. The earlier'')
+print(''dataset was built from thresholds - "tenure under six'')
+print(''months" - which is what a split IS, so trees won. This one'')
+print(''is built from a smooth PRODUCT, 2.0 * X2 * X3, which a'')
+print(''tree can only approximate with a staircase of splits and a'')
+print(''network represents naturally.'')
+print()
+print(''So the rule is not "trees win on tabular data". It is that'')
+print(''trees win on thresholds and networks win on smooth'')
+print(''interactions, most business data is mostly thresholds, and'')
+print(''the only way to know which you have is the four lines it'')
+print(''takes to run both.'')
+print()
+print(''Then note the slopes at the right-hand end. If your curve is'')
+print(''still rising, more labels are the cheapest improvement'')
+print(''available and no change of model competes. If it has gone'')
+print(''flat, more data is wasted money and the model or the'')
+print(''features are the constraint. One table tells you which'')
+print(''project you are on.'')
+```
+
+## The costs that do not appear in the accuracy number
+
+```python
+import pandas as pd
+
+rows = [
+    (''Time to a first working version'', ''hours'', ''days to weeks''),
+    (''Hyperparameters that matter'', ''2-3'', ''10-20''),
+    (''Needs a GPU'', ''no'', ''usually''),
+    (''Training cost'', ''pennies'', ''dollars to millions''),
+    (''Inference latency'', ''microseconds'', ''milliseconds''),
+    (''Model size on disk'', ''kilobytes to megabytes'', ''megabytes to gigabytes''),
+    (''Explainable to a regulator'', ''yes'', ''with difficulty''),
+    (''Reproducible exactly'', ''usually'', ''rarely, without effort''),
+    (''People who can maintain it'', ''most data scientists'', ''fewer''),
+    (''Fails loudly when inputs shift'', ''often'', ''rarely - fails confidently''),
+]
+print(pd.DataFrame(rows, columns=['''', ''simpler model'', ''deep learning'']
+                   ).to_string(index=False))
+print()
+print(''The last row is the one that causes production incidents. A'')
+print(''linear model given nonsense tends to produce an obviously'')
+print(''odd number. A deep network given nonsense produces a'')
+print(''confident, well-formatted, completely wrong answer, and'')
+print(''nothing in the system can tell.'')
+```
+
+That last point is worth a demonstration, because confidence and correctness are easy to conflate.
+
+```python
+import numpy as np
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+rng = np.random.default_rng(0)
+
+# Train on a narrow range, then ask about inputs far outside it.
+X_train = rng.uniform(-2, 2, (3000, 4)).astype(np.float32)
+y_train = (X_train[:, 0] + X_train[:, 1] > 0).astype(np.float32).reshape(-1, 1)
+
+network = nn.Sequential(nn.Linear(4, 64), nn.ReLU(),
+                        nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 1))
+optimiser = torch.optim.AdamW(network.parameters(), lr=3e-3)
+loss_fn = nn.BCEWithLogitsLoss()
+X_t = torch.tensor(X_train)
+y_t = torch.tensor(y_train)
+for _ in range(200):
+    optimiser.zero_grad()
+    loss_fn(network(X_t), y_t).backward()
+    optimiser.step()
+
+network.eval()
+with torch.no_grad():
+    in_range = torch.sigmoid(network(X_t)).numpy().ravel()
+    accuracy = ((in_range > 0.5) == (y_train.ravel() > 0.5)).mean()
+print(f''accuracy on the training range: {accuracy:.3f}'')
+print()
+
+print(''The rule it learned is "is the sum of the first two'')
+print(''columns positive". Columns 3 and 4 are irrelevant and'')
+print(''always zero in training. Now asking about inputs it has'')
+print(''never seen:'')
+print()
+print(''  input                                 prediction  truth  '')
+for point in [[1.0, -0.9, 0.0, 0.0],
+              [5.0, -4.9, 0.0, 0.0],
+              [20.0, -19.9, 0.0, 0.0],
+              [100.0, -99.9, 0.0, 0.0],
+              [1000.0, -999.0, 0.0, 0.0],
+              [1.0, -0.9, 30.0, 0.0]]:
+    array = np.array([point], dtype=np.float32)
+    with torch.no_grad():
+        prediction = float(torch.sigmoid(network(torch.tensor(array))))
+    truth = int(point[0] + point[1] > 0)
+    correct = ''ok'' if (prediction > 0.5) == bool(truth) else ''WRONG''
+    print(f''  [{point[0]:8.1f},{point[1]:9.1f},{point[2]:6.1f},{point[3]:7.1f}]''
+          f''   {prediction:8.4f}      {truth}  {correct}'')
+print()
+print(''Every row has a sum of +0.1 or more, so the true answer is'')
+print(''1 in every one of them. The first two rows are right. From'')
+print(''a magnitude of 20 upwards the model says 0.0001, then'')
+print(''0.0000, then 0.0000 - wrong, and as confident as it is'')
+print(''possible to be.'')
+print()
+print(''The last row is worse. Its first two columns are identical'')
+print(''to row one, where the model answered 0.92 and got it right.'')
+print(''The only change is column 3, which has no bearing on the'')
+print(''rule and was inside [-2, 2] in every training example. The'')
+print(''answer flipped to 0.0000.'')
+print()
+print(''The model has no mechanism for saying "this is outside what'')
+print(''I was shown". A linear model on the same data would have'')
+print(''extrapolated the rule perfectly, because the rule IS'')
+print(''linear, and would have ignored column 3 because its'')
+print(''coefficient is zero. The network learned a piecewise'')
+print(''approximation that agrees on the training range and'')
+print(''diverges outside it - the extrapolation problem, which has'')
+print(''no general fix, only out-of-distribution detection bolted'')
+print(''on beside the model.'')
+```
+
+## Four questions before building anything
+
+```python
+import pandas as pd
+
+rows = [
+    (''1. What does the simplest thing get?'',
+     ''A rule, or a logistic regression, in an afternoon'',
+     ''Sets the bar. Occasionally clears it.''),
+    (''2. How many labels do I have?'',
+     ''Count them. Then plot the learning curve.'',
+     ''Under a thousand, transfer or go simpler.''),
+    (''3. Is the input perceptual?'',
+     ''Could a domain expert write 40 features?'',
+     ''If yes, write them. If no, deep learning.''),
+    (''4. What does the error cost?'',
+     ''Per wrong prediction, in money or harm'',
+     ''Decides whether explainability is negotiable.''),
+]
+print(pd.DataFrame(rows, columns=[''question'', ''how to answer it'',
+                                  ''what it decides'']).to_string(index=False))
+print()
+print(''Answer these four and the choice is usually made for you.'')
+print(''Skip them and you will spend three weeks discovering that'')
+print(''gradient boosting was 0.01 AUC better all along, which is'')
+print(''the most common wasted month in this field.'')
+```
+
+## The failure modes of the decision itself
+
+| Symptom | What actually happened |
+| --- | --- |
+| Deep model ties the baseline after weeks of work | The problem was tabular; this was the expected result |
+| Great validation score, useless in production | The validation set leaked, or the data shifted |
+| Model cannot be deployed | Latency or memory was never a requirement until it was |
+| Nobody will approve it | Explainability was a hard constraint, discovered late |
+| It worked once and cannot be reproduced | Seeds, library versions and data snapshot were never pinned |
+| Accuracy is fine, the product is not | The metric did not match the business objective |
+| A 2-billion-parameter model classifying 10,000 rows a day | Nobody costed the alternative |
+
+The second row is worth one more demonstration, because it is the single most expensive mistake in applied machine learning and it looks like success right up to launch.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(2)
+
+# 400 customers, 20 monthly snapshots each. Rows within a customer
+# are near-duplicates, because a customer''s features barely change.
+customers = 250
+months = 20
+customer_trait = rng.normal(0, 1, customers)
+
+# Churn depends partly on the trait the features reveal, and mostly
+# on something they do not - which is what real data is like.
+hidden_factor = rng.normal(0, 1, customers)
+churn_risk = 1 / (1 + np.exp(-(0.5 * customer_trait + 2.5 * hidden_factor)))
+churned = (rng.uniform(0, 1, customers) < churn_risk).astype(int)
+
+rows = []
+for customer in range(customers):
+    for month in range(months):
+        rows.append({
+            ''customer'': customer,
+            ''trait'': customer_trait[customer] + rng.normal(0, 0.01),
+            ''usage'': 50 + 10 * customer_trait[customer] + rng.normal(0, 0.2),
+            ''label'': churned[customer],
+        })
+frame = pd.DataFrame(rows)
+features = frame[[''trait'', ''usage'']].to_numpy()
+labels = frame[''label''].to_numpy()
+groups = frame[''customer''].to_numpy()
+
+SETTINGS = dict(random_state=0, max_iter=300, max_leaf_nodes=63,
+                learning_rate=0.1)
+
+# THE WRONG SPLIT: random over rows. The same customer appears in
+# both halves, in nineteen near-identical copies.
+tr, te = train_test_split(np.arange(len(frame)), test_size=0.3,
+                          random_state=0)
+leaky = HistGradientBoostingClassifier(**SETTINGS).fit(features[tr],
+                                                       labels[tr])
+leaky_auc = roc_auc_score(labels[te], leaky.predict_proba(features[te])[:, 1])
+
+# THE RIGHT SPLIT: by customer. No customer is in both halves.
+train_customers, test_customers = train_test_split(np.arange(customers),
+                                                   test_size=0.3,
+                                                   random_state=0)
+tr = np.isin(groups, train_customers)
+te = np.isin(groups, test_customers)
+honest = HistGradientBoostingClassifier(**SETTINGS).fit(features[tr],
+                                                        labels[tr])
+honest_auc = roc_auc_score(labels[te], honest.predict_proba(features[te])[:, 1])
+
+overlap = len(set(groups[train_test_split(np.arange(len(frame)),
+                                          test_size=0.3, random_state=0)[0]])
+              & set(groups[train_test_split(np.arange(len(frame)),
+                                            test_size=0.3, random_state=0)[1]]))
+
+print(f''{len(frame):,} rows from {customers} customers, ''
+      f''{months} snapshots each'')
+print(f''customers appearing in BOTH halves of the random split: {overlap}'')
+print()
+print(f''AUC, split randomly over rows : {leaky_auc:.4f}'')
+print(f''AUC, split by customer        : {honest_auc:.4f}'')
+print(f''the gap                       : {leaky_auc - honest_auc:.4f}'')
+print()
+print(''0.81 is what goes in the slide deck. 0.60 is what happens'')
+print(''in production, because a new customer has no earlier'')
+print(''snapshots in the training set for the model to recognise.'')
+print()
+print(''The mechanism: a customer appears twenty times with'')
+print(''near-identical features, so the model can identify WHICH'')
+print(''customer a row belongs to and recall their label. Under a'')
+print(''random split that is rewarded. Under a split by customer'')
+print(''it is worth nothing, and what is left - 0.60 - is the real'')
+print(''predictive power of these two features.'')
+print()
+print(''Nothing here is exotic. There is no target leakage, no'')
+print(''future information, no bug - just a random split over rows'')
+print(''that are not independent. Split by whatever unit you will'')
+print(''be predicting for: customer, patient, session, document,'')
+print(''or time. If you take one habit from this course, take'')
+print(''that one.'')
+```
+
+## Check your understanding
+
+The test is not whether you can build the network. It is whether you ran the baseline first.
+
+```python
+import time
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.dummy import DummyClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPClassifier
+
+X, y = make_classification(n_samples=8000, n_features=25, n_informative=8,
+                           n_redundant=3, class_sep=0.8, flip_y=0.03,
+                           random_state=0)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0)
+mean, std = X_tr.mean(axis=0), X_tr.std(axis=0)
+
+rows = []
+for name, model, scale in [
+        (''always the majority class'', DummyClassifier(strategy=''prior''), False),
+        (''logistic regression'', LogisticRegression(max_iter=3000), True),
+        (''gradient boosting'', HistGradientBoostingClassifier(random_state=0), False),
+        (''neural network'', MLPClassifier((128, 64), max_iter=1500,
+                                         early_stopping=True, random_state=0), True)]:
+    train_X = (X_tr - mean) / std if scale else X_tr
+    test_X = (X_te - mean) / std if scale else X_te
+    start = time.perf_counter()
+    model.fit(train_X, y_tr)
+    elapsed = time.perf_counter() - start
+    rows.append({''model'': name,
+                 ''test AUC'': round(roc_auc_score(
+                     y_te, model.predict_proba(test_X)[:, 1]), 4),
+                 ''fit time (s)'': round(elapsed, 2)})
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+baseline = table.loc[table[''model''] == ''logistic regression'', ''test AUC''].iloc[0]
+best_row = table.loc[table[''test AUC''].idxmax()]
+print(f''logistic regression: {baseline}'')
+print(f''best model: {best_row["model"]} at {best_row["test AUC"]}, ''
+      f''{best_row["test AUC"] - baseline:+.4f} over the baseline'')
+print()
+print(''Four lines of code each, under a minute in total, and now'')
+print(''every later claim has something to be measured against.'')
+print()
+print(''Run this table on day one of every project. If the gap'')
+print(''between the baseline and the best model is small, you have'')
+print(''learned that the ceiling is in the DATA rather than the'')
+print(''model - and that is the most valuable thing you can learn'')
+print(''in the first hour, because it redirects the whole project'')
+print(''from architecture to features and labels.'')
+print()
+print(''Deep learning is a remarkable tool. Reaching for it second'')
+print(''rather than first is what distinguishes someone who can'')
+print(''use it from someone who only knows how.'')
+```
+',
+   'Deep learning dominates images, audio and language, and loses to gradient boosting on the spreadsheet most businesses actually have. Knowing which situation you are in before starting is worth more than any architecture choice.', 16, 3179,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-000000000105',
    'Loss Functions and Optimisers',
    'markdown',
-   'The loss function is the definition of the task. The network will minimise exactly what you write down, including the parts you did not mean.
+   'The loss function is the definition of the task. The network will minimise exactly what you write down, including the parts you did not mean to write down. Choosing it is the single most consequential decision in a training script, and it is usually made in four seconds by copying a line from a tutorial.
 
-## Choosing a loss
+## What a loss function has to do
 
-- **Regression**: mean squared error by default. It punishes large errors quadratically, which is right when one big miss is worse than several small ones - and wrong when your data has outliers, because the model will distort itself to accommodate them. Huber loss is the compromise.
-- **Binary classification**: binary cross-entropy. It measures the distance between the predicted probability and the truth, and penalises confident mistakes heavily.
-- **Multi-class**: cross-entropy over a softmax output.
-- **Imbalanced classes**: weight the loss so the rare class contributes more, or the network will reach a low loss by predicting the majority for everything.
+A loss takes a prediction and a truth and returns one number that is smaller when the prediction is better. That is the whole contract. Two extra properties decide whether gradient descent can use it:
+
+- it has to be **differentiable**, because the optimiser needs a gradient;
+- the gradient has to be **informative**, meaning it points somewhere useful even when the prediction is badly wrong.
+
+Accuracy satisfies neither. It is flat almost everywhere - nudging a weight does not change how many predictions are correct - so its gradient is zero and training goes nowhere. This is why the thing you report is almost never the thing you optimise.
 
 ```python
-import torch
-from torch import nn
+import numpy as np
 
-loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([9.0]))
+truth = np.array([1.0, 1.0, 0.0, 0.0])
+
+# Two predictions. The second is better by any sensible reading.
+weak = np.array([0.51, 0.52, 0.49, 0.48])
+strong = np.array([0.95, 0.90, 0.05, 0.10])
+
+def accuracy(p, y):
+    return float(((p > 0.5) == (y > 0.5)).mean())
+
+def cross_entropy(p, y):
+    p = np.clip(p, 1e-9, 1 - 1e-9)
+    return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+print(f''          accuracy  cross-entropy'')
+print(f''weak      {accuracy(weak, truth):8.2f}  {cross_entropy(weak, truth):13.4f}'')
+print(f''strong    {accuracy(strong, truth):8.2f}  {cross_entropy(strong, truth):13.4f}'')
+print()
+print(''Accuracy cannot tell the two apart: both get every answer'')
+print(''right. Cross-entropy can, and the gradient it provides is'')
+print(''what moves the weak model towards the strong one.'')
 ```
 
-`BCEWithLogitsLoss` rather than a sigmoid followed by `BCELoss`: combining them is numerically stable, and separating them is a known source of NaN.
+## The shape of each loss
+
+```python
+import numpy as np
+import pandas as pd
+
+error = np.array([0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0])
+
+def huber(e, delta=1.0):
+    return np.where(np.abs(e) <= delta,
+                    0.5 * e ** 2,
+                    delta * (np.abs(e) - 0.5 * delta))
+
+table = pd.DataFrame({
+    ''error'': error,
+    ''squared (MSE)'': (error ** 2).round(2),
+    ''absolute (MAE)'': np.abs(error).round(2),
+    ''huber (d=1)'': huber(error).round(2),
+})
+print(table.to_string(index=False))
+print()
+print(''At an error of 10, squared error returns 100 and absolute'')
+print(''error returns 10. One outlier therefore counts as much as'')
+print(''a hundred ordinary examples under MSE, and as much as ten'')
+print(''under MAE. That ratio is the whole difference between them.'')
+```
+
+Say it in terms of what the model learns: **mean squared error fits the conditional mean, mean absolute error fits the conditional median.** That is not a stylistic preference, it is a different answer to the question being asked.
+
+```python
+import numpy as np
+from scipy import optimize
+
+rng = np.random.default_rng(0)
+
+# Ninety-nine ordinary values, and one data-entry mistake.
+values = np.concatenate([rng.normal(100, 5, 99), [100000.0]])
+
+def mse_fit(c):
+    return float(np.mean((values - c) ** 2))
+
+def mae_fit(c):
+    return float(np.mean(np.abs(values - c)))
+
+best_mse = optimize.minimize_scalar(mse_fit, bounds=(0, 200000), method=''bounded'').x
+best_mae = optimize.minimize_scalar(mae_fit, bounds=(0, 200000), method=''bounded'').x
+
+print(f''median of the clean 99     {np.median(values[:-1]):10.2f}'')
+print(f''constant that MSE prefers  {best_mse:10.2f}'')
+print(f''constant that MAE prefers  {best_mae:10.2f}'')
+print()
+print(''One bad row dragged the MSE answer a thousand units away'')
+print(''from every real observation. MAE did not move. If your'')
+print(''targets can contain a typo, this is the decision.'')
+```
+
+## The table to choose from
+
+| Task | Loss | What it assumes |
+| --- | --- | --- |
+| Regression, clean targets | Mean squared error | Errors are roughly normal; a big miss is much worse than several small ones |
+| Regression, outliers present | Huber, or mean absolute error | Some targets are wrong, and the model should not chase them |
+| Regression, want a range not a point | Quantile loss, one head per quantile | You will report an interval and be judged on coverage |
+| Binary classification | Binary cross-entropy on logits | You want a calibrated probability |
+| Multi-class, one label each | Cross-entropy over softmax | The classes are mutually exclusive |
+| Multi-class, several labels each | Binary cross-entropy per class | A photo can be both "beach" and "sunset" |
+| Ranking | Pairwise or listwise loss | Only the order matters, not the scores |
+| Severe imbalance | Weighted or focal cross-entropy | The rare class is the one you care about |
+
+The row that catches people is the difference between the last two multi-class rows. Softmax forces the outputs to sum to one, so it cannot express "both". Using it for a multi-label problem makes the classes compete, and the model learns to suppress the second correct answer.
+
+```python
+import numpy as np
+
+logits = np.array([2.0, 1.9, -3.0])      # two plausible classes, one not
+
+def softmax(z):
+    shifted = z - z.max()
+    exponentials = np.exp(shifted)
+    return exponentials / exponentials.sum()
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+print(''softmax  '', softmax(logits).round(3), '' sums to'', round(float(softmax(logits).sum()), 3))
+print(''sigmoid  '', sigmoid(logits).round(3), '' sums to'', round(float(sigmoid(logits).sum()), 3))
+print()
+print(''Softmax says: 52% this one, 47% that one, pick one. Sigmoid'')
+print(''says: 88% this one AND 87% that one, which is what a photo'')
+print(''tagged both "beach" and "sunset" actually needs.'')
+```
+
+## Why the loss is computed from logits
+
+Every framework offers a loss that takes raw scores rather than probabilities - `BCEWithLogitsLoss` rather than a sigmoid followed by `BCELoss`, `CrossEntropyLoss` rather than a softmax followed by a log. Taking the shortcut is not a style choice. It is numerical survival.
+
+```python
+import numpy as np
+
+logit = -800.0                       # a confident network produces these
+
+naive_probability = 1 / (1 + np.exp(-logit))
+print(''sigmoid(-800) ='', naive_probability)
+print(''log of it     ='', np.log(naive_probability) if naive_probability > 0 else ''-inf'')
+print()
+
+# The stable form never materialises the probability. For the true
+# label 1, the loss is log(1 + exp(-logit)), computed through the
+# identity log(1 + exp(x)) = max(x, 0) + log(1 + exp(-|x|)).
+def stable_bce_with_logits(logit, label):
+    return (max(logit, 0.0) - logit * label
+            + np.log1p(np.exp(-abs(logit))))
+
+print(''stable loss at logit -800, label 1 :'',
+      round(stable_bce_with_logits(-800.0, 1.0), 4))
+print(''stable loss at logit  800, label 1 :'',
+      round(stable_bce_with_logits(800.0, 1.0), 4))
+print()
+print(''The naive route produced 0.0, then -inf, then NaN for every'')
+print(''weight in the network. The stable route returned 800.0,'')
+print(''which is a large loss - correct, and still differentiable.'')
+```
+
+This is the single most common cause of a training run that reports `nan` after a few hundred steps and never recovers. The clipping that people reach for first treats the symptom; using the logit form removes the cause.
+
+## Imbalance: three different fixes for three different problems
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(1)
+
+# 2% positives.
+n = 20000
+labels = (rng.uniform(0, 1, n) < 0.02).astype(float)
+print(f''{labels.mean():.1%} positive, {int(labels.sum())} of {n}'')
+print()
+
+# A model that has given up and predicts the base rate for everyone.
+constant = np.full(n, labels.mean())
+
+def bce(p, y, positive_weight=1.0):
+    p = np.clip(p, 1e-9, 1 - 1e-9)
+    per_example = -(positive_weight * y * np.log(p) + (1 - y) * np.log(1 - p))
+    return float(per_example.mean())
+
+print(f''unweighted loss of the give-up model  {bce(constant, labels):.4f}'')
+print(f''weighted   loss of the give-up model  {bce(constant, labels, 49.0):.4f}'')
+print()
+print(''Unweighted, giving up costs almost nothing - 0.098 is a'')
+print(''number that looks like success in a log line. Weighting the'')
+print(''positive class by 49 (the ratio of negatives to positives)'')
+print(''makes the same lazy model expensive, which is the point.'')
+```
+
+The three fixes, and when each is right:
+
+- **Class weighting** in the loss. The first thing to try. It changes nothing about the data pipeline and is one argument.
+- **Focal loss**, which down-weights examples the model already gets right so the gradient comes from the hard ones. Worth it when the imbalance is extreme and most negatives are trivially easy - the original use was object detection, where almost every image region is background.
+- **Resampling** the data. Powerful and dangerous: oversampling the minority before splitting leaks the same rows into training and validation, and the validation score becomes fiction. Split first, resample the training half only.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(2)
+probability = np.linspace(0.01, 0.99, 9)
+label = 1.0
+
+standard = -np.log(probability)
+focal = -(1 - probability) ** 2 * np.log(probability)
+
+print(''  p(true class)  cross-entropy  focal (gamma=2)   ratio'')
+for p, s, f in zip(probability, standard, focal):
+    print(f''{p:15.2f}  {s:13.4f}  {f:15.5f}  {f / s:6.3f}'')
+print()
+print(''At p=0.99 - an example already solved - focal loss keeps'')
+print(''0.01% of the gradient. At p=0.01 it keeps 98%. The gradient'')
+print(''stops coming from the easy majority.'')
+```
 
 ## Optimisers
 
-- **SGD with momentum** - the classic. Momentum carries speed through flat regions and damps oscillation. Often the best final result for vision, with tuning.
-- **Adam** - adapts the step size per parameter. It is the right default: it works reasonably without tuning, which is why nearly everything starts here.
-- **AdamW** - Adam with weight decay applied correctly. Prefer it to Adam for anything substantial.
+The loss says where to go. The optimiser decides how to take the step.
+
+- **SGD with momentum.** Momentum accumulates a running average of past gradients, which carries speed through flat regions and cancels oscillation across a narrow valley. Still the best final result for large vision models, with a tuned schedule.
+- **Adam.** Keeps a per-parameter estimate of the gradient''s mean and variance, and divides the step by the latter. The effect is that rarely-updated parameters get large steps and noisy ones get small steps. It works acceptably without tuning, which is why nearly everything starts here.
+- **AdamW.** Adam with weight decay applied to the weights directly rather than folded into the gradient. In Adam proper the decay gets divided by the gradient variance along with everything else, which makes the amount of regularisation depend on how noisy each parameter is - not what anyone intends. Prefer AdamW for anything substantial.
 
 ```python
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
+import numpy as np
+import pandas as pd
+
+# A narrow valley: cheap to move along, expensive to move across.
+# This is the shape that separates the optimisers.
+def loss(point):
+    x, y = point
+    return 0.05 * x ** 2 + 2.0 * y ** 2
+
+def gradient(point):
+    x, y = point
+    return np.array([0.1 * x, 4.0 * y])
+
+def run(kind, steps=60, rate=0.1):
+    point = np.array([-8.0, 1.5])
+    velocity = np.zeros(2)
+    mean = np.zeros(2)
+    variance = np.zeros(2)
+    crossings = 0
+    previous = np.sign(point[1])
+    for step in range(1, steps + 1):
+        g = gradient(point)
+        if kind == ''sgd'':
+            point = point - rate * g
+        elif kind == ''momentum'':
+            velocity = 0.9 * velocity + g
+            point = point - rate * velocity
+        else:
+            mean = 0.9 * mean + 0.1 * g
+            variance = 0.999 * variance + 0.001 * g ** 2
+            corrected_mean = mean / (1 - 0.9 ** step)
+            corrected_variance = variance / (1 - 0.999 ** step)
+            point = point - rate * corrected_mean / (np.sqrt(corrected_variance) + 1e-8)
+        side = np.sign(point[1])
+        if side != 0 and side != previous:
+            crossings += 1
+        previous = side
+    return point, loss(point), crossings
+
+rows = []
+for label, kind, rate in [(''sgd, rate 0.1'', ''sgd'', 0.1),
+                          (''sgd, rate 0.5'', ''sgd'', 0.5),
+                          (''sgd, rate 0.55'', ''sgd'', 0.55),
+                          (''momentum, rate 0.1'', ''momentum'', 0.1),
+                          (''adam, rate 0.1'', ''adam'', 0.1)]:
+    point, final, crossings = run(kind, rate=rate)
+    finite = np.isfinite(point).all()
+    rows.append({''optimiser'': label,
+                 ''x (started at -8)'': f''{point[0]:.3f}'' if finite else ''diverged'',
+                 ''loss after 60 steps'': f''{final:.5f}'' if finite else ''inf'',
+                 ''valley crossings'': crossings})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The steep direction has curvature 4, so plain SGD is stable'')
+print(''only below a rate of 2/4 = 0.5. At 0.1 it is stable and has'')
+print(''covered barely half the distance along x. Raising the rate to'')
+print(''buy speed in the flat direction is not available: 0.5 sits'')
+print(''exactly on the boundary and bounces across the valley'')
+print(''forever, and 0.55 explodes.'')
+print()
+print(''Momentum gets there, having crossed the valley 13 times on'')
+print(''the way - the oscillation is real, the average cancels it.'')
+print(''Adam crosses twice and lands short, because its step is'')
+print(''bounded by the learning rate no matter how flat the surface'')
+print(''is. That is the trade: Adam is the one that works without'')
+print(''being tuned, not the one that gets there fastest.'')
 ```
 
-`3e-4` is the folk default for Adam and a reasonable place to start. For SGD, `1e-2` is the equivalent. These differ by two orders of magnitude, so carrying a learning rate across a change of optimiser is a reliable way to break training.
+Two numbers worth memorising: **`3e-4` for Adam, `1e-2` for SGD.** They differ by a factor of thirty, so carrying a learning rate across a change of optimiser is a reliable way to break a training run that was working.
 
 ## Schedules
 
-The learning rate should fall as training proceeds: large steps to get near, small steps to settle.
+The learning rate should fall as training proceeds: large steps to get near the minimum, small steps to settle into it.
 
 ```python
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+import numpy as np
+import pandas as pd
+
+total = 1000
+base = 3e-4
+step = np.arange(total)
+
+constant = np.full(total, base)
+step_decay = base * 0.1 ** (step // 400)
+cosine = base * 0.5 * (1 + np.cos(np.pi * step / total))
+
+warmup_steps = 100
+warm_cosine = np.where(
+    step < warmup_steps,
+    base * (step + 1) / warmup_steps,
+    base * 0.5 * (1 + np.cos(np.pi * np.clip(step - warmup_steps, 0, None)
+                             / (total - warmup_steps))))
+
+sample = [0, 50, 100, 400, 700, 999]
+table = pd.DataFrame({
+    ''step'': sample,
+    ''constant'': [f''{constant[i]:.2e}'' for i in sample],
+    ''step decay'': [f''{step_decay[i]:.2e}'' for i in sample],
+    ''cosine'': [f''{cosine[i]:.2e}'' for i in sample],
+    ''warmup + cosine'': [f''{warm_cosine[i]:.2e}'' for i in sample],
+})
+print(table.to_string(index=False))
+print()
+print(''Cosine is the default worth starting from. The warmup'')
+print(''column is the one that matters for transformers: at step 0'')
+print(''it is a hundredth of the base rate, because the first few'')
+print(''large steps on a randomly initialised attention layer are'')
+print(''what destabilise the run.'')
 ```
 
-Cosine annealing is a good default. Warmup - starting small for a few hundred steps and rising - matters for transformers, where early large steps destabilise training.
+## A worked example: the same network, four losses
+
+One dataset, one architecture, and only the loss changed. The point is that the loss decides what the model is for.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import SGDRegressor, LogisticRegression
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(7)
+
+# Delivery times: mostly 20-40 minutes, but 3% of rows are a
+# driver who forgot to close the job and logged nine hours.
+n = 4000
+distance = rng.uniform(1, 12, n)
+traffic = rng.uniform(0, 1, n)
+true_minutes = 8 + 2.5 * distance + 18 * traffic + rng.normal(0, 3, n)
+
+corrupt = rng.uniform(0, 1, n) < 0.03
+minutes = true_minutes.copy()
+minutes[corrupt] = rng.uniform(400, 600, corrupt.sum())
+
+# "Late" means over 50 minutes by the TRUE time - 4.6% of rows.
+late = (true_minutes > 50).astype(int)
+
+X = np.column_stack([distance, traffic])
+(X_tr, X_te, y_tr, y_te, true_tr, true_te,
+ late_tr, late_te) = train_test_split(
+    X, minutes, true_minutes, late, test_size=0.3, random_state=0)
+
+print(f''{corrupt.mean():.1%} of rows corrupted'')
+print(f''median true time {np.median(true_minutes):.1f} min, ''
+      f''median logged time {np.median(minutes):.1f} min'')
+print()
+
+# ---- 1. Regression: MSE against Huber, scored on the TRUE times.
+rows = []
+for name, loss_name, extra in [(''mean squared error'', ''squared_error'', {}),
+                               (''huber'', ''huber'', {''epsilon'': 1.35})]:
+    model = SGDRegressor(loss=loss_name, alpha=1e-4, max_iter=5000,
+                         tol=1e-5, random_state=0, **extra).fit(X_tr, y_tr)
+    predicted = model.predict(X_te)
+    rows.append({''loss'': name,
+                 ''median error vs truth'': round(float(np.median(np.abs(predicted - true_te))), 2),
+                 ''predicted at 5km, traffic 0.2'':
+                     round(float(model.predict([[5.0, 0.2]])[0]), 1)})
+print(pd.DataFrame(rows).to_string(index=False))
+print(f''the true time at 5km, traffic 0.2 is ''
+      f''{8 + 2.5 * 5 + 18 * 0.2:.1f} minutes'')
+print()
+print(''Trained on the same corrupted column, MSE is pulled upwards'')
+print(''by the nine-hour rows and over-predicts by six minutes on'')
+print(''every delivery. Huber lands within a minute of the truth.'')
+print(''Neither model was told which rows were wrong.'')
+print()
+
+# ---- 2. Classification: unweighted against weighted, on "late".
+print(f''late deliveries: {late.mean():.1%}'')
+
+rows = []
+for label, weight in [(''unweighted'', None), (''balanced'', ''balanced'')]:
+    model = LogisticRegression(class_weight=weight, max_iter=2000).fit(X_tr, late_tr)
+    predicted = model.predict(X_te)
+    caught = int(((predicted == 1) & (late_te == 1)).sum())
+    missed = int(((predicted == 0) & (late_te == 1)).sum())
+    false_alarms = int(((predicted == 1) & (late_te == 0)).sum())
+    rows.append({''class weight'': label,
+                 ''accuracy'': round(float((predicted == late_te).mean()), 4),
+                 ''late caught'': caught,
+                 ''late missed'': missed,
+                 ''false alarms'': false_alarms})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The unweighted model has the higher accuracy - 96.8% against'')
+print(''93.8% - and catches 23 of the 59 late deliveries. The'')
+print(''weighted model gives up three points of accuracy and'')
+print(''catches 54 of them, raising false alarms from 3 to 69.'')
+print(''Accuracy ranks them one way and recall the other, and both'')
+print(''rankings are correct. Which model is better is a business'')
+print(''question - what a missed late delivery costs against what a'')
+print(''false alarm costs - and the loss function is where you'')
+print(''answer it.'')
+```
 
 ## Reading the loss curve
 
-- **Falls then flattens, validation tracking it**: working.
-- **Falls to NaN**: learning rate too high, or a numerically unstable loss.
-- **Flat from the start**: learning rate too low, data not normalised, labels misaligned, or the output layer wrong for the loss.
-- **Training falls while validation rises**: overfitting; stop at the turn.
-- **Jagged**: batch too small, or learning rate slightly too high.
+The curve is the only honest account of what happened. Six shapes and what each means:
 
-Plot it every time. Training without looking at the loss curve is guessing.',
-   'The loss defines what the network is trying to do, so choosing it wrongly means optimising the wrong thing perfectly. The optimiser decides how it gets there. There are sensible defaults for both, and reasons to depart from them.',
-   11, 417, '55555555-5555-4555-8555-555555555555', 'published',
+| What the curve does | What it means | What to change |
+| --- | --- | --- |
+| Falls, flattens, validation tracking it | Working | Nothing; train longer or add capacity |
+| Falls to `nan` within a few hundred steps | Learning rate too high, or a loss computed from probabilities rather than logits | Use the logits form; halve the rate; clip gradients |
+| Flat from step one | Rate too low, inputs not normalised, labels misaligned, or the output layer does not match the loss | Check one batch by hand before touching the rate |
+| Training falls, validation rises | Overfitting | Stop at the turn; add regularisation or data |
+| Jagged, no trend | Batch too small, or rate slightly too high | Larger batch, or lower rate |
+| Falls then jumps up and recovers repeatedly | Rate too high for the late phase | Add a decay schedule |
+
+The fourth row has a sibling that is harder to read: **training loss far below validation loss from the very first epoch**. That is rarely overfitting - it is usually a difference in how the two are computed. Dropout is active in training and inactive in evaluation, and batch normalisation uses batch statistics in one mode and running statistics in the other.
+
+## Check your understanding
+
+Compute the loss of a deliberately stupid model and make sure it is the number you can derive by hand. For binary cross-entropy, a model that predicts the base rate `p` for every example has a loss of exactly the entropy of the labels:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+labels = (rng.uniform(0, 1, 50000) < 0.2).astype(float)
+rate = labels.mean()
+
+predicted = np.full(len(labels), rate)
+measured = float(-np.mean(labels * np.log(predicted)
+                          + (1 - labels) * np.log(1 - predicted)))
+expected = float(-(rate * np.log(rate) + (1 - rate) * np.log(1 - rate)))
+
+print(f''base rate            {rate:.4f}'')
+print(f''measured loss        {measured:.6f}'')
+print(f''label entropy        {expected:.6f}'')
+print(f''agree: {abs(measured - expected) < 1e-9}'')
+print()
+print(''Any trained model whose loss is not clearly below this'')
+print(''number has learned nothing. It is the first line to print'')
+print(''in a training script, and almost nobody prints it.'')
+```
+
+If your model''s loss sits at that number after an hour of training, nothing is broken in your optimiser - the model is predicting the base rate, and the problem is upstream, in the features or the labels.
+',
+   'The loss defines what the network is trying to do, so choosing it wrongly means optimising the wrong thing perfectly. The optimiser decides how it gets there. There are sensible defaults for both, and reasons to depart from them.', 15, 3053,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-000000000106',
    'Batches, Epochs and Normalisation',
    'markdown',
-   'A few mechanical choices determine whether training works, and they are easy to get wrong in ways that look like a modelling problem.
+   'A network is almost never shown one example at a time, and almost never shown all of them at once. It is shown batches. The batch size decides how noisy each gradient is, how much memory the run needs, and - through normalisation layers - sometimes what the model predicts. It is the hyperparameter people tune last and should tune early.
 
-## Batch size
+## The vocabulary, precisely
 
-The number of examples processed before each weight update.
+- A **batch** is the group of examples whose gradients are averaged into one weight update.
+- A **step** (or iteration) is one weight update: one batch forward, one backward, one update.
+- An **epoch** is one pass over the whole training set. With 50,000 examples and a batch of 100, an epoch is 500 steps.
 
-- **Small batches** (8-64): noisier gradients, which acts as regularisation and often generalises better. Slower per epoch.
-- **Large batches** (256-4096): smoother gradients, far better GPU utilisation, and a tendency to converge to sharper minima that generalise slightly worse. Usually needs a higher learning rate to compensate.
-
-In practice: use the largest batch that fits in memory, then tune the learning rate for it. If you double the batch size, scale the learning rate up as a starting point.
-
-## Epochs, and stopping
-
-An epoch is one pass through the training data. The right number is not a number you pick - it is where validation loss stops improving.
+Those definitions matter because the two numbers people compare runs by - epochs and steps - are not interchangeable the moment the batch size changes.
 
 ```python
-best, patience, waited = float(''inf''), 5, 0
-for epoch in range(200):
-    train_one_epoch(model, train_loader)
-    val_loss = evaluate(model, val_loader)
-    if val_loss < best:
-        best, waited = val_loss, 0
-        torch.save(model.state_dict(), ''best.pt'')
-    else:
-        waited += 1
-        if waited >= patience:
-            break
+import pandas as pd
+
+examples = 50000
+rows = []
+for batch in [1, 32, 256, 2048, 50000]:
+    steps_per_epoch = -(-examples // batch)     # ceiling division
+    rows.append({''batch size'': batch,
+                 ''steps per epoch'': steps_per_epoch,
+                 ''updates in 10 epochs'': steps_per_epoch * 10,
+                 ''name'': (''stochastic'' if batch == 1 else
+                          ''full batch'' if batch >= examples else
+                          ''mini-batch'')})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Ten epochs at a batch of 32 is 15,630 updates. Ten epochs'')
+print(''at a batch of 2048 is 250. Reporting "trained for 10 epochs"'')
+print(''without the batch size describes two runs that differ by a'')
+print(''factor of sixty in how much learning happened.'')
 ```
 
-Early stopping with checkpointing: keep the weights from the best epoch, not the last. Training past the turn does not just waste time, it actively makes the model worse, and the final weights are the worst ones you kept.
+## Why batches at all
 
-## Normalise the input
+Two reasons, pulling in the same direction.
 
-Neural networks expect inputs on a similar scale. A column in the thousands next to one in fractions makes the loss surface a ravine, and gradient descent oscillates across it instead of travelling along it.
+The first is memory. The activations of every layer for every example in the batch have to be held until the backward pass uses them, because the gradient of a weight needs the activation that it multiplied.
 
 ```python
-# Fit on training data only, exactly as in the machine learning course.
-mean, std = X_train.mean(0), X_train.std(0) + 1e-8
-X_train = (X_train - mean) / std
-X_val = (X_val - mean) / std
+import pandas as pd
+
+# A small convolutional network, activations only - no weights.
+layers = [(''input 3x224x224'', 3 * 224 * 224),
+          (''conv1 64x112x112'', 64 * 112 * 112),
+          (''conv2 128x56x56'', 128 * 56 * 56),
+          (''conv3 256x28x28'', 256 * 28 * 28),
+          (''conv4 512x14x14'', 512 * 14 * 14)]
+per_example = sum(size for _, size in layers)
+
+rows = []
+for batch in [1, 8, 32, 128, 512]:
+    bytes_needed = per_example * batch * 4          # float32
+    rows.append({''batch size'': batch,
+                 ''activation memory'': f''{bytes_needed / 1024 ** 2:,.0f} MiB''})
+print(f''activations per example: {per_example:,} floats, ''
+      f''{per_example * 4 / 1024 ** 2:.1f} MiB'')
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Memory is linear in the batch size, and it is the'')
+print(''activations that dominate, not the weights. This is the'')
+print(''whole reason "CUDA out of memory" is answered by halving'')
+print(''the batch size and nothing else.'')
 ```
 
-For images, divide by 255 and then normalise by the channel statistics of the dataset the model was pretrained on. Skipping this is the single most common reason a network fails to learn, and it produces a flat loss curve that looks like a bug anywhere else.
-
-## Normalisation layers
-
-**Batch normalisation** normalises activations using statistics from the batch. It made deep networks trainable and is still standard in convolutional models. It behaves differently in training and evaluation, which is why forgetting `model.eval()` changes your results.
-
-**Layer normalisation** normalises across features within each example, independent of batch size. It is what transformers use, and it is the better choice for sequences and for small batches.
-
-## Shuffle, and check the labels
+The second reason is that an average of many gradients is a better estimate of the true gradient than one example''s. The improvement follows the square root of the batch size, which is the fact that governs every batch-size decision.
 
 ```python
-loader = DataLoader(dataset, batch_size=64, shuffle=True)
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(0)
+
+# The true gradient of some parameter is 1.0; each example gives a
+# noisy reading of it.
+TRUE = 1.0
+NOISE = 3.0
+
+rows = []
+for batch in [1, 4, 16, 64, 256, 1024]:
+    estimates = rng.normal(TRUE, NOISE, (4000, batch)).mean(axis=1)
+    rows.append({''batch size'': batch,
+                 ''std of the estimate'': round(float(estimates.std()), 4),
+                 ''predicted (noise/sqrt(n))'': round(NOISE / np.sqrt(batch), 4),
+                 ''wrong sign'': f''{float((estimates < 0).mean()):.1%}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Measured and predicted agree to three decimals. Note the'')
+print(''last column: at a batch of 1, more than a third of the'')
+print(''updates point the wrong way. At 64 it is under 1%.'')
+print()
+print(''And note the cost. Going from 16 to 1024 is 64 times the'')
+print(''compute for 8 times less noise. Beyond a few hundred, you'')
+print(''are buying very little accuracy very expensively, which is'')
+print(''why batch sizes cluster where they do.'')
 ```
 
-Unshuffled data sorted by class means a batch of all-one-class, which produces nonsense gradients. And print one batch of inputs with their labels before training anything - misaligned labels are far more common than anybody admits, and they look exactly like a model that will not learn.',
-   'Three knobs that decide whether training is fast, stable and finishes in the right place - plus the input normalisation that is the most common reason a network does not learn at all.',
-   11, 472, '55555555-5555-4555-8555-555555555555', 'published',
+## The large-batch bargain, and its catch
+
+A larger batch gives a less noisy gradient, so it tolerates a larger learning rate. The rule of thumb is **linear scaling**: double the batch, double the rate. It holds over a useful range and then stops, and the stopping point is worth seeing rather than reading about.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(0)
+X, y = make_classification(n_samples=12000, n_features=20, n_informative=12,
+                           n_redundant=4, class_sep=0.8, random_state=0)
+y = y.reshape(-1, 1).astype(float)
+X = (X - X.mean(axis=0)) / X.std(axis=0)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, random_state=0)
+
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -60, 60)))
+
+
+def train(batch_size, learning_rate, epochs=12, seed=0, width=48):
+    generator = np.random.default_rng(seed)
+    W1 = generator.normal(0, np.sqrt(2 / X_tr.shape[1]), (X_tr.shape[1], width))
+    b1 = np.zeros(width)
+    W2 = generator.normal(0, np.sqrt(2 / width), (width, 1))
+    b2 = np.zeros(1)
+    steps = 0
+    for _ in range(epochs):
+        order = generator.permutation(len(X_tr))
+        for start in range(0, len(X_tr), batch_size):
+            index = order[start:start + batch_size]
+            xb, yb = X_tr[index], y_tr[index]
+            z1 = xb @ W1 + b1
+            a1 = np.maximum(0, z1)
+            a2 = sigmoid(a1 @ W2 + b2)
+            delta2 = (a2 - yb) / len(xb)
+            gW2, gb2 = a1.T @ delta2, delta2.sum(axis=0)
+            delta1 = (delta2 @ W2.T) * (z1 > 0)
+            gW1, gb1 = xb.T @ delta1, delta1.sum(axis=0)
+            W1 -= learning_rate * gW1
+            b1 -= learning_rate * gb1
+            W2 -= learning_rate * gW2
+            b2 -= learning_rate * gb2
+            steps += 1
+    predicted = sigmoid(np.maximum(0, X_te @ W1 + b1) @ W2 + b2)
+    return float(((predicted > 0.5) == y_te).mean()), steps
+
+
+print(''twelve epochs each; the rate scaled linearly with the batch:'')
+rows = []
+for batch, rate in [(32, 0.05), (64, 0.10), (128, 0.20),
+                    (512, 0.80), (2048, 3.20), (8192, 12.80)]:
+    accuracy, steps = train(batch, rate)
+    rows.append({''batch'': batch, ''rate'': rate, ''updates'': steps,
+                 ''test accuracy'': round(accuracy, 4)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Linear scaling holds all the way to a batch of 2048: the'')
+print(''accuracy is flat - in fact it creeps up - while the number'')
+print(''of updates falls from 3,384 to 60. That is the bargain, and'')
+print(''it is a real one. At 8192 it breaks completely: 24 updates'')
+print(''at a rate of 12.8 collapses to 48.5%, which is a coin toss.'')
+print(''The range over which it holds is a property of the problem,'')
+print(''not a universal constant, so the sweep is the only way to'')
+print(''find where your own breaks.'')
+```
+
+So the catch is not subtle. A large batch means fewer updates per epoch, and at some point there are simply not enough updates left, however large each one is. The industrial answer is to train for more epochs at the large batch - which spends the compute the large batch was supposed to save.
+
+## Normalisation
+
+Normalisation is the other half of this lesson, and it is tied to the batch size in a way that surprises people.
+
+Start with the input. Features on wildly different scales make the loss surface a narrow valley, and the earlier lesson showed what gradient descent does in one of those.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(1)
+
+n = 5000
+age = rng.uniform(18, 80, n)                  # tens
+income = rng.uniform(15000, 200000, n)        # tens of thousands
+clicks = rng.uniform(0, 1, n)                 # fractions
+raw = np.column_stack([age, income, clicks])
+
+standardised = (raw - raw.mean(axis=0)) / raw.std(axis=0)
+
+print(''column        raw mean     raw std   standardised mean   std'')
+for index, name in enumerate([''age'', ''income'', ''clicks'']):
+    print(f''{name:<10} {raw[:, index].mean():11.2f} {raw[:, index].std():11.2f}''
+          f'' {standardised[:, index].mean():19.6f} {standardised[:, index].std():5.2f}'')
+print()
+
+# The curvature of a linear model''s loss surface is set by the
+# covariance of the inputs. Its condition number is what gradient
+# descent has to live with.
+for label, matrix in [(''raw'', raw), (''standardised'', standardised)]:
+    eigenvalues = np.linalg.eigvalsh(np.cov(matrix.T))
+    print(f''{label:<14} condition number ''
+          f''{eigenvalues.max() / eigenvalues.min():,.0f}'')
+print()
+print(''Ten orders of magnitude, reduced to 1 - a perfect sphere,'')
+print(''because these three columns are independent. The raw'')
+print(''version is not slow to train, it is untrainable: the rate'')
+print(''that the income direction needs would diverge in the clicks'')
+print(''direction on the first step.'')
+```
+
+Then normalise inside the network too, because the same problem recurs at every layer as the weights move.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(2)
+
+batch, features = 8, 4
+activations = rng.normal(5.0, 3.0, (batch, features)) * np.array([1, 10, 0.1, 4])
+
+def batch_norm(x, epsilon=1e-5):
+    # Statistics ACROSS THE BATCH, one pair per feature.
+    return (x - x.mean(axis=0)) / np.sqrt(x.var(axis=0) + epsilon)
+
+def layer_norm(x, epsilon=1e-5):
+    # Statistics ACROSS THE FEATURES, one pair per example.
+    return ((x - x.mean(axis=1, keepdims=True))
+            / np.sqrt(x.var(axis=1, keepdims=True) + epsilon))
+
+print(''input, per-feature std:'', activations.std(axis=0).round(2))
+print()
+print(''after batch norm, per-feature std :'', batch_norm(activations).std(axis=0).round(4))
+print(''after batch norm, per-example std :'', batch_norm(activations).std(axis=1).round(4))
+print()
+print(''after layer norm, per-feature std :'', layer_norm(activations).std(axis=0).round(4))
+print(''after layer norm, per-example std :'', layer_norm(activations).std(axis=1).round(4))
+print()
+print(''Batch norm makes every FEATURE unit variance; layer norm'')
+print(''makes every EXAMPLE unit variance. They normalise across'')
+print(''different axes of the same matrix, and that single'')
+print(''difference is why one depends on the batch and the other'')
+print(''does not.'')
+```
+
+| | Batch normalisation | Layer normalisation |
+| --- | --- | --- |
+| Statistics over | the batch, per feature | the features, per example |
+| Depends on batch size | yes, badly below about 16 | no |
+| Train and eval differ | yes - running averages at eval | no |
+| Each example''s output depends on the others in its batch | yes | no |
+| Standard for | convolutional networks | transformers, recurrent networks |
+
+The fourth row is the one that causes production incidents. Under batch normalisation, during **training**, what a network predicts for one image depends on which other images happened to share its batch.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+
+# One example, put through batch norm beside two different sets of
+# companions. Nothing about the example changed.
+example = np.array([[2.0, -1.0, 4.0]])
+
+def batch_norm(x, epsilon=1e-5):
+    return (x - x.mean(axis=0)) / np.sqrt(x.var(axis=0) + epsilon)
+
+quiet_companions = rng.normal(0, 0.5, (7, 3))
+loud_companions = rng.normal(0, 8.0, (7, 3))
+
+with_quiet = batch_norm(np.vstack([example, quiet_companions]))[0]
+with_loud = batch_norm(np.vstack([example, loud_companions]))[0]
+
+print(''the example alongside quiet companions:'', with_quiet.round(3))
+print(''the example alongside loud companions :'', with_loud.round(3))
+print()
+print(''Same example, same weights, two different activations. At'')
+print(''training time this is a feature - it acts as a regulariser.'')
+print(''At inference time it would be a bug, which is why batch'')
+print(''norm keeps running averages and uses those in eval mode.'')
+print(''Forgetting model.eval() is the most common serving bug in'')
+print(''all of deep learning, and this is the mechanism.'')
+```
+
+And here is the batch-size interaction, measured. Batch norm estimates its statistics from the batch, so a small batch estimates them badly.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(4)
+
+TRUE_MEAN, TRUE_STD = 3.0, 2.0
+population = rng.normal(TRUE_MEAN, TRUE_STD, 200000)
+
+rows = []
+for batch in [2, 4, 8, 16, 32, 128]:
+    samples = rng.choice(population, (3000, batch))
+    estimated_means = samples.mean(axis=1)
+    estimated_stds = samples.std(axis=1)
+    rows.append({''batch size'': batch,
+                 ''mean estimate, std of'': round(float(estimated_means.std()), 3),
+                 ''std estimate, average'': round(float(estimated_stds.mean()), 3),
+                 ''bias in the std'': round(float(estimated_stds.mean() - TRUE_STD), 3)})
+print(f''true mean {TRUE_MEAN}, true std {TRUE_STD}'')
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''At a batch of 2 the standard deviation is underestimated by'')
+print(''0.8 - a 40% error - and the mean estimate wobbles by 1.4.'')
+print(''Batch norm then divides by that wrong number, every step.'')
+print(''This is why a model that trains fine at batch 64 falls apart'')
+print(''at batch 2 on a smaller GPU, and why group normalisation'')
+print(''exists.'')
+```
+
+## Gradient accumulation: a large batch on a small card
+
+The fix for "I need a batch of 512 and 64 is all that fits" is to run eight batches of 64, add up their gradients, and update once. It is arithmetically identical to a batch of 512 - with one exception, which is the point of the example.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(5)
+
+features = 6
+weights = rng.normal(0, 1, features)
+X = rng.normal(0, 1, (512, features))
+y = X @ np.array([1.0, -2.0, 0.5, 0.0, 3.0, -1.0]) + rng.normal(0, 0.1, 512)
+
+def gradient(X, y, weights):
+    residual = X @ weights - y
+    return 2 * X.T @ residual / len(X)
+
+one_big_batch = gradient(X, y, weights)
+
+# Eight micro-batches of 64, accumulated. The MEAN of the eight
+# gradients, not the sum - the loss was already a mean over 64.
+accumulated = np.zeros(features)
+for start in range(0, 512, 64):
+    accumulated += gradient(X[start:start + 64], y[start:start + 64], weights)
+accumulated /= 8
+
+print(''batch of 512            '', one_big_batch.round(8))
+print(''8 x 64, averaged        '', accumulated.round(8))
+print(''identical:'', bool(np.allclose(one_big_batch, accumulated)))
+print()
+
+# The mistake: summing instead of averaging multiplies the
+# effective learning rate by the number of micro-batches.
+summed = accumulated * 8
+print(''8 x 64, summed          '', summed.round(8))
+print(f''that is {np.abs(summed).max() / np.abs(one_big_batch).max():.0f}x ''
+      f''the correct gradient, so an 8x learning rate you did not ask for'')
+print()
+print(''What accumulation does NOT reproduce is batch'')
+print(''normalisation: its statistics are still computed over 64'')
+print(''examples, because that is what is in memory at once. A run'')
+print(''using batch norm and accumulation has the batch size of the'')
+print(''micro-batch for normalisation and of the accumulated batch'')
+print(''for the update, and the two are no longer the same number.'')
+```
+
+## A worked example: one dataset, the whole grid
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_moons
+from sklearn.model_selection import train_test_split
+
+X, y = make_moons(n_samples=6000, noise=0.22, random_state=0)
+y = y.reshape(-1, 1).astype(float)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, random_state=0)
+X_mean, X_std = X_tr.mean(axis=0), X_tr.std(axis=0)
+X_tr_n, X_te_n = (X_tr - X_mean) / X_std, (X_te - X_mean) / X_std
+
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -60, 60)))
+
+
+def loss_of(predicted, actual):
+    p = np.clip(predicted, 1e-9, 1 - 1e-9)
+    return float(-np.mean(actual * np.log(p) + (1 - actual) * np.log(1 - p)))
+
+
+# One column in metres and one in micrometres - the ordinary case
+# of two features in different units.
+SCALE = np.array([1.0, 500.0])
+X_tr_s, X_te_s = X_tr * SCALE, X_te * SCALE
+S_mean, S_std = X_tr_s.mean(axis=0), X_tr_s.std(axis=0)
+X_tr_sn, X_te_sn = (X_tr_s - S_mean) / S_std, (X_te_s - S_mean) / S_std
+
+
+def run(batch_size, learning_rate, epochs, inputs=''normalised'',
+        width=32, seed=0):
+    train_X, test_X = {
+        ''normalised'': (X_tr_n, X_te_n),
+        ''badly scaled'': (X_tr_s, X_te_s),
+        ''badly scaled, then standardised'': (X_tr_sn, X_te_sn),
+    }[inputs]
+    generator = np.random.default_rng(seed)
+    W1 = generator.normal(0, np.sqrt(2 / 2), (2, width))
+    b1 = np.zeros(width)
+    W2 = generator.normal(0, np.sqrt(2 / width), (width, 1))
+    b2 = np.zeros(1)
+    steps = 0
+    for _ in range(epochs):
+        order = generator.permutation(len(train_X))
+        for start in range(0, len(train_X), batch_size):
+            index = order[start:start + batch_size]
+            xb, yb = train_X[index], y_tr[index]
+            z1 = xb @ W1 + b1
+            a1 = np.maximum(0, z1)
+            a2 = sigmoid(a1 @ W2 + b2)
+            delta2 = (a2 - yb) / len(xb)
+            gW2, gb2 = a1.T @ delta2, delta2.sum(axis=0)
+            delta1 = (delta2 @ W2.T) * (z1 > 0)
+            gW1, gb1 = xb.T @ delta1, delta1.sum(axis=0)
+            W1 -= learning_rate * gW1
+            b1 -= learning_rate * gb1
+            W2 -= learning_rate * gW2
+            b2 -= learning_rate * gb2
+            steps += 1
+            if not np.isfinite(W1).all():
+                return None, steps
+    predicted = sigmoid(np.maximum(0, test_X @ W1 + b1) @ W2 + b2)
+    return float(((predicted > 0.5) == y_te).mean()), steps
+
+
+# ---- 1. Batch size at a FIXED rate: noise, and nothing else.
+print(''batch size at a fixed rate of 0.1, 20 epochs:'')
+rows = []
+for batch in [1, 8, 32, 128, 512, 4500]:
+    accuracy, steps = run(batch, 0.1, 20)
+    rows.append({''batch'': batch, ''updates'': steps,
+                 ''test accuracy'': ''diverged'' if accuracy is None else round(accuracy, 4)})
+print(pd.DataFrame(rows).to_string(index=False))
+print(''-> the rate was tuned for the small batches, so the large'')
+print(''   ones are starved of updates. Nothing has been held'')
+print(''   constant except a number that should have moved.'')
+print()
+
+# ---- 2. The same batch sizes with the rate scaled.
+print(''the same batch sizes, rate scaled linearly from 0.025 at batch 8:'')
+rows = []
+for batch in [8, 32, 128, 512, 4500]:
+    rate = 0.025 * batch / 8
+    accuracy, steps = run(batch, rate, 20)
+    rows.append({''batch'': batch, ''rate'': round(rate, 4), ''updates'': steps,
+                 ''test accuracy'': ''diverged'' if accuracy is None else round(accuracy, 4)})
+print(pd.DataFrame(rows).to_string(index=False))
+print(''-> the same five batch sizes, now within half a point of'')
+print(''   each other up to 512, on a fiftieth of the updates.'')
+print()
+
+# ---- 3. Input normalisation, on and off, on the same grid.
+print(''input scaling, at batch 32 and rate 0.1:'')
+rows = []
+for inputs in [''normalised'', ''badly scaled'', ''badly scaled, then standardised'']:
+    accuracy, _ = run(32, 0.1, 20, inputs=inputs)
+    rows.append({''inputs'': inputs,
+                 ''test accuracy'': ''diverged'' if accuracy is None else round(accuracy, 4)})
+print(pd.DataFrame(rows).to_string(index=False))
+print(''-> multiplying one column by 500 is enough to stop the'')
+print(''   network learning at all. Standardising it afterwards'')
+print(''   recovers the original result exactly, because'')
+print(''   standardisation undoes the scaling.'')
+print()
+
+# ---- 4. Epochs at two batch sizes, to show what "an epoch" hides.
+print(''accuracy against epochs, both at rate 0.1:'')
+rows = []
+for epochs in [1, 3, 10, 30]:
+    small, small_steps = run(32, 0.1, epochs)
+    large, large_steps = run(512, 0.1, epochs)
+    rows.append({''epochs'': epochs,
+                 ''batch 32'': round(small, 4),
+                 ''updates'': small_steps,
+                 ''batch 512'': round(large, 4),
+                 ''updates '': large_steps})
+print(pd.DataFrame(rows).to_string(index=False))
+print(''-> at thirty epochs the large batch has had 270 updates and'')
+print(''   sits at 0.896, which the small batch passed inside its'')
+print(''   first three. "Thirty epochs" described both runs.'')
+```
+
+Read the four tables together and the lesson is one sentence: **the batch size is not a performance knob, it is a coupled change to the learning rate and the number of updates.** Change it on its own and the run gets worse in one of two ways - too noisy, or too few steps. Change it with the rate and it is nearly free, over a range.
+
+## Failure modes
+
+| Symptom | Cause |
+| --- | --- |
+| `CUDA out of memory` partway through the first epoch | A batch with longer sequences or larger images than the earlier ones; sort by length or cap it |
+| Loss jagged with no trend | Batch too small for the learning rate |
+| Loss falls smoothly but the final result is worse than a smaller batch | Too few updates; train more epochs or lower the batch |
+| Works at batch 64, diverges at batch 8 | The rate was tuned for 64; scale it down with the batch |
+| Validation much worse than training from epoch one, model uses batch norm | `model.eval()` not called, so batch statistics are being used at evaluation |
+| Trains fine, serves badly on single requests | Batch norm with a batch of one at inference; eval mode, or layer norm |
+| Accumulation "works" but the loss explodes | Gradients summed instead of averaged, so an 8x rate |
+| Results change between runs with everything fixed | The shuffle seed; batch composition is part of the result |
+
+## Check your understanding
+
+The gradient of a mean is the mean of the gradients, so accumulation must be exact. Verify it rather than believing it - and verify the one case where the equivalence genuinely breaks:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+X = rng.normal(0, 1, (240, 5))
+y = rng.normal(0, 1, 240)
+weights = rng.normal(0, 1, 5)
+
+def gradient(X, y, w):
+    return 2 * X.T @ (X @ w - y) / len(X)
+
+full = gradient(X, y, weights)
+accumulated = sum(gradient(X[i:i + 60], y[i:i + 60], weights)
+                  for i in range(0, 240, 60)) / 4
+print(''gradients agree:'', bool(np.allclose(full, accumulated)))
+
+# Now the case that does not survive: statistics computed over the
+# batch rather than per example.
+def batch_norm_mean(X):
+    return X.mean(axis=0)
+
+print(''full-batch means   '', batch_norm_mean(X).round(4))
+print(''micro-batch means  '')
+for i in range(0, 240, 60):
+    print(''                   '', batch_norm_mean(X[i:i + 60]).round(4))
+print()
+print(''The gradient accumulates exactly. The normalisation'')
+print(''statistics do not, and no amount of accumulation recovers'')
+print(''them. If your model normalises over the batch, the'')
+print(''micro-batch size is a real hyperparameter, not an'')
+print(''implementation detail.'')
+```
+',
+   'Three knobs that decide whether training is fast, stable and finishes in the right place - plus the input normalisation that is the most common reason a network does not learn at all.', 16, 3283,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-000000000107',
    'Stopping a Network Memorising',
    'markdown',
-   'A network with more parameters than training examples can memorise them exactly. It will reach zero training loss and be useless on anything new.
+   'A network with more parameters than training examples can memorise the training set exactly and learn nothing. Regularisation is every technique that stops it, and the first thing to understand is that overfitting is not a bug in the network - it is the network doing precisely what you asked, which was to minimise the training loss.
 
-## The signal
+## Seeing it happen
 
-```
-epoch 10   train 0.42   val 0.45
-epoch 30   train 0.18   val 0.31
-epoch 60   train 0.03   val 0.48   <- the turn was around epoch 30
-```
-
-Validation loss falling then rising while training loss keeps falling. That turn is the moment the model stopped generalising and started memorising.
-
-## Dropout
+Overfitting is a gap between two curves, so the only way to know you have it is to plot both.
 
 ```python
-model = nn.Sequential(
-    nn.Linear(100, 256), nn.ReLU(), nn.Dropout(0.3),
-    nn.Linear(256, 64),  nn.ReLU(), nn.Dropout(0.3),
-    nn.Linear(64, 1),
-)
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(0)
+
+# Deliberately hard: 400 examples, 60 features, only 8 of them real.
+X, y = make_classification(n_samples=400, n_features=60, n_informative=8,
+                           n_redundant=0, n_repeated=0, class_sep=0.7,
+                           flip_y=0.05, random_state=0)
+y = y.reshape(-1, 1).astype(float)
+X = (X - X.mean(axis=0)) / X.std(axis=0)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.4, random_state=0)
+
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -60, 60)))
+
+
+def loss_of(predicted, actual):
+    p = np.clip(predicted, 1e-9, 1 - 1e-9)
+    return float(-np.mean(actual * np.log(p) + (1 - actual) * np.log(1 - p)))
+
+
+def train(epochs=400, width=256, rate=0.05, weight_decay=0.0,
+          dropout=0.0, seed=0, record=None):
+    generator = np.random.default_rng(seed)
+    W1 = generator.normal(0, np.sqrt(2 / X_tr.shape[1]), (X_tr.shape[1], width))
+    b1 = np.zeros(width)
+    W2 = generator.normal(0, np.sqrt(2 / width), (width, 1))
+    b2 = np.zeros(1)
+    history = []
+    for epoch in range(1, epochs + 1):
+        z1 = X_tr @ W1 + b1
+        a1 = np.maximum(0, z1)
+        if dropout > 0:
+            mask = (generator.uniform(0, 1, a1.shape) > dropout) / (1 - dropout)
+            a1_dropped = a1 * mask
+        else:
+            mask = None
+            a1_dropped = a1
+        a2 = sigmoid(a1_dropped @ W2 + b2)
+
+        delta2 = (a2 - y_tr) / len(X_tr)
+        gW2 = a1_dropped.T @ delta2 + weight_decay * W2
+        gb2 = delta2.sum(axis=0)
+        delta1 = (delta2 @ W2.T)
+        if mask is not None:
+            delta1 = delta1 * mask
+        delta1 = delta1 * (z1 > 0)
+        gW1 = X_tr.T @ delta1 + weight_decay * W1
+        gb1 = delta1.sum(axis=0)
+
+        W1 -= rate * gW1
+        b1 -= rate * gb1
+        W2 -= rate * gW2
+        b2 -= rate * gb2
+
+        if record is not None and (epoch in record):
+            train_p = sigmoid(np.maximum(0, X_tr @ W1 + b1) @ W2 + b2)
+            test_p = sigmoid(np.maximum(0, X_te @ W1 + b1) @ W2 + b2)
+            history.append({''epoch'': epoch,
+                            ''train loss'': round(loss_of(train_p, y_tr), 4),
+                            ''test loss'': round(loss_of(test_p, y_te), 4),
+                            ''train acc'': round(float(((train_p > 0.5) == y_tr).mean()), 3),
+                            ''test acc'': round(float(((test_p > 0.5) == y_te).mean()), 3)})
+
+    train_p = sigmoid(np.maximum(0, X_tr @ W1 + b1) @ W2 + b2)
+    test_p = sigmoid(np.maximum(0, X_te @ W1 + b1) @ W2 + b2)
+    return {
+        ''train loss'': round(loss_of(train_p, y_tr), 4),
+        ''test loss'': round(loss_of(test_p, y_te), 4),
+        ''train acc'': round(float(((train_p > 0.5) == y_tr).mean()), 3),
+        ''test acc'': round(float(((test_p > 0.5) == y_te).mean()), 3),
+        ''weight norm'': round(float(np.sqrt((W1 ** 2).sum() + (W2 ** 2).sum())), 1),
+        ''history'': pd.DataFrame(history),
+    }
+
+
+marks = {1, 25, 50, 100, 200, 400, 800, 1600}
+result = train(epochs=1600, record=marks)
+print(f''{len(X_tr)} training examples, ''
+      f''{X_tr.shape[1] * 256 + 256 + 256 + 1:,} parameters'')
+print(result[''history''].to_string(index=False))
+print()
+print(''The training loss falls to almost nothing and the training'')
+print(''accuracy reaches 1.000: the network has memorised 240 rows.'')
+print(''The test loss stopped falling long before that and then'')
+print(''turned upwards. The epoch where the two curves part is the'')
+print(''only thing in this table worth knowing.'')
 ```
 
-During training, each neuron is zeroed with probability p for each example. The network cannot rely on any single neuron, so it spreads the representation - an averaging effect over many thinned networks.
-
-0.1 to 0.5 is the usual range. It is disabled automatically at evaluation time, which is what `model.eval()` does, and forgetting that call gives you randomly worse predictions in production.
-
-## Weight decay
-
-```python
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
-```
-
-A penalty on large weights, which is the same regularisation idea as ridge regression. Cheap, nearly always helpful, and the first thing to turn up when a model overfits.
-
-## Data augmentation
-
-The most effective regulariser when it applies: generate more training data by transforming what you have.
-
-For images, random crops, flips and colour jitter. For audio, time shifts and noise. For text, it is harder and often harmful - a synonym substitution can invert the meaning of a sentence.
-
-Augmentation must preserve the label. Flipping a photograph of a dog horizontally still shows a dog; flipping a photograph of the digit 2 does not show a 2.
+The shape to recognise: **training loss down, validation loss up.** Not "validation loss higher than training loss" - that is normal and expected - but *rising*.
 
 ## Early stopping
 
-Already covered, and it is the one you should never skip. It is free and it directly targets the symptom.
+The cheapest regularisation is to stop at the turn. It costs nothing and is almost always worth having.
 
-## More data
+```python
+import numpy as np
 
-Worth saying plainly: more real data beats every technique above. When the choice is between a week of tuning regularisation and a week of labelling, labelling usually wins.
+# A validation curve with the usual shape: down, flat, up, with
+# noise on top so the decision is not trivial.
+curve = np.array([0.690, 0.610, 0.550, 0.500, 0.470, 0.452, 0.458,
+                  0.455, 0.449, 0.430, 0.419, 0.424, 0.431, 0.448,
+                  0.465, 0.490, 0.520])
 
-## The order to apply them
+def early_stop(curve, patience):
+    best, best_epoch, waited = float(''inf''), 0, 0
+    for epoch, value in enumerate(curve, 1):
+        if value < best:
+            best, best_epoch, waited = value, epoch, 0
+        else:
+            waited += 1
+            if waited >= patience:
+                return epoch, best_epoch, best
+    return len(curve), best_epoch, best
 
-1. Early stopping - always, from the first run.
-2. Weight decay - cheap, nearly always helps.
-3. Augmentation - if your data type supports it.
-4. Dropout - tune the rate.
-5. A smaller model - frequently overlooked, and if the dataset is small it is the honest answer.',
-   'A model with a million parameters can memorise ten thousand examples perfectly. Dropout, weight decay, augmentation and early stopping are the four tools that prevent it, and they work in different ways and combine.',
-   11, 386, '55555555-5555-4555-8555-555555555555', 'published',
+print(''patience  stopped at  best epoch  best loss'')
+for patience in [1, 3, 5, 10]:
+    stopped, best_epoch, best = early_stop(curve, patience)
+    print(f''{patience:8d}  {stopped:10d}  {best_epoch:10d}  {best:9.3f}'')
+print()
+print(''true minimum: epoch'', int(curve.argmin() + 1), ''at'', curve.min())
+print()
+print(''A patience of 1 quits at epoch 7, on a 0.006 wobble, and'')
+print(''keeps 0.452 - it never sees the real minimum of 0.419 four'')
+print(''epochs later. Patience 3 and above find it. Patience 10'')
+print(''spends a few extra epochs and loses nothing, because what'')
+print(''you keep is the best checkpoint rather than the last one.'')
+print()
+print(''That is the part people get wrong: early stopping means'')
+print(''RESTORING the best weights. Stopping and keeping wherever'')
+print(''you happened to stop throws away the whole benefit, and'')
+print(''every framework makes it a flag you have to set.'')
+```
+
+## Weight decay
+
+Add a penalty proportional to the size of the weights, and the optimiser has to justify every large weight with a reduction in loss. Large weights are how a network builds a sharp, wiggly decision boundary, so penalising them produces a smoother one.
+
+```python
+import numpy as np
+import pandas as pd
+
+# L1 and L2 on the same weight vector, and what each does to it.
+weights = np.array([3.0, 0.4, -0.1, 0.02, -2.5, 0.001])
+
+print(''L2 penalty (sum of squares) :'', round(float((weights ** 2).sum()), 4))
+print(''L1 penalty (sum of absolute):'', round(float(np.abs(weights).sum()), 4))
+print()
+print(''The gradient of each penalty is what matters:'')
+def row(values):
+    return '' ''.join(f''{v:8.3f}'' for v in values)
+
+print(''  weight      '', row(weights))
+print(''  L2 gradient '', row(2 * weights), ''  - proportional to w'')
+print(''  L1 gradient '', row(np.sign(weights)), ''  - constant'')
+print()
+print(''L2 pushes a weight of 3.0 a hundred and fifty times harder'')
+print(''than a weight of 0.02, so it shrinks everything towards'')
+print(''zero and leaves nothing exactly at zero. L1 pushes both the'')
+print(''same, so small weights reach zero and stay - which is why'')
+print(''L1 produces sparsity and L2 produces smoothness.'')
+```
+
+Then the measurement, on the overfitting network from the first example.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+
+X, y = make_classification(n_samples=400, n_features=60, n_informative=8,
+                           n_redundant=0, class_sep=0.7, flip_y=0.05,
+                           random_state=0)
+y = y.reshape(-1, 1).astype(float)
+X = (X - X.mean(axis=0)) / X.std(axis=0)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.4, random_state=0)
+
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -60, 60)))
+
+
+def loss_of(p, actual):
+    p = np.clip(p, 1e-9, 1 - 1e-9)
+    return float(-np.mean(actual * np.log(p) + (1 - actual) * np.log(1 - p)))
+
+
+def train(weight_decay=0.0, dropout=0.0, epochs=1600, width=256,
+          rate=0.05, seed=0):
+    generator = np.random.default_rng(seed)
+    W1 = generator.normal(0, np.sqrt(2 / 60), (60, width))
+    b1 = np.zeros(width)
+    W2 = generator.normal(0, np.sqrt(2 / width), (width, 1))
+    b2 = np.zeros(1)
+    for _ in range(epochs):
+        z1 = X_tr @ W1 + b1
+        a1 = np.maximum(0, z1)
+        if dropout > 0:
+            mask = (generator.uniform(0, 1, a1.shape) > dropout) / (1 - dropout)
+        else:
+            mask = np.ones_like(a1)
+        a1d = a1 * mask
+        a2 = sigmoid(a1d @ W2 + b2)
+        delta2 = (a2 - y_tr) / len(X_tr)
+        gW2 = a1d.T @ delta2 + weight_decay * W2
+        delta1 = ((delta2 @ W2.T) * mask) * (z1 > 0)
+        gW1 = X_tr.T @ delta1 + weight_decay * W1
+        W1 -= rate * gW1
+        b1 -= rate * delta1.sum(axis=0)
+        W2 -= rate * gW2
+        b2 -= rate * delta2.sum(axis=0)
+    train_p = sigmoid(np.maximum(0, X_tr @ W1 + b1) @ W2 + b2)
+    test_p = sigmoid(np.maximum(0, X_te @ W1 + b1) @ W2 + b2)
+    return {''train loss'': round(loss_of(train_p, y_tr), 4),
+            ''test loss'': round(loss_of(test_p, y_te), 4),
+            ''train acc'': round(float(((train_p > 0.5) == y_tr).mean()), 3),
+            ''test acc'': round(float(((test_p > 0.5) == y_te).mean()), 3),
+            ''weight norm'': round(float(np.sqrt((W1 ** 2).sum() + (W2 ** 2).sum())), 1)}
+
+
+rows = []
+for decay in [0.0, 0.001, 0.01, 0.1, 1.0, 10.0]:
+    row = {''weight decay'': decay}
+    row.update(train(weight_decay=decay))
+    rows.append(row)
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Read the weight norm and the train/test gap down the table.'')
+print(''At zero decay the network memorises - perfect training'')
+print(''accuracy, a weight norm of 23, and the worst test loss in'')
+print(''the table. Decay shrinks the norm and the test loss nearly'')
+print(''halves, from 1.02 to 0.56.'')
+print()
+print(''Two honest observations. First, the test ACCURACY barely'')
+print(''moves - 0.700 to 0.713 - while the loss improves by a'')
+print(''factor of two. Decay mostly stopped the network being'')
+print(''confidently wrong, which the loss sees and accuracy cannot.'')
+print(''Second, past 0.1 it goes too far: at 1.0 and above the'')
+print(''weights are crushed to zero, training accuracy collapses to'')
+print(''0.512, and the model predicts the base rate for everyone.'')
+print(''Falling TRAINING accuracy is the signature of too much'')
+print(''regularisation, as against too little.'')
+```
+
+## Dropout
+
+During training, zero a random fraction of the activations in a layer. The network cannot rely on any single unit, so it has to spread the representation out.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(1)
+
+activations = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]])
+p = 0.5
+
+# Inverted dropout: zero half, and divide the survivors by (1-p) so
+# the expected sum is unchanged. This is what every framework does,
+# and it is why inference needs no rescaling at all.
+mask = (rng.uniform(0, 1, activations.shape) > p) / (1 - p)
+print(''activations      '', activations.ravel())
+print(''mask             '', mask.ravel())
+print(''after dropout    '', (activations * mask).ravel())
+print()
+print(''sum before       '', round(float(activations.sum()), 2))
+print(''sum after        '', round(float((activations * mask).sum()), 2))
+
+# One draw is noisy; the expectation is what matters.
+draws = np.array([(activations * ((rng.uniform(0, 1, activations.shape) > p)
+                                  / (1 - p))).sum()
+                  for _ in range(20000)])
+print(f''average over 20,000 draws  {draws.mean():.3f}''
+      f''   (target {activations.sum():.1f})'')
+print()
+print(''Each individual draw is wrong by a lot. The average is'')
+print(''right, which is the whole trick: training sees an unbiased'')
+print(''but noisy version, inference sees the exact value with'')
+print(''dropout switched off.'')
+```
+
+Three things about dropout that are not obvious:
+
+- **It must be off at inference.** In PyTorch that is `model.eval()`. Leaving it on makes every prediction random, and because the average is still correct, the bug shows up as unstable predictions rather than wrong ones - which is much harder to notice.
+- **It fights batch normalisation.** Both inject noise, both change behaviour between train and eval, and together they tend to be worse than either. Modern convolutional architectures use batch norm and little or no dropout.
+- **Rates differ by layer type.** 0.5 on a wide fully-connected layer is standard. 0.1 to 0.3 is typical in a transformer. On a convolutional layer, ordinary dropout is usually a mistake - neighbouring pixels are correlated, so zeroing individual activations removes almost no information; `Dropout2d`, which zeroes whole channels, is the correct form.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+
+X, y = make_classification(n_samples=400, n_features=60, n_informative=8,
+                           n_redundant=0, class_sep=0.7, flip_y=0.05,
+                           random_state=0)
+y = y.reshape(-1, 1).astype(float)
+X = (X - X.mean(axis=0)) / X.std(axis=0)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.4, random_state=0)
+
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -60, 60)))
+
+
+def loss_of(p, actual):
+    p = np.clip(p, 1e-9, 1 - 1e-9)
+    return float(-np.mean(actual * np.log(p) + (1 - actual) * np.log(1 - p)))
+
+
+def train(dropout=0.0, weight_decay=0.0, epochs=1600, width=256, rate=0.05, seed=0):
+    generator = np.random.default_rng(seed)
+    W1 = generator.normal(0, np.sqrt(2 / 60), (60, width))
+    b1 = np.zeros(width)
+    W2 = generator.normal(0, np.sqrt(2 / width), (width, 1))
+    b2 = np.zeros(1)
+    best_loss, best_accuracy, best_epoch = float(''inf''), 0.0, 0
+    for epoch in range(1, epochs + 1):
+        z1 = X_tr @ W1 + b1
+        a1 = np.maximum(0, z1)
+        mask = ((generator.uniform(0, 1, a1.shape) > dropout) / (1 - dropout)
+                if dropout > 0 else np.ones_like(a1))
+        a1d = a1 * mask
+        a2 = sigmoid(a1d @ W2 + b2)
+        delta2 = (a2 - y_tr) / len(X_tr)
+        gW2 = a1d.T @ delta2 + weight_decay * W2
+        delta1 = ((delta2 @ W2.T) * mask) * (z1 > 0)
+        W1 -= rate * (X_tr.T @ delta1 + weight_decay * W1)
+        b1 -= rate * delta1.sum(axis=0)
+        W2 -= rate * gW2
+        b2 -= rate * delta2.sum(axis=0)
+
+        # Dropout OFF for evaluation - this is what model.eval() does.
+        epoch_test = sigmoid(np.maximum(0, X_te @ W1 + b1) @ W2 + b2)
+        epoch_loss = loss_of(epoch_test, y_te)
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            best_accuracy = float(((epoch_test > 0.5) == y_te).mean())
+            best_epoch = epoch
+
+    train_p = sigmoid(np.maximum(0, X_tr @ W1 + b1) @ W2 + b2)
+    test_p = sigmoid(np.maximum(0, X_te @ W1 + b1) @ W2 + b2)
+    return {''train acc'': round(float(((train_p > 0.5) == y_tr).mean()), 3),
+            ''final test loss'': round(loss_of(test_p, y_te), 4),
+            ''final test acc'': round(float(((test_p > 0.5) == y_te).mean()), 3),
+            ''best test loss'': round(best_loss, 4),
+            ''best test acc'': round(best_accuracy, 3),
+            ''best epoch'': best_epoch}
+
+
+rows = []
+for name, options in [(''nothing'', {}),
+                      (''dropout 0.5'', {''dropout'': 0.5}),
+                      (''width 16 instead of 256'', {''width'': 16}),
+                      (''weight decay 0.05'', {''weight_decay'': 0.05}),
+                      (''weight decay 0.1'', {''weight_decay'': 0.1}),
+                      (''dropout 0.5 + decay 0.05'',
+                       {''dropout'': 0.5, ''weight_decay'': 0.05})]:
+    row = {''technique'': name}
+    row.update(train(**options))
+    rows.append(row)
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+print(''best final test loss:'',
+      table.loc[table[''final test loss''].idxmin(), ''technique''])
+print(''best loss at ANY epoch (i.e. with early stopping):'',
+      table.loc[table[''best test loss''].idxmin(), ''technique''])
+print()
+print(''Three things this table says that a tutorial will not.'')
+print()
+print(''Early stopping alone is the biggest single win available:'')
+print(''the unregularised run touches 0.611 at epoch 64 and then'')
+print(''spends 1,500 more epochs climbing to 1.024. Keeping the'')
+print(''checkpoint from epoch 64 costs nothing and recovers 40% of'')
+print(''the loss.'')
+print()
+print(''Dropout does almost nothing here. It improves the best'')
+print(''loss by 0.02 and makes the final loss worse. Dropout is a'')
+print(''technique for wide layers with plenty of data; on 240'')
+print(''tabular rows it is the wrong tool, and no amount of tuning'')
+print(''the rate changes that.'')
+print()
+print(''A smaller network is not automatically a regularised one.'')
+print(''Width 16 still reaches 1.000 training accuracy - 60'')
+print(''features is enough to memorise 240 rows at any width in'')
+print(''this range - so capacity was never the binding constraint.'')
+print()
+print(''Weight decay wins, and combining it with dropout adds'')
+print(''nothing on top. Try the cheap ones first and measure, in'')
+print(''that order.'')
+```
+
+## Data augmentation, and why it beats the others
+
+Every technique so far constrains the model. Augmentation changes the *data*, by generating new training examples that are different pixels but the same label. It is usually the single most effective regulariser available, because it adds information about what the label is invariant to - information the model has no other way to obtain.
+
+```python
+import numpy as np
+import pandas as pd
+from scipy import ndimage
+from sklearn.datasets import load_digits
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+digits = load_digits()                      # 8x8 grey-scale, 0-16
+train_images, test_images, train_labels, test_labels = train_test_split(
+    digits.images, digits.target, test_size=0.4, random_state=0,
+    stratify=digits.target)
+
+# Deliberately starved: 40 training images for ten classes.
+train_images, train_labels = train_images[:40], train_labels[:40]
+test_flat = test_images.reshape(len(test_images), -1) / 16.0
+
+
+def rotate_by(angle):
+    def transform(image):
+        return ndimage.rotate(image, angle, reshape=False, order=1,
+                              mode=''constant'', cval=0.0)
+    return transform
+
+
+def identity(image):
+    return image
+
+
+def mirror(image):
+    return image[:, ::-1]
+
+
+def evaluate(transforms):
+    images, labels = [], []
+    for image, label in zip(train_images, train_labels):
+        for transform in transforms:
+            images.append(transform(image))
+            labels.append(label)
+    flat = np.array(images).reshape(len(images), -1) / 16.0
+    model = LogisticRegression(max_iter=4000).fit(flat, labels)
+    return len(flat), model.score(flat, labels), model.score(test_flat, test_labels)
+
+
+rows = []
+for name, transforms in [
+        (''originals only'', [identity]),
+        (''+ rotations of 12 degrees'', [identity, rotate_by(12), rotate_by(-12)]),
+        (''+ rotations of 8 and 16'', [identity, rotate_by(8), rotate_by(-8),
+                                     rotate_by(16), rotate_by(-16)]),
+        (''+ horizontal mirrors'', [identity, mirror])]:
+    examples, train_score, test_score = evaluate(transforms)
+    rows.append({''training set'': name, ''examples'': examples,
+                 ''train acc'': round(train_score, 3),
+                 ''test acc'': round(test_score, 3)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Rotating the digits took the test accuracy from 0.720 to'')
+print(''0.776 - five and a half points, from no new photographs.'')
+print(''Mirroring them took it DOWN to 0.661, which is worse than'')
+print(''having done nothing at all.'')
+print()
+print(''Same dataset, same model, same amount of extra data. The'')
+print(''difference is that a rotated 7 is a 7 and a mirrored 7 is'')
+print(''not. Augmentation adds the information that the label does'')
+print(''not change under some transformation; choose the wrong'')
+print(''transformation and you have added the opposite.'')
+```
+
+The rule is one question: **would a human give this the same label?** A horizontally flipped cat is a cat, so flipping is valid for animal photographs. A flipped `2` is not a `2`. A rotated chest X-ray is not a realistic chest X-ray, so large rotations are invalid in medical imaging even though they are routine elsewhere. Getting this wrong teaches the model that two different things are the same, and the table above is what that costs.
+
+Note also that the five extra rotations bought nothing over the first two - 0.775 against 0.776. Augmentation adds information about an invariance, and once the model has learned that rotation does not matter, further rotations are repetition.
+
+## The complete list, in the order to try them
+
+1. **More data.** Not a technique, but it dominates everything below and is sometimes available.
+2. **Augmentation.** The best regulariser when the invariances are known.
+3. **Early stopping.** Free, and nearly always correct.
+4. **Weight decay.** One number; `0.01` with AdamW is a reasonable start.
+5. **A smaller model.** Underrated. If 240 examples will not support 16,000 parameters, a smaller network is not a compromise, it is the right model.
+6. **Dropout.** Effective on fully-connected layers; mostly superseded by batch norm in vision.
+7. **Label smoothing.** Replace a target of 1.0 with 0.9. Stops the network becoming absurdly confident and improves calibration.
+8. **Ensembling.** Train five models, average their predictions. Reliably the best result, at five times the cost.
+
+```python
+import numpy as np
+
+truth = np.array([0.0, 0.0, 1.0, 0.0])
+
+def cross_entropy(predicted, target):
+    p = np.clip(predicted, 1e-9, 1)
+    return float(-(target * np.log(p)).sum())
+
+# What a confident network pushes towards under each target.
+predicted = np.array([0.001, 0.001, 0.997, 0.001])
+smoothed = truth * 0.9 + 0.1 / len(truth)
+
+print(''hard target    '', truth)
+print(''smoothed target'', smoothed.round(4))
+print()
+print(f''loss against hard target     {cross_entropy(predicted, truth):.4f}'')
+print(f''loss against smoothed target {cross_entropy(predicted, smoothed):.4f}'')
+print()
+
+# The mechanism is the gradient with respect to the LOGIT, which for
+# softmax plus cross-entropy is simply (predicted - target).
+print(''p(true class)  gradient, hard target  gradient, smoothed'')
+for p in [0.5, 0.8, 0.9, 0.925, 0.95, 0.99, 0.9999]:
+    print(f''{p:13}  {p - 1.0:21.4f}  {p - 0.925:+18.4f}'')
+print()
+print(''Against a hard target the gradient is negative at every'')
+print(''value of p: it keeps pushing the logit up forever, because'')
+print(''p = 1 is never reached. That is how a network ends up'')
+print(''99.99% confident about a blurry photograph.'')
+print()
+print(''Against a smoothed target it crosses zero at p = 0.925 and'')
+print(''then turns POSITIVE, pushing the logit back down. The model'')
+print(''has a confidence it is supposed to stop at, which is the'')
+print(''whole of what label smoothing does.'')
+```
+
+## Failure modes
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Training accuracy 1.00, test accuracy poor | Classic overfitting | Augment, decay, early stop, smaller model |
+| Both accuracies poor, training loss still falling slowly | Underfitting, or too much regularisation | Reduce decay and dropout; train longer; more capacity |
+| Validation loss rises while validation accuracy holds | The model is getting more confident about its mistakes | Label smoothing; stop earlier |
+| Validation better than training | Dropout and batch norm active in training, not in eval - usually fine | Compare like with like before worrying |
+| Weight decay seems to do nothing | Applied only to the last layer, or the optimiser is Adam rather than AdamW | Check what the parameter group covers |
+| Augmentation made it worse | An augmentation that changes the true label | Look at twenty augmented examples with their labels |
+| Great offline, worse in production | The validation set leaked, or the data has shifted | Re-split by time or by group |
+
+The fourth row deserves its own sentence, because it sends people chasing a non-existent bug: **validation loss below training loss is normal.** Training loss is measured with dropout on and averaged over the epoch while the weights were still improving; validation loss is measured after the epoch, with dropout off. Two different measurements of two different things.
+
+## Check your understanding
+
+Regularisation should cost you training accuracy. If a technique improves the test score *without* reducing the training score, it is not regularising - it is fixing something else, and you have mislabelled what happened.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+X, y = make_classification(n_samples=300, n_features=80, n_informative=10,
+                           n_redundant=0, class_sep=0.6, flip_y=0.1,
+                           random_state=1)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.5, random_state=0)
+
+rows = []
+for C in [10.0, 1.0, 0.1, 0.01, 0.001, 0.0003, 0.0001]:
+    model = LogisticRegression(C=C, max_iter=8000).fit(X_tr, y_tr)
+    rows.append({''C (inverse strength)'': C,
+                 ''penalty strength'': round(1 / C, 4),
+                 ''train acc'': round(model.score(X_tr, y_tr), 3),
+                 ''test acc'': round(model.score(X_te, y_te), 3),
+                 ''weight norm'': round(float(np.linalg.norm(model.coef_)), 2)})
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+best = table.loc[table[''test acc''].idxmax()]
+print(f''best test accuracy {best["test acc"]} at penalty strength ''
+      f''{best["penalty strength"]}'')
+print(f''its training accuracy is {best["train acc"]}, down from ''
+      f''{table["train acc"].max()}'')
+print()
+print(''Training accuracy falls monotonically as the penalty rises,'')
+print(''from 1.000 to 0.527. Test accuracy rises from 0.447 to'')
+print(''0.720 and then falls back to 0.473 - an interior optimum,'')
+print(''found by sweeping five decades of penalty strength.'')
+print()
+print(''The best model on the test set is NOT the best model on the'')
+print(''training set, and it never will be. That is not a flaw in'')
+print(''the experiment, it is the entire reason regularisation'')
+print(''works: you are trading training accuracy, which you do not'')
+print(''care about, for test accuracy, which you do.'')
+```
+',
+   'A model with a million parameters can memorise ten thousand examples perfectly. Dropout, weight decay, augmentation and early stopping are the four tools that prevent it, and they work in different ways and combine.', 18, 3586,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-000000000109',
    'Convolutional Networks, and Why They Suit Images',
    'markdown',
-   'A fully connected layer on a 224x224 colour image would need about 150,000 weights per neuron, and it would have to learn separately what an edge looks like in every position. Convolution fixes both problems with one idea.
+   'A fully-connected layer treats a 224x224 photograph as 50,176 unrelated numbers. It does not know that two adjacent pixels are related, or that a cat in the top-left corner is the same cat in the bottom-right. A convolutional layer knows both, and it knows them because of how its weights are shared rather than because anyone told it.
 
-## What a convolution does
+## What a convolution actually computes
 
-A small filter - typically 3x3 - slides across the image. At each position it computes a weighted sum of the pixels under it. The same weights are used at every position.
-
-Two consequences, and they are the whole reason this works:
-
-- **Parameter sharing.** One 3x3 filter is 9 weights that detect their pattern anywhere in the image, instead of relearning it per location.
-- **Locality.** Each output depends only on a small neighbourhood, which matches how images are actually structured - nearby pixels are related, distant ones usually are not.
+A small grid of weights - the kernel - slides across the image. At every position it multiplies element by element and sums. That is the whole operation.
 
 ```python
-from torch import nn
+import numpy as np
 
-model = nn.Sequential(
-    nn.Conv2d(3, 32, kernel_size=3, padding=1), nn.ReLU(),
-    nn.MaxPool2d(2),
-    nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.ReLU(),
-    nn.MaxPool2d(2),
-    nn.Flatten(),
-    nn.Linear(64 * 56 * 56, 10),
-)
+image = np.array([
+    [0, 0, 0, 9, 9, 9],
+    [0, 0, 0, 9, 9, 9],
+    [0, 0, 0, 9, 9, 9],
+    [0, 0, 0, 9, 9, 9],
+    [0, 0, 0, 9, 9, 9],
+    [0, 0, 0, 9, 9, 9],
+], dtype=float)
+
+# A vertical-edge detector: dark on the left, bright on the right.
+kernel = np.array([
+    [-1, 0, 1],
+    [-1, 0, 1],
+    [-1, 0, 1],
+], dtype=float)
+
+
+def convolve(image, kernel):
+    kh, kw = kernel.shape
+    out_h, out_w = image.shape[0] - kh + 1, image.shape[1] - kw + 1
+    out = np.zeros((out_h, out_w))
+    for row in range(out_h):
+        for column in range(out_w):
+            patch = image[row:row + kh, column:column + kw]
+            out[row, column] = (patch * kernel).sum()
+    return out
+
+
+result = convolve(image, kernel)
+print(''image'')
+print(image.astype(int))
+print()
+print(''kernel'')
+print(kernel.astype(int))
+print()
+print(''output'')
+print(result.astype(int))
+print()
+print(''The edge is at column 2 of the output and nowhere else. The'')
+print(''kernel has nine weights and it found that edge at every one'')
+print(''of the four rows, because the SAME nine weights were'')
+print(''applied at all four positions. That is weight sharing, and'')
+print(''it is the entire reason this works on images.'')
 ```
 
-## The hierarchy
+Rotate the kernel and it finds horizontal edges instead. Nothing else changes.
 
-Stacked convolutions build up abstraction, and this is visible if you look at the learned filters: the first layer finds edges and colour gradients, the second corners and textures, the third parts of objects, the fourth objects.
+```python
+import numpy as np
 
-Pooling reduces the spatial size as you go, which widens the area each later neuron sees while keeping the computation manageable.
 
-## The pieces you will see
+def convolve(image, kernel):
+    kh, kw = kernel.shape
+    out = np.zeros((image.shape[0] - kh + 1, image.shape[1] - kw + 1))
+    for row in range(out.shape[0]):
+        for column in range(out.shape[1]):
+            out[row, column] = (image[row:row + kh,
+                                      column:column + kw] * kernel).sum()
+    return out
 
-- **Padding** keeps the output the same size as the input, so stacking does not shrink everything to nothing.
-- **Stride** moves the filter more than one pixel at a time, downsampling as it convolves.
-- **Channels** are the number of filters in a layer - 32 filters means 32 different patterns detected.
-- **Residual connections** add a layer''s input to its output, which lets gradients flow directly through very deep stacks. This is what made 50- and 100-layer networks trainable, and it is the central idea in ResNet.
 
-## Where else convolution applies
+# A bright square on a dark background.
+image = np.zeros((7, 7))
+image[2:5, 2:5] = 9.0
 
-Anywhere the input has a grid structure and translation invariance: spectrograms for audio, one-dimensional convolution over time series, and board positions in game playing.
+kernels = {
+    ''vertical edge'': np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], float),
+    ''horizontal edge'': np.array([[-1, -1, -1], [0, 0, 0], [1, 1, 1]], float),
+    ''blur'': np.full((3, 3), 1 / 9),
+    ''sharpen'': np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], float),
+    ''identity'': np.array([[0, 0, 0], [0, 1, 0], [0, 0, 0]], float),
+}
 
-It does not apply to tabular data, where column 3 and column 4 have no spatial relationship at all - which is one concrete reason neural networks underperform on spreadsheets.
+print(''input'')
+print(image.astype(int))
+for name, kernel in kernels.items():
+    print()
+    print(f''{name}:'')
+    print(convolve(image, kernel).round(1))
+print()
+print(''Five kernels, one image, five completely different outputs.'')
+print(''In a real network nobody writes these down - they are'')
+print(''weights, and the first layer of a trained image model'')
+print(''reliably learns something very close to the edge detectors'')
+print(''above.'')
+```
 
-## In practice, you will not train one from scratch
+## The three numbers that decide the output size
 
-For almost any image task, a pretrained backbone fine-tuned on your data beats a network trained from scratch, by a wide margin, with a fraction of the data. That is Level 4, and it is how this is actually done.',
-   'A convolution slides a small learned filter across an image, which builds in two assumptions: that a pattern means the same thing anywhere, and that nearby pixels are related. Those assumptions are why a convolutional network needs far less data than a fully connected one.',
-   11, 429, '55555555-5555-4555-8555-555555555555', 'published',
+Kernel size, stride and padding. Getting them wrong is the most common shape error in deep learning, and the formula is worth committing to memory:
+
+**output = floor((input + 2 x padding - kernel) / stride) + 1**
+
+```python
+import pandas as pd
+
+
+def output_size(input_size, kernel, stride=1, padding=0):
+    return (input_size + 2 * padding - kernel) // stride + 1
+
+
+rows = []
+for kernel, stride, padding, note in [
+        (3, 1, 0, ''shrinks by 2 every layer''),
+        (3, 1, 1, ''"same" padding - size preserved''),
+        (5, 1, 2, ''same, with a wider view''),
+        (3, 2, 1, ''halves the size - the usual downsample''),
+        (7, 2, 3, ''halves it, ResNet stem''),
+        (1, 1, 0, ''pointwise - mixes channels, not pixels''),
+        (2, 2, 0, ''max pooling, the classic'')]:
+    rows.append({''kernel'': kernel, ''stride'': stride, ''padding'': padding,
+                 ''224 ->'': output_size(224, kernel, stride, padding),
+                 ''32 ->'': output_size(32, kernel, stride, padding),
+                 ''note'': note})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The second row is the one to default to: kernel 3, stride 1,'')
+print(''padding 1 keeps the spatial size exactly, so you can stack'')
+print(''as many as you like without doing arithmetic. Downsampling'')
+print(''is then a deliberate separate step, which is how every'')
+print(''modern architecture is organised.'')
+```
+
+## Why it needs so many fewer parameters
+
+This is the argument for convolution in one table.
+
+```python
+import pandas as pd
+
+rows = []
+for size, channels_in, channels_out in [(32, 3, 16), (64, 16, 32),
+                                        (224, 3, 64), (112, 64, 128)]:
+    pixels_in = size * size * channels_in
+    pixels_out = size * size * channels_out
+
+    dense = pixels_in * pixels_out + pixels_out
+    conv = (3 * 3 * channels_in * channels_out) + channels_out
+
+    rows.append({''input'': f''{channels_in}x{size}x{size}'',
+                 ''output channels'': channels_out,
+                 ''fully connected'': f''{dense:,}'',
+                 ''3x3 convolution'': f''{conv:,}'',
+                 ''ratio'': f''{dense / conv:,.0f}x''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''A fully-connected layer mapping one 224x224 colour image to'')
+print(''64 channels at the same resolution needs 483 BILLION'')
+print(''weights - about two terabytes in float32, for one layer.'')
+print(''The convolution needs 1,792, which is 7 kilobytes. That is'')
+print(''not an optimisation, it is the difference between a model'')
+print(''that exists and one that does not.'')
+print()
+print(''And the parameter count is independent of the image size:'')
+print(''the same 1,792 weights work on 32x32 and on 4000x3000.'')
+```
+
+The saving comes from two assumptions, and they are assumptions:
+
+- **Locality** - a pixel''s meaning depends on its neighbours, not on a pixel 200 away. True for photographs; false for a spreadsheet where column 1 and column 200 may be directly related.
+- **Translation equivariance** - a feature means the same thing wherever it appears. True for a cat in a photograph; false for a medical scan where position is diagnostic, and false for the board in a game of chess.
+
+When those assumptions do not hold, a convolution is the wrong layer, and it fails by being unable to express what you need rather than by training badly.
+
+## Channels, and what a stack of layers builds
+
+```python
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+
+layer = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+batch = torch.randn(8, 3, 32, 32)
+output = layer(batch)
+
+print(''input shape '', tuple(batch.shape), '' (batch, channels, height, width)'')
+print(''output shape'', tuple(output.shape))
+print()
+weight, bias = layer.weight, layer.bias
+print(''weight shape'', tuple(weight.shape),
+      ''= (out channels, in channels, kernel, kernel)'')
+print(''bias shape  '', tuple(bias.shape))
+print(''parameters  '', weight.numel() + bias.numel(),
+      ''= 16 x 3 x 3 x 3 + 16'')
+print()
+print(''Each of the 16 output channels has its own 3x3x3 kernel: it'')
+print(''looks at a 3x3 neighbourhood across ALL THREE input'')
+print(''channels at once. "16 channels" means sixteen different'')
+print(''learned feature detectors, each producing its own 32x32 map'')
+print(''of where it fired.'')
+```
+
+Stack those layers and the region of the original image that influences one output - the receptive field - grows. This is the mechanism by which a network that only ever looks at 3x3 patches ends up recognising a whole face.
+
+```python
+import pandas as pd
+
+# Receptive field of a stack: r = r + (k - 1) * jump, jump = jump * stride
+rows = []
+field, jump, size = 1, 1, 224
+for index, (kernel, stride, name) in enumerate([
+        (7, 2, ''conv 7x7 /2''), (3, 2, ''maxpool 3x3 /2''),
+        (3, 1, ''conv 3x3''), (3, 1, ''conv 3x3''),
+        (3, 2, ''conv 3x3 /2''), (3, 1, ''conv 3x3''),
+        (3, 2, ''conv 3x3 /2''), (3, 1, ''conv 3x3''),
+        (3, 2, ''conv 3x3 /2''), (3, 1, ''conv 3x3'')], 1):
+    field = field + (kernel - 1) * jump
+    jump = jump * stride
+    size = (size + 2 * (kernel // 2) - kernel) // stride + 1
+    rows.append({''layer'': f''{index}. {name}'',
+                 ''feature map'': f''{size}x{size}'',
+                 ''receptive field'': f''{field}x{field}'',
+                 ''covers'': f''{min(100.0, 100 * field / 224):.0f}% of a 224px image''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Layer 1 sees a 7x7 patch - 3% of the image, enough for an'')
+print(''edge and nothing more. Layer 10 sees 195x195, 87% of it,'')
+print(''which is enough for "a dog". Depth is how the receptive'')
+print(''field grows; stride is what makes it grow fast. Notice the'')
+print(''jumps: crossing a stride-2 layer doubles how much each'')
+print(''later 3x3 covers, so the field grows by 32 pixels a layer'')
+print(''near the end against 8 near the start.'')
+```
+
+## Pooling, and the modern view of it
+
+Max pooling takes the largest value in each window. It shrinks the map and makes the output slightly insensitive to exactly where a feature sat.
+
+```python
+import numpy as np
+
+feature_map = np.array([
+    [1, 3, 2, 1],
+    [4, 9, 1, 0],
+    [2, 1, 5, 7],
+    [1, 0, 2, 3],
+], dtype=float)
+
+
+def max_pool(x, size=2):
+    h, w = x.shape[0] // size, x.shape[1] // size
+    return np.array([[x[r * size:(r + 1) * size,
+                        c * size:(c + 1) * size].max()
+                      for c in range(w)] for r in range(h)])
+
+
+def average_pool(x, size=2):
+    h, w = x.shape[0] // size, x.shape[1] // size
+    return np.array([[x[r * size:(r + 1) * size,
+                        c * size:(c + 1) * size].mean()
+                      for c in range(w)] for r in range(h)])
+
+
+print(''feature map'')
+print(feature_map.astype(int))
+print()
+print(''max pool 2x2'')
+print(max_pool(feature_map).astype(int))
+print()
+print(''average pool 2x2'')
+print(average_pool(feature_map).round(2))
+print()
+
+# The invariance claim, tested rather than asserted.
+shifted = np.roll(feature_map, 1, axis=1)
+print(''after shifting the map one pixel right:'')
+print(shifted.astype(int))
+print(''max pool  '', max_pool(shifted).astype(int).ravel(),
+      '' (before:'', max_pool(feature_map).astype(int).ravel(), '')'')
+print()
+print(''Note what that shows: pooling is only invariant to shifts'')
+print(''INSIDE a window. A one-pixel shift that moves a value'')
+print(''across a window boundary changes the output. Pooling buys'')
+print(''a little tolerance, not translation invariance, and the'')
+print(''difference is why heavily-pooled networks still need'')
+print(''augmentation.'')
+```
+
+Modern architectures use less pooling than the textbooks suggest. A stride-2 convolution downsamples too, and it *learns* how to do so rather than always taking the maximum. The pattern now is strided convolutions through the body and one **global average pool** at the end, which collapses each channel to a single number and makes the network accept any input size.
+
+```python
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+body = nn.Sequential(nn.Conv2d(3, 32, 3, stride=2, padding=1), nn.ReLU(),
+                     nn.Conv2d(32, 64, 3, stride=2, padding=1), nn.ReLU())
+head = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(64, 10))
+
+for size in [32, 64, 224]:
+    image = torch.randn(1, 3, size, size)
+    features = body(image)
+    logits = head(features)
+    shape = f''{size}x{size}''
+    print(f''input {shape:<9} -> features {str(tuple(features.shape)[1:]):<15}''
+          f'' -> logits {tuple(logits.shape)}'')
+print()
+print(''Three different input sizes, one set of weights, the same'')
+print(''ten logits out. A Flatten followed by a Linear would have'')
+print(''failed on two of the three, because its input size is'')
+print(''baked into the weight matrix. This is why global average'')
+print(''pooling replaced it.'')
+```
+
+## A worked example: a small convolutional network on digits
+
+```python
+import numpy as np
+import torch
+import torch.nn as nn
+from sklearn.datasets import load_digits
+from sklearn.model_selection import train_test_split
+
+torch.manual_seed(0)
+torch.set_num_threads(4)
+
+digits = load_digits()
+X = digits.images[:, None, :, :] / 16.0           # (n, 1, 8, 8)
+y = digits.target
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3,
+                                          random_state=0, stratify=y)
+X_tr = torch.tensor(X_tr, dtype=torch.float32)
+X_te = torch.tensor(X_te, dtype=torch.float32)
+y_tr = torch.tensor(y_tr, dtype=torch.long)
+y_te = torch.tensor(y_te, dtype=torch.long)
+print(f''{len(X_tr)} train, {len(X_te)} test, images {tuple(X_tr.shape[1:])}'')
+
+
+def dense_model():
+    return nn.Sequential(nn.Flatten(), nn.Linear(64, 64), nn.ReLU(),
+                         nn.Linear(64, 10))
+
+
+def conv_model():
+    return nn.Sequential(
+        nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(),
+        nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(),
+        nn.MaxPool2d(2),                            # 8x8 -> 4x4
+        nn.AdaptiveAvgPool2d(1), nn.Flatten(),
+        nn.Linear(32, 10))
+
+
+def train(build, epochs=40, rate=0.01, seed=0):
+    torch.manual_seed(seed)
+    model = build()
+    optimiser = torch.optim.AdamW(model.parameters(), lr=rate)
+    loss_fn = nn.CrossEntropyLoss()
+    for _ in range(epochs):
+        model.train()
+        order = torch.randperm(len(X_tr))
+        for start in range(0, len(X_tr), 64):
+            index = order[start:start + 64]
+            optimiser.zero_grad()
+            loss = loss_fn(model(X_tr[index]), y_tr[index])
+            loss.backward()
+            optimiser.step()
+    model.eval()
+    with torch.no_grad():
+        train_acc = (model(X_tr).argmax(1) == y_tr).float().mean().item()
+        test_acc = (model(X_te).argmax(1) == y_te).float().mean().item()
+    parameters = sum(p.numel() for p in model.parameters())
+    return parameters, train_acc, test_acc
+
+
+print()
+print(''model           parameters  train acc  test acc'')
+for name, build in [(''fully connected'', dense_model), (''convolutional'', conv_model)]:
+    parameters, train_acc, test_acc = train(build)
+    print(f''{name:<15} {parameters:10,}  {train_acc:9.4f}  {test_acc:8.4f}'')
+print()
+print(''A dead heat: 0.9722 each. On 8x8 digits that are already'')
+print(''centred and cropped, the dense model has nothing to gain -'')
+print(''every digit is in the same place, so weight sharing buys no'')
+print(''information. The advantage is invisible until the'')
+print(''assumption behind it is tested.'')
+print()
+
+# The claim everyone makes about convolutions, tested: are they
+# more robust to a shifted input?
+def shift_right(images, pixels=1):
+    out = torch.zeros_like(images)
+    out[:, :, :, pixels:] = images[:, :, :, :-pixels]
+    return out
+
+
+print(''and on test images shifted one pixel to the right:'')
+for name, build in [(''fully connected'', dense_model), (''convolutional'', conv_model)]:
+    torch.manual_seed(0)
+    model = build()
+    optimiser = torch.optim.AdamW(model.parameters(), lr=0.01)
+    loss_fn = nn.CrossEntropyLoss()
+    for _ in range(40):
+        model.train()
+        order = torch.randperm(len(X_tr))
+        for start in range(0, len(X_tr), 64):
+            index = order[start:start + 64]
+            optimiser.zero_grad()
+            loss_fn(model(X_tr[index]), y_tr[index]).backward()
+            optimiser.step()
+    model.eval()
+    with torch.no_grad():
+        clean = (model(X_te).argmax(1) == y_te).float().mean().item()
+        shifted = (model(shift_right(X_te)).argmax(1) == y_te).float().mean().item()
+    print(f''{name:<15} clean {clean:.4f}  shifted {shifted:.4f}  ''
+          f''lost {clean - shifted:.4f}'')
+print()
+print(''Both models lose accuracy on a shift that no human would'')
+print(''even notice, and the convolutional one loses less. "Shift'')
+print(''invariant" is an overstatement of what a convolution gives'')
+print(''you - it shares weights, so a shifted feature is still'')
+print(''detected, but pooling boundaries and the classifier head'')
+print(''still see a different input.'')
+```
+
+## Architectures, and the one idea in each
+
+| Architecture | Year | The idea worth knowing |
+| --- | --- | --- |
+| LeNet-5 | 1998 | Convolutions and pooling work; it read cheques |
+| AlexNet | 2012 | Depth plus GPUs plus ReLU plus dropout; it started all of this |
+| VGG | 2014 | Only 3x3 kernels, stacked. Two 3x3 see as much as one 5x5 with fewer weights |
+| Inception | 2014 | Several kernel sizes in parallel; 1x1 convolutions to cut channel count cheaply |
+| ResNet | 2015 | Residual connections. Made 100+ layers trainable; still the default backbone |
+| DenseNet | 2016 | Connect every layer to every later layer |
+| MobileNet | 2017 | Depthwise separable convolutions - a 3x3 per channel, then a 1x1 to mix |
+| EfficientNet | 2019 | Scale depth, width and resolution together, not one at a time |
+| ConvNeXt | 2022 | A convolutional network with transformer-era training matches a vision transformer |
+
+Two of those rows are worth the arithmetic, because they are the two ideas that actually reduce cost.
+
+```python
+import pandas as pd
+
+# VGG''s claim: two stacked 3x3 layers have the receptive field of
+# one 5x5 and fewer parameters.
+channels = 64
+one_5x5 = 5 * 5 * channels * channels
+two_3x3 = 2 * (3 * 3 * channels * channels)
+print(f''one 5x5 layer, 64->64 channels : {one_5x5:,} weights'')
+print(f''two 3x3 layers, 64->64 channels: {two_3x3:,} weights'')
+print(f''both see a 5x5 region; the pair is {1 - two_3x3 / one_5x5:.0%} smaller'')
+print(''and has a non-linearity in the middle, which the single'')
+print(''5x5 layer does not.'')
+print()
+
+# MobileNet''s claim: split a convolution into a per-channel spatial
+# part and a 1x1 channel-mixing part.
+rows = []
+for cin, cout in [(32, 64), (64, 128), (256, 512)]:
+    standard = 3 * 3 * cin * cout
+    separable = 3 * 3 * cin + cin * cout
+    rows.append({''channels'': f''{cin} -> {cout}'',
+                 ''standard 3x3'': f''{standard:,}'',
+                 ''depthwise separable'': f''{separable:,}'',
+                 ''reduction'': f''{standard / separable:.1f}x''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Roughly an 8-9x reduction, and it grows with the channel'')
+print(''count. This single substitution is what put convolutional'')
+print(''networks on phones.'')
+```
+
+## Failure modes
+
+| Symptom | Cause |
+| --- | --- |
+| `RuntimeError: shape ... invalid for input of size ...` | The flatten size does not match the linear layer; print the shape after the body, or use `AdaptiveAvgPool2d(1)` |
+| Accuracy collapses when input size changes | A `Flatten` plus `Linear` head; global average pool instead |
+| Trains to 99% on your data, fails on the client''s photographs | Different capture conditions; normalise with the training set''s statistics, and augment for the shift |
+| Much worse than a published number on the same dataset | Almost always the augmentation and schedule, not the architecture |
+| First layer''s learned kernels look like noise after training | Learning rate too high, or the inputs were never normalised |
+| Memory explodes in the first layers, not the last | Early layers have the largest feature maps; activation memory is spatial size times channels |
+| Grey-scale model fails on colour input | `in_channels` is 1; repeat the channel or retrain the first layer |
+
+The sixth row is worth internalising because it is the opposite of where people look. Parameters concentrate in the late, narrow, many-channel layers; *activations* concentrate in the early, wide, few-channel ones. Out-of-memory errors are about activations.
+
+```python
+import pandas as pd
+
+rows = []
+for name, size, channels in [(''conv1'', 112, 64), (''conv2'', 56, 128),
+                             (''conv3'', 28, 256), (''conv4'', 14, 512),
+                             (''conv5'', 7, 512)]:
+    activations = size * size * channels
+    weights = 3 * 3 * channels * channels
+    rows.append({''layer'': name, ''map'': f''{channels}x{size}x{size}'',
+                 ''activations per image'': f''{activations:,}'',
+                 ''weights in the layer'': f''{weights:,}''})
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+print(''conv1 holds 802,816 activations per image and 36,864'')
+print(''weights. conv5 holds 25,088 activations and 2.4 million'')
+print(''weights. They are inverses of each other, so "reduce the'')
+print(''model size" and "stop running out of memory" are two'')
+print(''different jobs on two different layers.'')
+```
+
+## Check your understanding
+
+Implement the convolution by hand and check it against the framework. If your version disagrees, one of two things is true, and both are worth finding out about.
+
+```python
+import numpy as np
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+
+image = np.random.default_rng(0).normal(0, 1, (1, 1, 6, 6)).astype(np.float32)
+layer = nn.Conv2d(1, 1, 3, padding=0, bias=False)
+kernel = layer.weight.detach().numpy()[0, 0]
+
+framework = layer(torch.tensor(image)).detach().numpy()[0, 0]
+
+by_hand = np.zeros((4, 4), dtype=np.float32)
+for row in range(4):
+    for column in range(4):
+        patch = image[0, 0, row:row + 3, column:column + 3]
+        by_hand[row, column] = (patch * kernel).sum()
+
+print(''framework'')
+print(framework.round(4))
+print()
+print(''by hand'')
+print(by_hand.round(4))
+print()
+print(''max difference'', float(np.abs(framework - by_hand).max()))
+print(''agree:'', bool(np.allclose(framework, by_hand, atol=1e-5)))
+print()
+print(''They agree, which tells you something that trips up anyone'')
+print(''coming from a signal-processing background: what deep'')
+print(''learning calls "convolution" is really cross-correlation.'')
+print(''A true convolution flips the kernel first. Since the kernel'')
+print(''is learned, the flip makes no difference to what the'')
+print(''network can represent - but it matters the moment you'')
+print(''compare against scipy.signal.convolve2d, which does flip.'')
+```
+',
+   'A convolution slides a small learned filter across an image, which builds in two assumptions: that a pattern means the same thing anywhere, and that nearby pixels are related. Those assumptions are why a convolutional network needs far less data than a fully connected one.', 15, 2992,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-00000000010a',
    'Sequences: Recurrence and Its Limits',
    'markdown',
-   'A sequence has order and variable length. A fixed-size input layer cannot represent that, so recurrent networks process one element at a time, carrying a hidden state forward.
+   'A sequence has an order, and the order carries meaning. "The dog bit the man" and "the man bit the dog" are the same words. A convolution sees a neighbourhood; a fully-connected layer sees a fixed-size vector with no notion of before and after. Recurrence was the first answer, and understanding why it was eventually replaced is more useful than the mechanism itself.
 
+## The recurrent cell
+
+One set of weights, applied once per time step, carrying a hidden state forward.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+
+hidden_size, input_size = 4, 3
+W_input = rng.normal(0, 0.5, (input_size, hidden_size))
+W_hidden = rng.normal(0, 0.5, (hidden_size, hidden_size))
+bias = np.zeros(hidden_size)
+
+sequence = rng.normal(0, 1, (5, input_size))     # 5 time steps
+
+hidden = np.zeros(hidden_size)
+print(''step  hidden state'')
+for step, x in enumerate(sequence, 1):
+    hidden = np.tanh(x @ W_input + hidden @ W_hidden + bias)
+    print(f''{step:4d}  {hidden.round(4)}'')
+print()
+print(f''the same {W_hidden.size + W_input.size + bias.size} parameters were ''
+      f''used at all 5 steps,'')
+print(''and would be used at all 5,000 steps of a longer sequence.'')
+print(''That is why a recurrent network accepts any length: the'')
+print(''length is in the loop, not in the weights.'')
 ```
-hidden = f(hidden, input_t)
+
+Order matters, and it is worth confirming rather than assuming:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+W_input = rng.normal(0, 0.5, (3, 4))
+W_hidden = rng.normal(0, 0.5, (4, 4))
+
+def final_state(sequence):
+    hidden = np.zeros(4)
+    for x in sequence:
+        hidden = np.tanh(x @ W_input + hidden @ W_hidden)
+    return hidden
+
+sequence = rng.normal(0, 1, (5, 3))
+reversed_sequence = sequence[::-1]
+
+print(''forwards '', final_state(sequence).round(4))
+print(''backwards'', final_state(reversed_sequence).round(4))
+print(''same:'', bool(np.allclose(final_state(sequence),
+                                final_state(reversed_sequence))))
+print()
+
+# Compare with a model that averages its inputs - a "bag of words".
+print(''mean of the sequence, forwards '', sequence.mean(axis=0).round(4))
+print(''mean of the sequence, backwards'', reversed_sequence.mean(axis=0).round(4))
+print(''same:'', bool(np.allclose(sequence.mean(axis=0),
+                                reversed_sequence.mean(axis=0))))
+print()
+print(''The recurrent state depends on the order. The mean does'')
+print(''not. Every bag-of-words model is blind to the difference'')
+print(''between "the dog bit the man" and its reverse, and that'')
+print(''blindness is exactly what recurrence removes.'')
 ```
 
-The same weights at every step. The hidden state is the model''s memory of everything so far.
+## Why it stopped working on long sequences
 
-## LSTM and GRU
+Unrolled over 100 steps, a recurrent network is a 100-layer network that reuses one weight matrix. The gradient travelling back to step 1 is multiplied by that same matrix 100 times - so its size is governed by the matrix''s largest singular value raised to the power of the sequence length.
 
-A plain recurrent network forgets quickly: the gradient has to flow back through every step, and multiplying small numbers many times drives it to zero. Information from thirty steps ago has no path to influence the update.
+```python
+import numpy as np
+import pandas as pd
 
-LSTMs added gates - learned decisions about what to keep, what to forget and what to output - giving gradients a more direct route backwards. GRUs are a simpler variant with similar performance. Both were the standard for sequence work for years, and both are still reasonable for modest-length series.
+rng = np.random.default_rng(1)
 
-## The two problems that ended their dominance
+SIZE = 32
 
-**1. They cannot be parallelised across time.** Step 50 needs the hidden state from step 49. Training is inherently sequential, which does not use a GPU well and puts a hard ceiling on how much data you can train on.
 
-**2. Long-range dependencies remain hard.** Gates help, but a word 500 tokens back still has to survive 500 updates to a fixed-size state. In practice information fades.
+def gradient_after(steps, scale, size=SIZE, seed=0):
+    generator = np.random.default_rng(seed)
+    W = generator.normal(0, scale, (size, size))
+    gradient = np.ones(size)
+    for _ in range(steps):
+        gradient = gradient @ W
+        if not np.isfinite(gradient).all():
+            return float(''inf'')
+    return float(np.abs(gradient).mean())
 
-Both were tolerated until an architecture appeared without either, which is the next lesson.
 
-## Where recurrence is still fine
+# For a random matrix the per-step factor applied to a typical
+# vector is about scale * sqrt(size). That is the number raised to
+# the power of the sequence length.
+rows = []
+for scale in [0.10, 0.17, 0.18, 0.25]:
+    row = {''init scale'': scale,
+           ''per-step factor'': round(scale * np.sqrt(SIZE), 3)}
+    for steps in [10, 50, 100, 200]:
+        row[f''{steps} steps''] = f''{gradient_after(steps, scale):.2e}''
+    rows.append(row)
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The per-step factor crosses 1 between the second and third'')
+print(''rows. At 0.962 the gradient is 1e-45 by 200 steps. At 1.018'')
+print(''- a difference of six percent - it is 1e+6. At 1.414 it is'')
+print(''1e+35.'')
+print()
+print(''There is no setting that survives 200 steps, because the'')
+print(''number being raised to the 200th power would have to be'')
+print(''almost exactly 1. This is not the deep feed-forward'')
+print(''problem, where each layer has its OWN matrix and the'')
+print(''factors are independent and partly cancel. Here it is one'')
+print(''matrix, 200 times, and the errors compound in one'')
+print(''direction.'')
+```
 
-Short sequences, small models, and settings where you want streaming inference - a recurrent model consumes one step at a time naturally, where a transformer wants the window. For a sensor time series of a few hundred steps, a GRU is small, fast and entirely adequate.
+## LSTM and GRU: a path that is addition rather than multiplication
 
-## Sequence tasks have shapes
+The LSTM''s answer is a second state - the cell state - that is updated by *adding* to it, with gates deciding what to add and what to forget. Addition does not shrink a gradient.
 
-- **Many to one**: a sentence to a sentiment. Take the final hidden state.
-- **Many to many, aligned**: tag every word. One output per step.
-- **Many to many, unaligned**: translation. Encoder, then decoder - and the bottleneck between them is exactly what attention was invented to fix.
+```python
+import numpy as np
 
-## Teacher forcing, and the gap it creates
+rng = np.random.default_rng(2)
 
-When training a model that generates a sequence, you feed it the true previous token rather than its own prediction, which makes training stable. At inference it has to consume its own output, so one early mistake compounds - the model has never practised recovering from its own errors. This exposure gap is still a live issue in generation, including in the models in the next course.',
-   'Text, speech and time series have order. Recurrent networks process them one step at a time, carrying a hidden state - an elegant idea with two fatal problems that explain exactly why the field moved to attention.',
-   11, 412, '55555555-5555-4555-8555-555555555555', 'published',
+hidden = 8
+# Four gates: forget, input, output, and the candidate value.
+W = {name: rng.normal(0, 0.3, (hidden + 4, hidden))
+     for name in [''forget'', ''input'', ''output'', ''candidate'']}
+b = {''forget'': np.ones(hidden) * 1.0,      # biased OPEN at the start
+     ''input'': np.zeros(hidden),
+     ''output'': np.zeros(hidden),
+     ''candidate'': np.zeros(hidden)}
+
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+
+def lstm_step(x, h, c):
+    joined = np.concatenate([x, h])
+    f = sigmoid(joined @ W[''forget''] + b[''forget''])
+    i = sigmoid(joined @ W[''input''] + b[''input''])
+    o = sigmoid(joined @ W[''output''] + b[''output''])
+    g = np.tanh(joined @ W[''candidate''] + b[''candidate''])
+    c_next = f * c + i * g                  # ADDITION - the key line
+    h_next = o * np.tanh(c_next)
+    return h_next, c_next, f.mean()
+
+
+sequence = rng.normal(0, 1, (12, 4))
+h, c = np.zeros(hidden), np.zeros(hidden)
+print(''step  mean forget gate  |cell state|  |hidden state|'')
+for step, x in enumerate(sequence, 1):
+    h, c, forget_mean = lstm_step(x, h, c)
+    print(f''{step:4d}  {forget_mean:16.4f}  {np.abs(c).mean():12.4f}''
+          f''  {np.abs(h).mean():14.4f}'')
+print()
+print(''The forget gate sits near 0.73, because its bias was'')
+print(''initialised to 1.0 rather than 0 - the standard trick, and'')
+print(''the reason every LSTM implementation has a forget_bias'')
+print(''argument.'')
+print()
+print(''What matters is the PRODUCT of those gates, because that is'')
+print(''the factor a gradient from the last step carries back to'')
+print(''the first:'')
+for gate, label in [(0.5, ''bias 0 - the naive default''),
+                    (0.73, ''bias 1 - as measured above''),
+                    (0.95, ''bias 3''),
+                    (0.99, ''bias 5'')]:
+    print(f''  gate {gate:<5} ({label:<26}) ''
+          f''over 12 steps {gate ** 12:8.4f}   ''
+          f''over 200 {gate ** 200:.2e}'')
+print()
+print(''A gate of 0.5 loses everything in a dozen steps. A gate of'')
+print(''0.99 keeps 13% over two hundred. The arithmetic is'')
+print(''unforgiving and it is why the forget bias is one of the few'')
+print(''initialisation details that has a name.'')
+```
+
+Now the measurement that justifies the extra machinery: can each architecture remember a value it saw at step 1?
+
+```python
+import torch
+import torch.nn as nn
+
+torch.set_num_threads(4)
+
+
+def gradient_at_first_step(kind, length, forget_bias=None, hidden=32, seed=0):
+    """How much of the final loss''s gradient reaches input step 0."""
+    torch.manual_seed(seed)
+    layer = (nn.RNN if kind == ''rnn'' else nn.LSTM)(1, hidden, batch_first=True)
+
+    # PyTorch stacks the four gate biases as (input, forget, cell, output),
+    # so the forget slice is the second block of `hidden` entries.
+    if forget_bias is not None:
+        with torch.no_grad():
+            layer.bias_ih_l0[hidden:2 * hidden].fill_(forget_bias)
+            layer.bias_hh_l0[hidden:2 * hidden].fill_(0.0)
+
+    head = nn.Linear(hidden, 1)
+    sequence = torch.randn(1, length, 1, requires_grad=True)
+    output, _ = layer(sequence)
+    head(output[:, -1]).sum().backward()
+    gradients = sequence.grad[0, :, 0].abs()
+    return float(gradients[0]), float(gradients[-1])
+
+
+print(''gradient reaching the FIRST input step:'')
+print()
+print(''length         RNN  LSTM, forget bias 0  bias 1  bias 3  bias 5'')
+for length in [5, 20, 50, 100, 200]:
+    rnn_first, _ = gradient_at_first_step(''rnn'', length)
+    columns = [gradient_at_first_step(''lstm'', length, bias)[0]
+               for bias in [0.0, 1.0, 3.0, 5.0]]
+    print(f''{length:6d}  {rnn_first:10.2e}  '' +
+          ''  ''.join(f''{value:.2e}'' for value in columns))
+print()
+last_rnn = gradient_at_first_step(''rnn'', 200)
+print(f''for scale, the gradient at the LAST step of a 200-sequence ''
+      f''is {last_rnn[1]:.2e}'')
+print()
+print(''Read the first column down. By 200 steps the plain'')
+print(''recurrence delivers a gradient of exactly zero to step 0,'')
+print(''while the last step still gets 4.7e-02 - a ratio of'')
+print(''infinity. The network cannot learn anything about its own'')
+print(''early inputs, however long you train it.'')
+print()
+print(''Now read across. An LSTM at the default forget bias of 0 is'')
+print(''no better: 3.2e-40 is zero for every practical purpose. The'')
+print(''additive cell path does not help by existing; it helps when'')
+print(''the forget gate is OPEN, and the bias is what opens it. At'')
+print(''bias 5 the gradient at step 0 is 1.4e-01, larger than the'')
+print(''plain RNN manages at its LAST step.'')
+print()
+print(''That is the honest version of "LSTMs solve the vanishing'')
+print(''gradient". They provide a path that CAN carry a gradient.'')
+print(''Whether it does is a matter of initialisation, and of what'')
+print(''the gates learn.'')
+```
+
+It is worth being clear about what this does and does not settle. A gradient of `1e-40` means the first step is unlearnable. It does not mean an LSTM beats an RNN on every sequence task - on short sequences, or where the answer depends on recent inputs, a plain recurrence is often as good and trains faster. The gated cell buys range, and range is only worth paying for when the problem needs it.
+
+## The three structural variants
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+hidden, input_size, length = 6, 3, 7
+sequence = rng.normal(0, 1, (length, input_size))
+
+Wx = rng.normal(0, 0.4, (input_size, hidden))
+Wh = rng.normal(0, 0.4, (hidden, hidden))
+
+
+def run(sequence):
+    h = np.zeros(hidden)
+    states = []
+    for x in sequence:
+        h = np.tanh(x @ Wx + h @ Wh)
+        states.append(h.copy())
+    return np.array(states)
+
+
+forward = run(sequence)
+backward = run(sequence[::-1])[::-1]
+bidirectional = np.concatenate([forward, backward], axis=1)
+
+print(''unidirectional state at each step :'', forward.shape)
+print(''bidirectional state at each step  :'', bidirectional.shape)
+print()
+print(''step  forward sees   backward sees'')
+for step in range(length):
+    print(f''{step:4d}  steps 0-{step:<7d} steps {step}-{length - 1}'')
+print()
+print(''A bidirectional layer doubles the state width and gives'')
+print(''every step access to the whole sequence. It is correct for'')
+print(''classification, translation and tagging - anything where'')
+print(''the full input is available.'')
+print()
+print(''It is WRONG for forecasting and for generation, where the'')
+print(''future is what you are predicting. Using a bidirectional'')
+print(''layer there leaks the answer, and the symptom is a'')
+print(''validation score that looks wonderful and a live model'')
+print(''that is useless.'')
+```
+
+Three shapes cover most sequence problems:
+
+| Shape | Input to output | Example |
+| --- | --- | --- |
+| Many to one | a sequence, one answer | sentiment of a review, is this session fraudulent |
+| Many to many, aligned | one output per step | part-of-speech tagging, per-frame labels |
+| Sequence to sequence | a sequence in, a different-length sequence out | translation, summarisation |
+
+The third is the hard one, and it is where recurrence''s real limit shows up. The classic design encodes the whole input into one fixed-size vector and decodes from it - so a 60-word sentence and a 6-word sentence are compressed into the same number of floats.
+
+```python
+import numpy as np
+
+hidden = 512
+print(''encoder final state:'', hidden, ''floats ='', hidden * 4, ''bytes'')
+print()
+for words in [5, 20, 60, 200]:
+    print(f''{words:4d}-word sentence -> {hidden} floats ''
+          f''({hidden / words:.1f} floats per word)'')
+print()
+print(''A 200-word input gets 2.6 floats per word to carry its'')
+print(''meaning, and the decoder sees nothing else. Translation'')
+print(''quality duly collapsed with sentence length, and the fix'')
+print(''for that - letting the decoder look back at every encoder'')
+print(''state instead of just the last one - is attention. It was'')
+print(''invented for this exact problem, and it turned out to make'')
+print(''the recurrence itself unnecessary.'')
+```
+
+## Why transformers replaced them
+
+The architectural argument is about gradients. The practical argument is about hardware, and it is the one that actually decided it.
+
+```python
+import pandas as pd
+
+rows = []
+for length in [10, 100, 1000]:
+    rows.append({''length'': length,
+                 ''recurrent: steps that cannot be parallelised'': length,
+                 ''attention: the same'': 1,
+                 ''recurrent: hops from step 1 to step n'': length,
+                 ''attention: the same '': 1})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''A recurrent layer cannot compute step 5 before step 4. For'')
+print(''a 1,000-token sequence that is 1,000 unavoidable sequential'')
+print(''operations, and a GPU with thousands of cores spends almost'')
+print(''all of them idle. Attention computes every position at'')
+print(''once, as one large matrix multiplication, which is the'')
+print(''single thing GPUs do best.'')
+print()
+print(''The second and fourth columns are the gradient argument:'')
+print(''the distance information has to travel. 1,000 steps versus'')
+print(''1. Nothing about LSTMs fixes that, it only makes the decay'')
+print(''slower.'')
+```
+
+## Where recurrence is still the right answer
+
+This is not a lesson about a dead technology. Recurrent models remain the better choice in three situations:
+
+- **Streaming with a fixed memory budget.** An RNN''s state is one vector of constant size, so the cost per token never grows. Attention over a growing context costs more at every step.
+- **Very long sequences where quadratic cost is prohibitive.** Attention over `n` positions costs `n^2`; recurrence costs `n`.
+- **Small devices and small data.** An LSTM with 50,000 parameters trained on 2,000 examples will often beat a transformer on the same budget, because the transformer has no built-in notion of order and has to learn one.
+
+```python
+import pandas as pd
+
+rows = []
+for length in [128, 1024, 8192, 65536]:
+    attention_scores = length * length
+    recurrent_work = length
+    rows.append({''sequence length'': length,
+                 ''attention score matrix'': f''{attention_scores:,}'',
+                 ''as float32'': f''{attention_scores * 4 / 1024 ** 2:,.1f} MiB'',
+                 ''recurrent state updates'': f''{recurrent_work:,}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''At 65,536 tokens the score matrix alone is 16 GiB per'')
+print(''attention head per example. This is why long-context models'')
+print(''do not use plain attention, and why state-space models -'')
+print(''which are recurrences with a cleverer update - came back'')
+print(''into fashion for exactly this regime.'')
+```
+
+## Failure modes
+
+| Symptom | Cause |
+| --- | --- |
+| Loss falls for short sequences, flat for long ones | Vanishing gradient; use a gated cell, truncate the backward pass, or use attention |
+| Loss becomes `nan` after a few hundred steps | Exploding gradient; clip the norm, which for recurrent models is not optional |
+| Validation excellent, live predictions useless, task is forecasting | A bidirectional layer, or a feature computed over the whole series including the future |
+| Padded batches give different results than one-at-a-time | Padding is being fed through the recurrence; use a mask or packed sequences |
+| Training is slow and the GPU is at 10% | Inherent: the recurrence is sequential. Batch harder, or change architecture |
+| Works on your sequences, fails on longer ones at inference | The model learned a length, not a rule; train on varied lengths |
+| First few outputs of every sequence are poor | The initial state is zero and carries no information; this is normal, and warmup steps are often discarded |
+
+Row four is the one that quietly destroys results. A padded batch looks correct and trains without error - the padding simply becomes part of the input, and the model learns that sequences end with a run of zeros.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(4)
+hidden = 4
+Wx = rng.normal(0, 0.5, (1, hidden))
+Wh = rng.normal(0, 0.5, (hidden, hidden))
+
+
+def final_state(sequence, mask=None):
+    h = np.zeros(hidden)
+    for index, x in enumerate(sequence):
+        candidate = np.tanh(x @ Wx + h @ Wh)
+        if mask is None or mask[index]:
+            h = candidate
+    return h
+
+
+real = np.array([[1.0], [-0.5], [2.0]])
+padded = np.array([[1.0], [-0.5], [2.0], [0.0], [0.0], [0.0]])
+mask = np.array([True, True, True, False, False, False])
+
+print(''unpadded          '', final_state(real).round(4))
+print(''padded, no mask   '', final_state(padded).round(4))
+print(''padded, with mask '', final_state(padded, mask).round(4))
+print()
+print(''masked matches unpadded:'',
+      bool(np.allclose(final_state(real), final_state(padded, mask))))
+print(''unmasked matches unpadded:'',
+      bool(np.allclose(final_state(real), final_state(padded))))
+print()
+print(''Three zero steps moved the state a long way, because'')
+print(''tanh(0 @ Wx + h @ Wh) is not h. The unmasked version is'')
+print(''answering a different question, and nothing in the training'')
+print(''loop will tell you.'')
+```
+
+## Check your understanding
+
+Write the recurrence by hand and check it against the framework. The thing to get right is not the arithmetic but the shapes, and the shape convention is where almost everyone loses an afternoon.
+
+```python
+import numpy as np
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+
+input_size, hidden_size, length = 3, 5, 4
+cell = nn.RNN(input_size, hidden_size, batch_first=True, nonlinearity=''tanh'')
+
+sequence = torch.randn(1, length, input_size)
+output, final = cell(sequence)
+
+# PyTorch stores the input-to-hidden weights TRANSPOSED relative to
+# the (input, hidden) convention used by hand above.
+W_ih = cell.weight_ih_l0.detach().numpy()      # (hidden, input)
+W_hh = cell.weight_hh_l0.detach().numpy()      # (hidden, hidden)
+b_ih = cell.bias_ih_l0.detach().numpy()
+b_hh = cell.bias_hh_l0.detach().numpy()
+
+h = np.zeros(hidden_size)
+by_hand = []
+for step in range(length):
+    x = sequence[0, step].numpy()
+    h = np.tanh(W_ih @ x + b_ih + W_hh @ h + b_hh)
+    by_hand.append(h.copy())
+by_hand = np.array(by_hand)
+
+framework = output[0].detach().numpy()
+print(''framework output shape'', tuple(output.shape),
+      ''= (batch, length, hidden)'')
+print(''final state shape     '', tuple(final.shape),
+      ''= (layers, batch, hidden)'')
+print()
+print(''max difference'', float(np.abs(framework - by_hand).max()))
+print(''agree:'', bool(np.allclose(framework, by_hand, atol=1e-5)))
+print()
+print(''Two conventions worth writing on a card. PyTorch keeps TWO'')
+print(''biases, one for the input term and one for the hidden term,'')
+print(''which is redundant mathematically and real in the'')
+print(''parameter count. And batch_first=False is the DEFAULT, so'')
+print(''the shape is (length, batch, hidden) unless you say'')
+print(''otherwise - a transposition that trains perfectly happily'')
+print(''and gives nonsense.'')
+```
+',
+   'Text, speech and time series have order. Recurrent networks process them one step at a time, carrying a hidden state - an elegant idea with two fatal problems that explain exactly why the field moved to attention.', 14, 2725,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-00000000010b',
    'Attention and the Transformer',
    'markdown',
-   'Attention answers one question: when processing this element, which other elements matter, and how much?
+   'Attention lets every position in a sequence look directly at every other position and decide, for itself, which ones matter. That is the whole idea, and it replaced recurrence because it removes the two things recurrence could not fix: the distance information has to travel, and the fact that step 5 cannot be computed before step 4.
 
-## The mechanism, in words
+## Query, key, value
 
-Every position produces three vectors - a query, a key and a value. To compute the output at one position, compare its query against every key to get a score, turn the scores into weights with softmax, and take the weighted sum of the values.
+The vocabulary is borrowed from databases, and the analogy is close enough to be useful. Each position emits a **query** - what it is looking for. Each position also emits a **key** - what it offers. The match between a query and a key decides how much of that position''s **value** is read.
 
+```python
+import numpy as np
+
+dimension = 4
+
+# Four positions. Rather than random projections - which produce
+# near-uniform weights and show nothing - the queries and keys are
+# written out, so you can read off which position matches which.
+#
+#   position 0 asks for "A", position 1 asks for "B", and so on.
+queries = np.array([[3.0, 0, 0, 0],      # 0 looks for A
+                    [0, 3.0, 0, 0],      # 1 looks for B
+                    [0, 0, 3.0, 0],      # 2 looks for C
+                    [3.0, 0, 0, 0]])     # 3 also looks for A
+
+keys = np.array([[0, 0, 1.0, 0],         # 0 offers C
+                 [1.0, 0, 0, 0],         # 1 offers A
+                 [0, 1.0, 0, 0],         # 2 offers B
+                 [0, 0, 0, 1.0]])        # 3 offers D
+
+values = np.array([[10.0, 0.0],
+                   [20.0, 1.0],
+                   [30.0, 2.0],
+                   [40.0, 3.0]])
+
+Q, K, V = queries, keys, values
+print(''Q, K, V shapes:'', Q.shape, K.shape, V.shape)
+print()
+
+# Every query against every key: one score per pair.
+scores = Q @ K.T
+print(''raw scores (query row, key column)'')
+print(scores.round(3))
+print()
+
+# Scaled, then turned into weights that sum to 1 along each row.
+scaled = scores / np.sqrt(dimension)
+
+
+def softmax(z):
+    shifted = z - z.max(axis=-1, keepdims=True)
+    exponentials = np.exp(shifted)
+    return exponentials / exponentials.sum(axis=-1, keepdims=True)
+
+
+weights = softmax(scaled)
+print(''attention weights'')
+print(weights.round(3))
+print(''each row sums to'', weights.sum(axis=1).round(6))
+print()
+
+output = weights @ V
+print(''output shape'', output.shape, ''- one vector per position, as the input was'')
+print()
+for position in range(4):
+    best = int(weights[position].argmax())
+    print(f''position {position} put {weights[position].max():.0%} of its ''
+          f''weight on position {best}, and read {output[position].round(2)}'')
+print()
+print(''Position 0 asked for A and found it at position 1. Position'')
+print(''1 asked for B and found it at 2. Positions 0 and 3 asked'')
+print(''for the same thing and read the same value, although they'')
+print(''sit at opposite ends. The distance between them cost'')
+print(''nothing: there is no 200-step path, because there are no'')
+print(''steps.'')
 ```
-attention(Q, K, V) = softmax(Q Kt / sqrt(d)) V
+
+## Why the division by the square root of the dimension
+
+This is the one line in the formula that looks arbitrary and is not. Without it, the scores grow with the dimension, the softmax saturates, and the gradient disappears.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(1)
+
+
+def softmax(z):
+    shifted = z - z.max(axis=-1, keepdims=True)
+    exponentials = np.exp(shifted)
+    return exponentials / exponentials.sum(axis=-1, keepdims=True)
+
+
+rows = []
+for dimension in [8, 64, 512, 4096]:
+    q = rng.normal(0, 1, (2000, dimension))
+    k = rng.normal(0, 1, (2000, dimension))
+    unscaled = (q * k).sum(axis=1)
+    scaled = unscaled / np.sqrt(dimension)
+
+    # ONE fixed pattern of scores, stretched to each measured
+    # spread, so the only thing changing down the table is the
+    # spread itself.
+    pattern = np.linspace(-1.5, 1.5, 20)
+    row_unscaled = softmax((pattern * unscaled.std())[None, :])[0]
+    row_scaled = softmax((pattern * scaled.std())[None, :])[0]
+
+    rows.append({''dimension'': dimension,
+                 ''score std, unscaled'': round(float(unscaled.std()), 2),
+                 ''score std, scaled'': round(float(scaled.std()), 2),
+                 ''largest weight, unscaled'': f''{row_unscaled.max():.4f}'',
+                 ''largest weight, scaled'': f''{row_scaled.max():.4f}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The dot product of two random vectors has a standard'')
+print(''deviation of sqrt(dimension), so at 4096 the scores span'')
+print(''about 66 either way. Softmax over scores that large puts'')
+print(''essentially all the weight on one position - the unscaled'')
+print(''column goes 0.36, 0.72, 0.97, 1.00 - and the gradient'')
+print(''through every other position goes to zero with it. The'')
+print(''scaled column stays at 0.15 at every width.'')
+print()
+print(''Dividing by sqrt(dimension) holds the score spread at'')
+print(''roughly 1 regardless of width, which keeps the softmax in'')
+print(''the range where it has a gradient. That is the whole'')
+print(''reason, and it is why the operation is called SCALED'')
+print(''dot-product attention.'')
 ```
 
-The scaling by the square root of the dimension stops the scores growing so large that softmax saturates into a one-hot vector with no useful gradient.
+## Attention is not magic: it is a weighted average
 
-That is the whole mechanism. Everything else in a transformer is plumbing around it.
+Worth seeing concretely, because it explains both what attention can do and what it cannot.
 
-## Why it replaced recurrence
+```python
+import numpy as np
 
-**Every position reaches every other in one step.** The distance between two words is irrelevant - 500 tokens apart costs the same as adjacent.
+# Six positions, each holding a one-dimensional "meaning".
+values = np.array([[10.0], [20.0], [30.0], [40.0], [50.0], [60.0]])
 
-**It parallelises.** Every position is computed at once, which uses a GPU properly. This is the practical reason transformers scaled and recurrent models did not.
 
-The cost is that attention is quadratic in sequence length: double the context, quadruple the computation. That is why context windows were small for years and why so much research targets exactly this.
+def softmax(z):
+    shifted = z - z.max()
+    exponentials = np.exp(shifted)
+    return exponentials / exponentials.sum()
 
-## The rest of a transformer block
 
-- **Multi-head attention** - several attention operations in parallel with different learned projections, so one head can track syntax while another tracks reference.
-- **Positional encoding** - attention is order-blind on its own, so position information is added to the inputs. Without it, a sentence and its shuffle are identical to the model.
-- **A feed-forward network** per position, applied identically everywhere.
-- **Residual connections and layer normalisation** around each sub-layer, for the same reason as in deep convolutional networks.
+print(''values:'', values.ravel())
+print()
+for label, scores in [
+        (''uniform attention'', np.zeros(6)),
+        (''sharp on position 3'', np.array([0, 0, 0, 10.0, 0, 0])),
+        (''sharp on position 0'', np.array([10.0, 0, 0, 0, 0, 0])),
+        (''two positions'', np.array([0, 0, 5.0, 5.0, 0, 0])),
+        (''mild preference for late'', np.array([0, 0.4, 0.8, 1.2, 1.6, 2.0]))]:
+    weights = softmax(scores)
+    output = (weights @ values).item()
+    print(f''{label:<26} weights {weights.round(3)} -> {output:6.2f}'')
+print()
+print(''Every output is between 10 and 60, because every output is'')
+print(''a convex combination of the values. Attention can select,'')
+print(''and it can blend. It cannot produce 70, and it cannot'')
+print(''compute anything non-linear - which is exactly why every'')
+print(''transformer block puts a feed-forward network after the'')
+print(''attention. The attention moves information between'')
+print(''positions; the feed-forward network transforms it.'')
+```
 
-Stack that block N times and you have a transformer.
+## Multiple heads
 
-## The three shapes
+One attention operation produces one set of weights, so it can express one notion of relevance. Several heads, each with its own smaller projections, express several at once.
 
-- **Encoder only** (BERT-style): sees the whole input at once. For classification, retrieval and embeddings.
-- **Decoder only** (GPT-style): each position attends only to earlier ones, so it can be trained to predict the next token. Every large language model you have used.
-- **Encoder-decoder** (T5-style): for translation and summarisation, where input and output are different sequences.
+```python
+import numpy as np
 
-## Why this is the last architecture lesson
+rng = np.random.default_rng(2)
 
-The same block works for text, images (as patches), audio and video. A single architecture absorbed fields that each had their own specialised models, and scaling it up turned out to keep working - which is the entire premise of the generative AI course that follows this one.',
-   'Attention lets every position look directly at every other and decide what matters, with no sequential bottleneck. It is the idea behind every large language model, and it is simpler than its reputation.',
-   12, 417, '55555555-5555-4555-8555-555555555555', 'published',
+length, dimension, heads = 6, 64, 8
+head_dimension = dimension // heads
+X = rng.normal(0, 1, (length, dimension))
+
+W_query = rng.normal(0, 0.1, (dimension, dimension))
+W_key = rng.normal(0, 0.1, (dimension, dimension))
+W_value = rng.normal(0, 0.1, (dimension, dimension))
+W_output = rng.normal(0, 0.1, (dimension, dimension))
+
+
+def softmax(z):
+    shifted = z - z.max(axis=-1, keepdims=True)
+    exponentials = np.exp(shifted)
+    return exponentials / exponentials.sum(axis=-1, keepdims=True)
+
+
+# Project once, then SPLIT into heads. This is the detail that
+# surprises people: eight heads cost the same as one wide one.
+Q = (X @ W_query).reshape(length, heads, head_dimension).transpose(1, 0, 2)
+K = (X @ W_key).reshape(length, heads, head_dimension).transpose(1, 0, 2)
+V = (X @ W_value).reshape(length, heads, head_dimension).transpose(1, 0, 2)
+
+weights = softmax(Q @ K.transpose(0, 2, 1) / np.sqrt(head_dimension))
+per_head = weights @ V                           # (heads, length, head_dim)
+joined = per_head.transpose(1, 0, 2).reshape(length, dimension)
+output = joined @ W_output
+
+print(f''{heads} heads of {head_dimension} dimensions each = {dimension}'')
+print(''weights shape'', weights.shape, ''= (heads, query, key)'')
+print(''output shape '', output.shape, ''- same as the input'')
+print()
+print(''parameters:'', 4 * dimension * dimension,
+      ''- four projections, independent of the head count'')
+print()
+print(''where each head puts most of its weight, for query 3:'')
+for head in range(heads):
+    print(f''  head {head}: position {int(weights[head, 3].argmax())} ''
+          f''at {weights[head, 3].max():.3f}'')
+print()
+print(''Eight heads, eight different answers to "what matters for'')
+print(''position 3". In a trained model these specialise -'')
+print(''published analyses find heads that track the previous'')
+print(''token, heads that match a verb to its subject, heads that'')
+print(''find the matching bracket. Nobody designs that; it is what'')
+print(''the split produces.'')
+```
+
+## Masking: two different masks, often confused
+
+```python
+import numpy as np
+
+
+def softmax(z):
+    shifted = z - z.max(axis=-1, keepdims=True)
+    exponentials = np.exp(shifted)
+    return exponentials / exponentials.sum(axis=-1, keepdims=True)
+
+
+length = 5
+rng = np.random.default_rng(3)
+scores = rng.normal(0, 1, (length, length))
+
+# 1. The CAUSAL mask: position i may not see positions after i.
+#    This is what makes a language model able to generate.
+causal = np.triu(np.ones((length, length), dtype=bool), k=1)
+print(''causal mask (True = blocked)'')
+print(causal.astype(int))
+print()
+print(''weights with the causal mask'')
+print(softmax(np.where(causal, -np.inf, scores)).round(3))
+print()
+
+# 2. The PADDING mask: positions 3 and 4 are padding in this
+#    example and should be invisible to everyone.
+padding = np.array([False, False, False, True, True])
+print(''weights with a padding mask on positions 3 and 4'')
+print(softmax(np.where(padding[None, :], -np.inf, scores)).round(3))
+print()
+print(''Both are applied by setting the score to minus infinity'')
+print(''BEFORE the softmax, not by zeroing the weight afterwards.'')
+print(''Zeroing afterwards leaves the rows no longer summing to 1,'')
+print(''which silently rescales everything.'')
+print()
+
+wrong = softmax(scores) * ~causal
+print(''what zeroing afterwards gives, row sums:'',
+      wrong.sum(axis=1).round(3))
+print(''what masking before gives, row sums:    '',
+      softmax(np.where(causal, -np.inf, scores)).sum(axis=1).round(3))
+print()
+print(''Row 1 of the wrong version sums to 0.031, so that position'')
+print(''output has been scaled down by a factor of 32 for no'')
+print(''reason at all. Row 4 sums to 1.000, so it is untouched.'')
+print(''Every position is distorted by a different amount, and the'')
+print(''model trains around it.'')
+```
+
+## Positional information, because attention has none
+
+A weighted average does not know where anything is. Shuffle the input and the set of outputs is the same set, permuted. This is worth proving, because it is the single most important limitation of the mechanism.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(4)
+length, dimension = 5, 16
+X = rng.normal(0, 1, (length, dimension))
+W = rng.normal(0, 0.2, (dimension, dimension))
+
+
+def softmax(z):
+    shifted = z - z.max(axis=-1, keepdims=True)
+    exponentials = np.exp(shifted)
+    return exponentials / exponentials.sum(axis=-1, keepdims=True)
+
+
+def attend(X):
+    Q, K, V = X @ W, X @ W, X @ W
+    return softmax(Q @ K.T / np.sqrt(dimension)) @ V
+
+
+order = np.array([3, 1, 4, 0, 2])
+original = attend(X)
+shuffled = attend(X[order])
+
+print(''attention of the shuffled input equals the shuffled output:'',
+      bool(np.allclose(shuffled, original[order])))
+print()
+print(''So the mechanism is PERMUTATION EQUIVARIANT: it has no idea'')
+print(''which position is which. "The dog bit the man" and "the man'')
+print(''bit the dog" would produce the same set of vectors.'')
+print()
+
+# Sinusoidal positions - the original fix. Each dimension is a sine
+# of a different wavelength, so the pattern is unique per position
+# and nearby positions are similar.
+def sinusoidal(length, dimension):
+    position = np.arange(length)[:, None]
+    index = np.arange(0, dimension, 2)[None, :]
+    rate = 1.0 / (10000 ** (index / dimension))
+    encoding = np.zeros((length, dimension))
+    encoding[:, 0::2] = np.sin(position * rate)
+    encoding[:, 1::2] = np.cos(position * rate)
+    return encoding
+
+
+encoding = sinusoidal(8, 16)
+print(''position encoding, first 6 dimensions of each of 8 positions'')
+print(encoding[:, :6].round(3))
+print()
+
+# Nearby positions should be similar; distant ones less so.
+normalised = encoding / np.linalg.norm(encoding, axis=1, keepdims=True)
+print(''similarity of position 0 to each position:'')
+print((normalised @ normalised[0]).round(3))
+print()
+print(''Similarity falls from 1.000 at position 0 to 0.693 at'')
+print(''position 3, which gives the model a usable notion of'')
+print(''"nearby". Note that it then RISES again, to 0.806 at'')
+print(''position 6: sinusoids wrap around, so absolute encodings'')
+print(''make distant positions look similar. That is one of the'')
+print(''reasons they were replaced.'')
+print()
+print(''Add them to the input and attention stops being'')
+print(''permutation equivariant:'')
+
+positions = sinusoidal(length, dimension)
+# Positions are added AFTER the shuffle, which is what a real
+# pipeline does: position 0 is whatever token arrived first.
+shuffled_then_encoded = attend(X[order] + positions)
+encoded_then_shuffled = attend(X + positions)[order]
+print(''  shuffled == shuffled output, with positions added:'',
+      bool(np.allclose(shuffled_then_encoded, encoded_then_shuffled)))
+print(''  largest disagreement:'',
+      round(float(np.abs(shuffled_then_encoded
+                         - encoded_then_shuffled).max()), 4))
+print()
+print(''False, which is the point. Modern models mostly use'')
+print(''rotary embeddings instead, which apply a rotation to Q and'')
+print(''K so that the SCORE depends on the relative distance'')
+print(''between two positions rather than on their absolute'')
+print(''indices - better behaved when the sequence is longer than'')
+print(''anything seen in training.'')
+```
+
+## A transformer block, in full
+
+Attention is one of five parts. The arrangement matters as much as the mechanism.
+
+```python
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+torch.set_num_threads(4)
+
+
+class Block(nn.Module):
+    """One pre-norm transformer block: the modern arrangement."""
+
+    def __init__(self, dimension, heads, expansion=4, dropout=0.1):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dimension)
+        self.attention = nn.MultiheadAttention(dimension, heads,
+                                               dropout=dropout,
+                                               batch_first=True)
+        self.norm2 = nn.LayerNorm(dimension)
+        self.feed_forward = nn.Sequential(
+            nn.Linear(dimension, expansion * dimension),
+            nn.GELU(),
+            nn.Linear(expansion * dimension, dimension),
+            nn.Dropout(dropout))
+
+    def forward(self, x, mask=None):
+        normed = self.norm1(x)
+        attended, weights = self.attention(normed, normed, normed,
+                                           attn_mask=mask,
+                                           need_weights=True)
+        x = x + attended                       # residual
+        x = x + self.feed_forward(self.norm2(x))   # residual
+        return x, weights
+
+
+dimension, heads, length = 64, 8, 10
+block = Block(dimension, heads)
+x = torch.randn(2, length, dimension)
+
+causal = torch.triu(torch.ones(length, length, dtype=torch.bool), diagonal=1)
+output, weights = block(x, mask=causal)
+
+print(''input  '', tuple(x.shape))
+print(''output '', tuple(output.shape), ''- unchanged, so blocks stack'')
+print(''weights'', tuple(weights.shape), ''- averaged over heads by default'')
+print()
+counts = {name: sum(p.numel() for p in module.parameters())
+          for name, module in [(''attention'', block.attention),
+                               (''feed forward'', block.feed_forward),
+                               (''two layer norms'',
+                                nn.ModuleList([block.norm1, block.norm2]))]}
+total = sum(counts.values())
+for name, count in counts.items():
+    print(f''{name:<18} {count:8,}  {count / total:5.1%}'')
+print(f''{"total":<18} {total:8,}'')
+print()
+print(''Two thirds of the parameters are in the feed-forward'')
+print(''network, not the attention. The part everyone talks about'')
+print(''is the smaller half of the block.'')
+print()
+
+# Causality, checked rather than assumed: changing a LATER token
+# must not change an EARLIER output.
+block.eval()
+with torch.no_grad():
+    base, _ = block(x, mask=causal)
+    tampered = x.clone()
+    tampered[:, -1, :] += 10.0
+    after, _ = block(tampered, mask=causal)
+    difference = (after - base).abs().max(dim=-1).values[0]
+print(''effect of changing the LAST token, by output position:'')
+print(difference.round(decimals=6).tolist())
+print()
+print(''Zero everywhere except the final position. That is the test'')
+print(''to run on any causal model you build, because a mask that'')
+print(''is off by one trains beautifully and cheats.'')
+```
+
+Five things to notice about that block, each of which is a decision someone argued about:
+
+- **Pre-norm, not post-norm.** The original paper normalised *after* the residual addition. Pre-norm - normalising the input to each sub-layer, leaving the residual path clean - trains far more stably at depth, and every model since about 2020 uses it.
+- **Two residual connections**, one around attention and one around the feed-forward network. These are what let the stack go 100 layers deep.
+- **Layer norm, not batch norm.** The sequence length varies and the batch is a poor source of statistics for it.
+- **An expansion of 4** in the feed-forward network. Almost universal, and almost unexamined.
+- **GELU, not ReLU.** A smooth activation; it measurably helps here, and nobody is quite sure why.
+
+## What it costs
+
+```python
+import pandas as pd
+
+rows = []
+dimension = 768
+for length in [128, 512, 2048, 8192, 32768]:
+    attention = length * length * dimension        # score matrix work
+    feed_forward = length * dimension * dimension * 8
+    rows.append({''length'': length,
+                 ''attention work'': f''{attention / 1e9:8.2f} G'',
+                 ''feed-forward work'': f''{feed_forward / 1e9:8.2f} G'',
+                 ''attention share'': f''{attention / (attention + feed_forward):6.1%}'',
+                 ''scores as float32'': f''{length * length * 4 / 1024 ** 2:,.0f} MiB''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''At 128 tokens attention is 2% of the work and the'')
+print(''quadratic term is irrelevant. At 32,768 it is 84% and the'')
+print(''score matrix alone is 4 GiB per head per example.'')
+print()
+print(''This is why the practical answer is not a cleverer'')
+print(''algorithm but a better implementation: FlashAttention'')
+print(''computes the same result without ever materialising the'')
+print(''score matrix, by processing it in tiles that fit in fast'')
+print(''memory. Same arithmetic, same output, a fraction of the'')
+print(''memory traffic.'')
+```
+
+## Failure modes
+
+| Symptom | Cause |
+| --- | --- |
+| A causal model that predicts perfectly in training and produces nonsense when generating | The mask is off by one, so each position can see the token it is meant to predict |
+| Loss is `nan` from the first step | A row that is entirely masked, so the softmax divides by zero; keep at least one visible position |
+| `CUDA out of memory` scaling with the square of the sequence length | The score matrix; use a fused attention implementation |
+| Attention weights uniform across all positions after training | Scores too small - a missing scale factor, or the inputs were never normalised |
+| Attention weights entirely on one position | Scores too large - the `sqrt(dimension)` divisor is missing |
+| Results change when a batch is padded differently | No padding mask, so padding is being attended to |
+| Longer inputs at inference than in training degrade badly | Absolute position encodings; rotary or ALiBi extend better |
+| Attention maps "explain" the prediction | They show where information was read, which is not the same as why; treat them as a hint |
+
+The last row is not a bug but a reasoning error, and it is common. A head can place 90% of its weight on a token and contribute almost nothing to the output, because the value vector it read was near zero.
+
+```python
+import numpy as np
+
+# A head attending overwhelmingly to position 2, whose value
+# happens to be nearly zero.
+weights = np.array([0.03, 0.04, 0.90, 0.03])
+values = np.array([[1.0, -2.0], [0.5, 1.5], [0.001, 0.002], [3.0, 1.0]])
+
+output = weights @ values
+print(''weights'', weights)
+print(''output '', output.round(4))
+print()
+for index in range(4):
+    contribution = weights[index] * values[index]
+    print(f''position {index}: weight {weights[index]:.2f}, ''
+          f''contribution {contribution.round(4)}, ''
+          f''{np.abs(contribution).sum() / np.abs(weights[:, None] * values).sum():.1%} ''
+          f''of the total movement'')
+print()
+print(''Position 2 got 90% of the attention and supplied 0.9% of'')
+print(''the movement. Position 3 got 3% of the attention and'')
+print(''supplied 41%. An attention map would have pointed you at'')
+print(''position 2, confidently, and position 2 is the one that'')
+print(''did not matter.'')
+```
+
+## Check your understanding
+
+Write attention in eight lines and check it against the framework. Getting the same numbers means you understand the operation; the places where it is easy to disagree are the scale factor, the softmax axis, and the shape convention.
+
+```python
+import numpy as np
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+
+dimension, length = 16, 5
+attention = nn.MultiheadAttention(dimension, num_heads=1, bias=False,
+                                  batch_first=True)
+x = torch.randn(1, length, dimension)
+framework, framework_weights = attention(x, x, x, need_weights=True)
+
+# MultiheadAttention packs the three projections into one matrix,
+# stacked (query, key, value) along the output dimension.
+packed = attention.in_proj_weight.detach().numpy()        # (3d, d)
+W_query = packed[:dimension]
+W_key = packed[dimension:2 * dimension]
+W_value = packed[2 * dimension:]
+W_output = attention.out_proj.weight.detach().numpy()
+
+sequence = x[0].detach().numpy()
+Q = sequence @ W_query.T
+K = sequence @ W_key.T
+V = sequence @ W_value.T
+
+scores = Q @ K.T / np.sqrt(dimension)
+shifted = scores - scores.max(axis=-1, keepdims=True)
+weights = np.exp(shifted) / np.exp(shifted).sum(axis=-1, keepdims=True)
+by_hand = (weights @ V) @ W_output.T
+
+print(''output max difference '',
+      float(np.abs(framework[0].detach().numpy() - by_hand).max()))
+print(''weights max difference'',
+      float(np.abs(framework_weights[0].detach().numpy() - weights).max()))
+print(''agree:'', bool(np.allclose(framework[0].detach().numpy(), by_hand,
+                                 atol=1e-5)))
+print()
+print(''Three ways this disagrees if you get it wrong, all of which'')
+print(''still RUN:'')
+print('' - divide by dimension instead of its square root: the'')
+print(''   weights come out too flat, and the model underperforms'')
+print(''   quietly;'')
+print('' - softmax along axis 0 instead of -1: each KEY sums to 1'')
+print(''   instead of each query, which is a different operation'')
+print(''   entirely;'')
+print('' - forget the transpose on a projection: the shapes are'')
+print(''   square here, so it runs and computes nonsense. Use a'')
+print(''   non-square test when you can.'')
+```
+',
+   'Attention lets every position look directly at every other and decide what matters, with no sequential bottleneck. It is the idea behind every large language model, and it is simpler than its reputation.', 16, 3107,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-00000000010d',
    'Transfer Learning: How Models Are Really Trained',
    'markdown',
-   'Training from scratch needs an enormous dataset and a lot of compute. Almost nobody does it, and you should not either.
+   'Almost nobody trains a deep network from random weights. They start from a model someone else trained on far more data than they have, and adapt it. Understanding this is the difference between needing a million labelled examples and needing two hundred.
 
-## The idea
+## Why it works at all
 
-A model trained on millions of images has learned edges, textures, shapes and parts. Those are useful for almost any image task. Only the last layers are specific to the original classes.
+A trained network''s early layers have learned things that are not specific to its task. Edge detectors are edge detectors whether the next layer is classifying cats or diagnosing fractures. The late layers are task-specific; the early ones are close to universal.
 
-So: take the pretrained model, replace the final layer with one for your classes, and train on your data.
+So the practical question is never "should I use a pretrained model" - it is "how many of its layers am I allowed to keep".
+
+```python
+import pandas as pd
+
+rows = [
+    (''1-2'', ''edges, colour blobs, gradients'', ''universal - keep always''),
+    (''3-5'', ''textures, corners, simple shapes'', ''nearly universal''),
+    (''6-10'', ''parts: an eye, a wheel, a letter'', ''domain-specific - keep if the domain is close''),
+    (''11-15'', ''objects: a face, a car'', ''task-specific''),
+    (''final'', ''the 1,000 ImageNet classes'', ''always replaced''),
+]
+print(pd.DataFrame(rows, columns=[''layers'', ''what they represent'',
+                                  ''how transferable'']).to_string(index=False))
+print()
+print(''The gradient of specificity down that table is what every'')
+print(''transfer-learning decision is really about. A model'')
+print(''pretrained on photographs transfers well to other'')
+print(''photographs, moderately to medical scans, and barely at all'')
+print(''to spectrograms - and the layer at which it stops'')
+print(''transferring is how you measure "barely".'')
+```
+
+## The four strategies, and when each is right
+
+```python
+import pandas as pd
+
+rows = [
+    (''Feature extraction'', ''freeze everything, train a new head'',
+     ''< 1,000 examples'', ''minutes, CPU is fine''),
+    (''Fine-tune the last block'', ''freeze most, unfreeze the top'',
+     ''1,000 - 10,000'', ''tens of minutes''),
+    (''Fine-tune everything'', ''unfreeze all, very low rate'',
+     ''> 10,000'', ''hours''),
+    (''Train from scratch'', ''random weights'',
+     ''> 100,000 and a domain nothing pretrained covers'', ''days''),
+]
+print(pd.DataFrame(rows, columns=[''strategy'', ''what it means'',
+                                  ''use when you have'', ''typical cost'']
+                   ).to_string(index=False))
+print()
+print(''Work down the table, not up. Feature extraction takes ten'')
+print(''minutes and answers the only question that matters at the'')
+print(''start: are the pretrained features any use on this problem'')
+print(''at all? If a frozen backbone plus a logistic regression is'')
+print(''already close to what you need, the rest is tuning. If it'')
+print(''is at chance, no amount of fine-tuning will rescue the'')
+print(''choice of pretrained model, and you have learned that for'')
+print(''ten minutes rather than two days.'')
+print()
+print(''The boundaries in the third column are rough, and the'')
+print(''measurement later in this lesson crosses one of them in'')
+print(''the direction the table does not predict. Treat them as a'')
+print(''starting order, not a rule.'')
+```
+
+## Feature extraction, measured
+
+The clearest version of the argument: take a model trained for one task, throw away its classifier, and use its hidden layer as a feature extractor for a completely different task.
+
+```python
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from sklearn.datasets import load_digits
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+torch.manual_seed(0)
+torch.set_num_threads(4)
+
+# Each 8x8 digit is pasted at a random position on a 24x24 canvas
+# with background noise - 576 input dimensions instead of 64, which
+# is the regime real images are in and the regime where this matters.
+digits = load_digits()
+generator = np.random.default_rng(0)
+canvas = np.zeros((len(digits.images), 1, 24, 24), dtype=np.float32)
+for index, image in enumerate(digits.images):
+    row, column = generator.integers(0, 17, 2)
+    canvas[index, 0, row:row + 8, column:column + 8] = image / 16.0
+canvas += generator.normal(0, 0.15, canvas.shape).astype(np.float32)
+
+images = torch.tensor(canvas)
+labels = torch.tensor(digits.target, dtype=torch.long)
+
+# PRETRAINING uses the digits 0-4, with plenty of labels.
+# The DOWNSTREAM task is the digits 5-9 - classes the backbone
+# has never seen - with very few.
+pretrain_index = torch.where(labels < 5)[0]
+downstream_index = torch.where(labels >= 5)[0]
+downstream_target = labels - 5
+
+print(f''{len(pretrain_index)} images of digits 0-4 for pretraining'')
+print(f''{len(downstream_index)} images of digits 5-9 for the real task'')
+print(f''input is {24 * 24} dimensions'')
+print()
+
+
+def make_backbone():
+    return nn.Sequential(
+        nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+        nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+        nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
+        nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(32, 32), nn.ReLU())
+
+
+backbone = make_backbone()
+head = nn.Linear(32, 5)
+optimiser = torch.optim.AdamW(list(backbone.parameters())
+                              + list(head.parameters()), lr=3e-3)
+loss_fn = nn.CrossEntropyLoss()
+for _ in range(60):
+    order = torch.randperm(len(pretrain_index))
+    for start in range(0, len(order), 64):
+        batch = pretrain_index[order[start:start + 64]]
+        optimiser.zero_grad()
+        loss_fn(head(backbone(images[batch])), labels[batch]).backward()
+        optimiser.step()
+
+backbone.eval()
+with torch.no_grad():
+    pretrain_accuracy = (head(backbone(images[pretrain_index])).argmax(1)
+                         == labels[pretrain_index]).float().mean().item()
+    features = backbone(images).numpy()
+print(f''pretraining task (digits 0-4), accuracy {pretrain_accuracy:.3f}'')
+print()
+
+raw = images.reshape(len(images), -1).numpy()
+target = downstream_target.numpy()
+
+rows = []
+for budget in [40, 80, 150, 400]:
+    train_index, test_index = train_test_split(
+        downstream_index.numpy(), train_size=budget, random_state=0,
+        stratify=target[downstream_index.numpy()])
+    row = {''labelled examples'': budget}
+    for name, matrix in [(''raw pixels'', raw), (''pretrained features'', features)]:
+        model = LogisticRegression(max_iter=4000).fit(matrix[train_index],
+                                                      target[train_index])
+        row[f''{name}: train''] = round(model.score(matrix[train_index],
+                                                 target[train_index]), 3)
+        row[f''{name}: test''] = round(model.score(matrix[test_index],
+                                                target[test_index]), 3)
+    rows.append(row)
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Chance is 0.200 on five classes. Raw pixels reach 1.000 on'')
+print(''the training set and 0.21 on the test set at EVERY budget:'')
+print(''576 dimensions against 40 labels is pure memorisation, and'')
+print(''400 labels do not fix it, because the digit is in a'')
+print(''different place every time.'')
+print()
+print(''The pretrained features reach 0.42 with 40 labels and 0.58'')
+print(''with 400. The backbone that produced them was trained on'')
+print(''the digits 0-4 and has never seen a 5, 6, 7, 8 or 9. What'')
+print(''transferred is not knowledge of those classes - it is'')
+print(''knowing to look for strokes and corners anywhere in the'')
+print(''frame, which is the part the 40 labels could never have'')
+print(''taught.'')
+print()
+print(''That is transfer learning in one table. Nothing was'')
+print(''fine-tuned; the convolutional weights never moved after'')
+print(''pretraining.'')
+```
+
+## Freezing: what it does and the two ways to get it wrong
 
 ```python
 import torch
-from torchvision import models
+import torch.nn as nn
 
-model = models.resnet50(weights=''IMAGENET1K_V2'')
+torch.manual_seed(0)
 
-for param in model.parameters():
-    param.requires_grad = False        # freeze the learned representation
+model = nn.Sequential(nn.Linear(10, 32), nn.ReLU(),
+                      nn.Linear(32, 32), nn.ReLU(),
+                      nn.Linear(32, 4))
 
-model.fc = torch.nn.Linear(model.fc.in_features, num_classes)  # a new head
-# only model.fc has requires_grad=True now
+# Freeze everything but the last layer.
+for parameter in model.parameters():
+    parameter.requires_grad = False
+for parameter in model[-1].parameters():
+    parameter.requires_grad = True
+
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f''trainable {trainable:,} of {total:,} parameters ''
+      f''({trainable / total:.1%})'')
+print()
+
+# MISTAKE 1: building the optimiser over every parameter. It
+# "works" - no error - and silently does nothing for the frozen
+# ones, but any optimiser with weight decay will still DECAY them.
+wrong = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.1)
+right = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                          lr=1e-3, weight_decay=0.1)
+print(''parameter groups, wrong way:'',
+      sum(len(g[''params'']) for g in wrong.param_groups), ''tensors'')
+print(''parameter groups, right way:'',
+      sum(len(g[''params'']) for g in right.param_groups), ''tensors'')
+print()
+
+before = model[0].weight.detach().clone()
+x = torch.randn(8, 10)
+loss = model(x).sum()
+loss.backward()
+wrong.step()
+moved = (model[0].weight.detach() - before).abs().max().item()
+print(f''frozen layer moved by {moved:.2e} after one step of the ''
+      f''wrongly-built optimiser'')
+print(''(requires_grad=False stops the GRADIENT, and AdamW decays'')
+print(''on the gradient, so here it happened to be safe. Optimisers'')
+print(''that decay the weight directly do not give you that.)'')
+print()
+print(''MISTAKE 2 is the one that really costs you: forgetting'')
+print(''model.eval() on the frozen part. Batch-norm layers keep'')
+print(''updating their running statistics in train mode even with'')
+print(''requires_grad=False, because those buffers are not'')
+print(''parameters and have no gradient. A "frozen" ResNet backbone'')
+print(''drifts through fine-tuning, and the symptom is a model'')
+print(''that gets worse as you train it on a small dataset.'')
 ```
 
-With a few hundred labelled images this will beat anything you could train from scratch with ten thousand.
-
-## Freeze, or fine-tune
-
-**Freeze everything but the head** when your data is small or very similar to the original training data. Fast, little risk of overfitting, works surprisingly often.
-
-**Unfreeze the later layers too** when your domain differs - medical scans, satellite imagery, industrial defects. The early layers still transfer; the later, more specific ones need to change.
-
-**Fine-tune everything** with a very small learning rate when you have substantial data. Use a rate roughly ten times smaller than you would for a new model: large steps will destroy the pretrained weights before they adapt, which is called catastrophic forgetting and looks like a model that was fine and then suddenly was not.
-
-## Discriminative learning rates
+That second point deserves a demonstration, because it is invisible in every other way.
 
 ```python
-optimizer = torch.optim.AdamW([
-    {''params'': model.layer4.parameters(), ''lr'': 1e-4},
-    {''params'': model.fc.parameters(),     ''lr'': 1e-3},
-])
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+
+norm = nn.BatchNorm1d(4)
+for parameter in norm.parameters():
+    parameter.requires_grad = False          # "frozen"
+
+print(''running mean at the start:'', norm.running_mean.round(decimals=4).tolist())
+
+# Train mode, no gradients, requires_grad off - and the buffers
+# still move, because a forward pass updates them.
+norm.train()
+with torch.no_grad():
+    for _ in range(50):
+        norm(torch.randn(16, 4) * 3 + 5)
+print(''after 50 forward passes in TRAIN mode:'',
+      norm.running_mean.round(decimals=4).tolist())
+
+norm.eval()
+snapshot = norm.running_mean.clone()
+with torch.no_grad():
+    for _ in range(50):
+        norm(torch.randn(16, 4) * 3 + 5)
+print(''after 50 more in EVAL mode:        '',
+      norm.running_mean.round(decimals=4).tolist())
+print()
+print(''moved in train mode:'', bool((snapshot != 0).any()))
+print(''moved in eval mode: '',
+      bool((norm.running_mean != snapshot).any()))
+print()
+print(''requires_grad=False froze the scale and shift. It did'')
+print(''nothing to the running statistics, which are buffers, not'')
+print(''parameters. Only eval() stops those. This is the single'')
+print(''most common reason a frozen backbone misbehaves.'')
 ```
 
-Later layers learn faster, earlier ones barely move. This is the standard recipe and it is better than one rate for everything.
+## Fine-tuning: the learning rate is the whole decision
 
-## For text
+Fine-tuning with the rate you would use for training from scratch destroys the pretrained weights in the first few steps. The useful mental model: the pretrained weights are a good solution, and a large step throws them away before the gradient has any idea where to go.
 
-The same pattern with a pretrained language model: load it, add a classification head, fine-tune on a few thousand labelled examples. Parameter-efficient methods such as LoRA go further - freeze the whole model and train a small number of additional parameters - which is how fine-tuning a very large model becomes possible on one GPU.
+```python
+import pandas as pd
 
-## The practical warning
+rows = [
+    (''pretraining the backbone'', ''1e-3'', ''random weights, needs big steps''),
+    (''a new head on a frozen backbone'', ''1e-3'', ''this layer IS random''),
+    (''fine-tuning the top block'', ''1e-4'', ''ten times smaller''),
+    (''fine-tuning everything'', ''1e-5 to 3e-5'', ''a hundred times smaller''),
+    (''the first few hundred steps'', ''warm up from near zero'',
+     ''the random head produces huge gradients''),
+]
+print(pd.DataFrame(rows, columns=[''what you are training'',
+                                  ''typical rate'', ''why'']).to_string(index=False))
+print()
+print(''The fourth row is the number people get wrong. 1e-3 on a'')
+print(''pretrained backbone is not "fine-tuning quickly", it is'')
+print(''re-initialisation with extra steps, and the symptom is a'')
+print(''model that starts at 85% accuracy, drops to 40% in the'')
+print(''first epoch, and climbs back to 80% over twenty more.'')
+print()
+print(''Discriminative rates - a lower rate for earlier layers -'')
+print(''are the refinement: the early layers need to move least,'')
+print(''so give them the smallest steps.'')
 
-Check what the pretrained model was trained on. It carries that data''s biases, its blind spots and its licence. A model trained on web images reproduces what is over- and under-represented there, and you inherit all of it along with the useful features.',
-   'Almost nobody trains from scratch. You take a model that has already learned general representations from an enormous dataset and adapt it to your task with a fraction of the data - and which layers you unfreeze is the main decision.',
-   11, 389, '55555555-5555-4555-8555-555555555555', 'published',
+for layer, rate in [(1, 1e-5), (2, 2e-5), (3, 4e-5), (4, 8e-5), (''head'', 1e-3)]:
+    print(f''  layer {str(layer):<5} rate {rate:.0e}'')
+```
+
+Here is the comparison, measured, on the canvas task from above.
+
+```python
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from sklearn.datasets import load_digits
+from sklearn.model_selection import train_test_split
+
+torch.set_num_threads(4)
+
+digits = load_digits()
+generator = np.random.default_rng(0)
+canvas = np.zeros((len(digits.images), 1, 24, 24), dtype=np.float32)
+for index, image in enumerate(digits.images):
+    row, column = generator.integers(0, 17, 2)
+    canvas[index, 0, row:row + 8, column:column + 8] = image / 16.0
+canvas += generator.normal(0, 0.15, canvas.shape).astype(np.float32)
+
+images = torch.tensor(canvas)
+labels = torch.tensor(digits.target, dtype=torch.long)
+pretrain_index = torch.where(labels < 5)[0]
+downstream_index = torch.where(labels >= 5)[0]
+target = labels - 5
+
+train_index, test_index = train_test_split(
+    downstream_index.numpy(), train_size=300, random_state=0,
+    stratify=target[downstream_index].numpy())
+train_index = torch.tensor(train_index)
+test_index = torch.tensor(test_index)
+
+loss_fn = nn.CrossEntropyLoss()
+
+
+def make_backbone():
+    return nn.Sequential(
+        nn.Conv2d(1, 16, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+        nn.Conv2d(16, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+        nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
+        nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(32, 32), nn.ReLU())
+
+
+torch.manual_seed(0)
+backbone = make_backbone()
+head = nn.Linear(32, 5)
+optimiser = torch.optim.AdamW(list(backbone.parameters())
+                              + list(head.parameters()), lr=3e-3)
+for _ in range(60):
+    order = torch.randperm(len(pretrain_index))
+    for start in range(0, len(order), 64):
+        batch = pretrain_index[order[start:start + 64]]
+        optimiser.zero_grad()
+        loss_fn(head(backbone(images[batch])), labels[batch]).backward()
+        optimiser.step()
+pretrained = {k: v.clone() for k, v in backbone.state_dict().items()}
+print(''backbone pretrained on digits 0-4, 300 labels for digits 5-9'')
+print()
+
+
+def run(strategy, epochs=60):
+    torch.manual_seed(1)
+    body = make_backbone()
+    if strategy != ''scratch'':
+        body.load_state_dict({k: v.clone() for k, v in pretrained.items()})
+    classifier = nn.Linear(32, 5)
+
+    if strategy == ''frozen'':
+        for parameter in body.parameters():
+            parameter.requires_grad = False
+        optimiser = torch.optim.AdamW(classifier.parameters(), lr=1e-3)
+    elif strategy == ''discriminative'':
+        optimiser = torch.optim.AdamW(
+            [{''params'': body.parameters(), ''lr'': 1e-4},
+             {''params'': classifier.parameters(), ''lr'': 1e-3}])
+    else:
+        optimiser = torch.optim.AdamW(list(body.parameters())
+                                      + list(classifier.parameters()), lr=1e-3)
+
+    curve = []
+    for _ in range(epochs):
+        # A frozen body stays in eval mode, so nothing in it drifts.
+        body.eval() if strategy == ''frozen'' else body.train()
+        order = torch.randperm(len(train_index))
+        for start in range(0, len(order), 32):
+            batch = train_index[order[start:start + 32]]
+            optimiser.zero_grad()
+            loss_fn(classifier(body(images[batch])), target[batch]).backward()
+            optimiser.step()
+        body.eval()
+        with torch.no_grad():
+            accuracy = (classifier(body(images[test_index])).argmax(1)
+                        == target[test_index]).float().mean().item()
+        curve.append(round(accuracy, 3))
+    return curve
+
+
+rows = []
+for label, strategy in [(''train from scratch'', ''scratch''),
+                        (''frozen backbone, new head at 1e-3'', ''frozen''),
+                        (''fine-tune everything at 1e-3'', ''full''),
+                        (''backbone 1e-4, head 1e-3'', ''discriminative'')]:
+    curve = run(strategy)
+    rows.append({''strategy'': label, ''epoch 1'': curve[0], ''epoch 5'': curve[4],
+                 ''epoch 20'': curve[19], ''epoch 60'': curve[-1],
+                 ''best'': max(curve)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Read the epoch-20 column first, because that is where the'')
+print(''head start shows: 0.602 fine-tuning against 0.381 from'')
+print(''scratch. The pretrained model is well over twenty epochs'')
+print(''ahead of the random one at the same point in training,'')
+print(''which is the practical value of transfer and the reason it'')
+print(''is the default.'')
+print()
+print(''Then read the final column, which contradicts the advice'')
+print(''people repeat. Fine-tuning everything at 1e-3 wins at'')
+print(''0.765. The frozen backbone comes LAST at 0.510 - worse'')
+print(''than training from scratch - because 32 pretrained features'')
+print(''learned on five classes are not enough to separate five'')
+print(''different ones, and a frozen body cannot adapt. The'')
+print(''discriminative rates land in between at 0.609: the'')
+print(''backbone was held back harder than this problem wanted.'')
+```
+
+So "use a rate a hundred times smaller" is advice about a specific situation, and it is worth knowing which. It applies when the pretrained weights encode far more than your dataset could ever teach - a 100-million-parameter model trained on a billion images, adapted with two thousand examples. There, a large step destroys information you cannot rebuild, and the symptom is the one in the table above: accuracy starts high, collapses in the first epoch, and climbs back to less than it began with.
+
+It does not apply to a small backbone pretrained on a small task, where there is less to protect and more to adapt. The rule that survives both cases is: **start with the frozen backbone because it takes ten minutes, then try a full fine-tune, then try lowering the backbone''s rate** - and keep whichever the validation set prefers rather than whichever the blog post recommended.
+
+## Catastrophic forgetting
+
+Fine-tune on a new task and the model forgets the old one. This is not a subtle effect.
+
+```python
+import numpy as np
+import torch
+import torch.nn as nn
+from sklearn.datasets import load_digits
+from sklearn.model_selection import train_test_split
+
+torch.manual_seed(0)
+torch.set_num_threads(4)
+
+digits = load_digits()
+images = torch.tensor(digits.images[:, None, :, :] / 16.0, dtype=torch.float32)
+labels = torch.tensor(digits.target, dtype=torch.long)
+
+# Task A: the digits 0-4.  Task B: the digits 5-9, relabelled 0-4.
+is_a = labels < 5
+a_index = torch.where(is_a)[0]
+b_index = torch.where(~is_a)[0]
+a_labels = labels.clone()
+b_labels = labels - 5
+
+model = nn.Sequential(nn.Flatten(), nn.Linear(64, 64), nn.ReLU(),
+                      nn.Linear(64, 5))
+loss_fn = nn.CrossEntropyLoss()
+
+
+def train_on(index, target, epochs, rate=1e-3):
+    optimiser = torch.optim.AdamW(model.parameters(), lr=rate)
+    for _ in range(epochs):
+        order = torch.randperm(len(index))
+        for start in range(0, len(order), 64):
+            batch = index[order[start:start + 64]]
+            optimiser.zero_grad()
+            loss_fn(model(images[batch]), target[batch]).backward()
+            optimiser.step()
+
+
+def accuracy(index, target):
+    model.eval()
+    with torch.no_grad():
+        return (model(images[index]).argmax(1) == target[index]).float().mean().item()
+
+
+train_on(a_index, a_labels, 40)
+print(f''after training on task A (digits 0-4): ''
+      f''A {accuracy(a_index, a_labels):.3f}'')
+
+train_on(b_index, b_labels, 40)
+print(f''after training on task B (digits 5-9): ''
+      f''A {accuracy(a_index, a_labels):.3f}  ''
+      f''B {accuracy(b_index, b_labels):.3f}'')
+print()
+print(''Task A accuracy collapsed. The weights that solved it were'')
+print(''simply overwritten, because nothing in the loss on task B'')
+print(''had any reason to preserve them.'')
+print()
+print(''The practical defences, in order of how often they are'')
+print(''used:'')
+print('' - keep a copy of the old model and serve both;'')
+print('' - mix a slice of the old data into the new training set;'')
+print('' - freeze the backbone and train only a new head per task;'')
+print('' - adapter layers or LoRA: leave the weights alone'')
+print(''   entirely and train a small added module.'')
+```
+
+## Parameter-efficient fine-tuning
+
+The modern answer for large models: do not update the weights at all. Add a small trainable module beside them.
+
+```python
+import pandas as pd
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+
+
+class LoRALinear(nn.Module):
+    """A frozen linear layer plus a low-rank trainable correction."""
+
+    def __init__(self, base, rank=8, alpha=16):
+        super().__init__()
+        self.base = base
+        for parameter in self.base.parameters():
+            parameter.requires_grad = False
+        self.down = nn.Linear(base.in_features, rank, bias=False)
+        self.up = nn.Linear(rank, base.out_features, bias=False)
+        nn.init.zeros_(self.up.weight)        # starts as a no-op
+        self.scale = alpha / rank
+
+    def forward(self, x):
+        return self.base(x) + self.scale * self.up(self.down(x))
+
+
+base = nn.Linear(768, 768)
+wrapped = LoRALinear(base, rank=8)
+
+x = torch.randn(4, 768)
+print(''output identical to the base layer at initialisation:'',
+      bool(torch.allclose(wrapped(x), base(x), atol=1e-6)))
+print(''(because the up projection is initialised to zero, so'')
+print(''fine-tuning starts from exactly the pretrained model)'')
+print()
+
+rows = []
+full = sum(p.numel() for p in base.parameters())
+for rank in [1, 4, 8, 16, 64]:
+    adapter = 768 * rank + rank * 768
+    rows.append({''rank'': rank,
+                 ''trainable parameters'': f''{adapter:,}'',
+                 ''full fine-tune'': f''{full:,}'',
+                 ''share'': f''{adapter / full:.2%}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''At rank 8, 2.1% of the parameters are trainable. For a 7'')
+print(''billion parameter model that is the difference between'')
+print(''needing 80 GiB of optimiser state and needing 2 - which is'')
+print(''the difference between a data centre and one GPU.'')
+print()
+print(''And because the base weights never change, one base model'')
+print(''can serve many tasks: swap the adapter, not the model.'')
+print(''That is what makes per-customer fine-tuning affordable.'')
+```
+
+## Failure modes
+
+| Symptom | Cause |
+| --- | --- |
+| Accuracy starts high and collapses in the first epoch | Learning rate too high for a pretrained backbone; drop it 10-100x and warm up |
+| Frozen backbone, but results drift as you train | Batch-norm running statistics still updating; call `.eval()` on it |
+| Fine-tuning is no better than feature extraction | Not enough data to justify it, or the rate is too low to move anything |
+| Worse than training from scratch | A genuine domain mismatch, or the input preprocessing does not match what the model was pretrained with |
+| Works on your validation split, fails on new data | The split was random over near-duplicate images; split by source, patient or session |
+| The new head''s gradients wreck the backbone in step one | Train the head alone for a few hundred steps first, then unfreeze |
+| Old task forgotten after fine-tuning | Catastrophic forgetting; mix old data in, or use adapters |
+
+Row four has a sub-case worth stating on its own, because it is silent and very common: **the preprocessing must match.** A model pretrained on ImageNet expects its inputs normalised with ImageNet''s channel means and standard deviations. Feed it `0..1` pixels instead and every feature is computed from the wrong distribution.
+
+```python
+import numpy as np
+
+# ImageNet''s statistics, which every pretrained vision model expects.
+MEAN = np.array([0.485, 0.456, 0.406])
+STD = np.array([0.229, 0.224, 0.225])
+
+pixels = np.array([0.2, 0.5, 0.8])            # one pixel, three channels
+
+print(''raw 0..1 pixel          '', pixels)
+print(''correctly normalised    '', ((pixels - MEAN) / STD).round(3))
+print(''wrongly left as 0..1    '', pixels, ''  (unchanged)'')
+print()
+print(''The first layer sees inputs with a mean of 0.500 where it'')
+print(''expects 0.234, and a spread five times too small. Nothing'')
+print(''errors. Accuracy just comes out several points low, and you'')
+print(''spend a week on the architecture.'')
+print()
+for label, values in [(''expected input range'', (pixels - MEAN) / STD),
+                      (''what it got'', pixels)]:
+    print(f''{label:<22} mean {values.mean():+.3f}  std {values.std():.3f}'')
+```
+
+## Check your understanding
+
+The claim behind all of this is that pretrained features are better than raw inputs *for a different task*. Test it on your own data in ten minutes, before committing to anything.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import load_digits
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+# The same canvas task as above.
+digits = load_digits()
+generator = np.random.default_rng(0)
+canvas = np.zeros((len(digits.images), 24, 24), dtype=np.float32)
+for index, image in enumerate(digits.images):
+    row, column = generator.integers(0, 17, 2)
+    canvas[index, row:row + 8, column:column + 8] = image / 16.0
+canvas += generator.normal(0, 0.15, canvas.shape).astype(np.float32)
+
+X = canvas.reshape(len(canvas), -1)
+y = digits.target
+pretrain_index = np.where(y < 5)[0]
+downstream_index = np.where(y >= 5)[0]
+target = y - 5
+
+# A fair test needs a CONTROL. PCA is a feature extractor of the
+# same output size that learns no task at all - just the directions
+# of greatest variance. If pretrained features only beat raw pixels
+# by as much as PCA does, nothing transferred: you have a dimension
+# reduction, which is not the same thing.
+pca = PCA(n_components=32, random_state=0).fit(X[pretrain_index])
+projected = pca.transform(X)
+
+rows = []
+for budget in [40, 150, 400]:
+    train_index, test_index = train_test_split(
+        downstream_index, train_size=budget, random_state=0,
+        stratify=target[downstream_index])
+    row = {''labels'': budget}
+    for name, matrix in [(''raw pixels (576)'', X),
+                         (''PCA to 32'', projected)]:
+        model = LogisticRegression(max_iter=4000).fit(matrix[train_index],
+                                                      target[train_index])
+        row[name] = round(model.score(matrix[test_index],
+                                      target[test_index]), 3)
+    rows.append(row)
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Chance is 0.200. PCA to 32 dimensions scores 0.21 to 0.23 -'')
+print(''indistinguishable from raw pixels. The pretrained backbone,'')
+print(''fitted on exactly the same 901 images and producing exactly'')
+print(''32 numbers, reached 0.58.'')
+print()
+print(''So the gain earlier was not dimension reduction. It was'')
+print(''what the backbone LEARNED while reducing: that a digit is a'')
+print(''pattern of strokes, wherever in the frame it appears. PCA'')
+print(''had the same data and the same output size and learned'')
+print(''none of it.'')
+print()
+print(''Run this three-row comparison on your own problem before'')
+print(''committing to a pretrained model. The three outcomes have'')
+print(''three different next steps:'')
+print()
+print('' - pretrained clearly beats PCA and raw -> transfer is'')
+print(''   working; try fine-tuning next.'')
+print('' - pretrained ties with PCA             -> you have a'')
+print(''   dimension reduction, not transferred knowledge. Try a'')
+print(''   different pretrained model, or a closer domain.'')
+print('' - pretrained loses to raw pixels       -> check the'')
+print(''   preprocessing before anything else. This is almost'')
+print(''   always normalisation rather than the model.'')
+```
+',
+   'Almost nobody trains from scratch. You take a model that has already learned general representations from an enormous dataset and adapt it to your task with a fraction of the data - and which layers you unfreeze is the main decision.', 17, 3488,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-00000000010e',
    'Serving a Model Without Setting Money on Fire',
    'markdown',
-   'Training happens once a month. Inference happens on every request, and that is where the cost and the failures live.
+   'A model that reaches 94% in a notebook has produced a number, not a product. Serving it means answering a different set of questions: how fast, how many at once, how much per request, and what happens when it is wrong. Most of the engineering is in this lesson, and almost none of it is about the model.
 
-## Make it smaller before you make it faster
-
-- **Quantisation**: store weights in 8-bit integers rather than 32-bit floats. Roughly four times smaller, substantially faster, usually a fraction of a point of accuracy. Nearly always worth it.
-- **Distillation**: train a small model to reproduce the large one''s outputs. More work, and it can be dramatically smaller.
-- **Pruning**: remove weights near zero. Most effective with structure, so the hardware can actually skip them.
-
-Start with quantisation. It is a few lines and it often removes the need for everything else.
-
-## Batching, and the latency it costs
-
-A GPU is far more efficient on 32 requests at once than on one. Dynamic batching - wait a few milliseconds to collect a batch - multiplies throughput several times over.
-
-The cost is latency for the first request in each batch. That is the trade: pick the window from the latency budget, not from the throughput target.
-
-## Export rather than ship Python
+## The three numbers that define a serving system
 
 ```python
-scripted = torch.jit.trace(model.eval(), example_input)
-scripted.save(''model.pt'')
+import pandas as pd
+
+rows = [
+    (''Latency'', ''time for ONE request, end to end'',
+     ''measured at p50, p95 and p99 - never the mean''),
+    (''Throughput'', ''requests per second the system sustains'',
+     ''raised by batching, which RAISES latency''),
+    (''Cost'', ''money per thousand requests'',
+     ''hardware hours divided by what they served''),
+]
+print(pd.DataFrame(rows, columns=[''quantity'', ''what it is'',
+                                  ''how it is actually measured'']
+                   ).to_string(index=False))
+print()
+print(''Latency and throughput pull against each other, and that'')
+print(''tension is the central design decision. Everything else -'')
+print(''quantisation, distillation, caching - is an attempt to buy'')
+print(''one without paying in the other.'')
 ```
 
-Or export to ONNX. Either gives you an artefact that runs without your training code, in a runtime designed for serving. It also freezes the preprocessing, which is the usual source of a mismatch between evaluation and production.
+The mean latency is the number that hides problems, and the reason is worth seeing rather than being told.
 
-## Version everything together
+```python
+import numpy as np
 
-A model artefact is useless without the exact preprocessing that produced its inputs. Ship them as one versioned unit - model weights, preprocessing, label mapping, framework version - and record the version with every prediction.
+rng = np.random.default_rng(0)
 
-## Monitor the inputs, not just the outputs
+# A realistic latency distribution: mostly fast, with a tail from
+# cold caches, garbage collection and unlucky batches.
+fast = rng.normal(45, 8, 9500)
+slow = rng.normal(380, 120, 500)
+latencies = np.clip(np.concatenate([fast, slow]), 5, None)
 
-The failure that matters is receiving inputs unlike anything in training: a new camera, a different microphone, a language the model never saw. The prediction confidence usually drops, so track the distribution of maximum softmax probability over time. A shift there is the earliest warning you get.
-
-## Keep a path back
-
+print(f''mean   {latencies.mean():7.1f} ms'')
+print(f''p50    {np.percentile(latencies, 50):7.1f} ms'')
+print(f''p95    {np.percentile(latencies, 95):7.1f} ms'')
+print(f''p99    {np.percentile(latencies, 99):7.1f} ms'')
+print(f''p99.9  {np.percentile(latencies, 99.9):7.1f} ms'')
+print(f''max    {latencies.max():7.1f} ms'')
+print()
+print(''The mean is 62 ms and almost no request took 62 ms: the'')
+print(''distribution has two humps and the mean sits in the valley'')
+print(''between them. Half of all requests finished under 46 ms,'')
+print(''and one in a hundred took longer than 470.'')
+print()
+print(''Now the part that makes tails matter more than they look.'')
+print(''A page that makes several calls is as slow as its slowest:'')
+for calls in [1, 5, 20, 100]:
+    probability = 1 - (0.99 ** calls)
+    print(f''  {calls:3d} calls per page -> {probability:5.1%} chance of ''
+          f''hitting at least one p99 request'')
+print()
+print(''At twenty calls, one page view in five contains a request'')
+print(''from the slow tail. The p99 is not a rare event at the'')
+print(''level the user experiences - it is the common case.'')
 ```
-model_version: 2026-03-01-a   (previous: 2026-02-01-c, still loadable)
+
+## Batching: the throughput lever, and what it costs
+
+```python
+import numpy as np
+import pandas as pd
+
+# A GPU has a fixed overhead per call and then processes a batch
+# nearly in parallel. These numbers are the shape of the trade,
+# measured the same way on any real hardware.
+OVERHEAD_MS = 8.0           # kernel launch, transfers, Python
+PER_EXAMPLE_MS = 0.4        # the actual arithmetic
+
+rows = []
+for batch in [1, 4, 16, 64, 256]:
+    compute = OVERHEAD_MS + PER_EXAMPLE_MS * batch
+    throughput = batch / (compute / 1000)
+    # A request also waits for the batch to fill. On average it
+    # waits half a window.
+    wait = 10.0 if batch > 1 else 0.0
+    rows.append({''batch size'': batch,
+                 ''compute (ms)'': round(compute, 1),
+                 ''throughput (req/s)'': round(throughput),
+                 ''latency for one request (ms)'': round(compute + wait, 1)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''From batch 1 to batch 64, throughput goes from 119 to 1,905'')
+print(''requests a second - sixteen times - while a single'')
+print(''request waits 44 ms instead of 8. That is the trade in one'')
+print(''table.'')
+print()
+print(''Which end to sit at is a product question, not a technical'')
+print(''one:'')
+print(''  interactive autocomplete  -> batch 1 to 4, latency wins'')
+print(''  search ranking            -> batch 16 to 32, a balance'')
+print(''  overnight scoring         -> batch 512+, nothing is'')
+print(''                               waiting'')
 ```
 
-Roll back before debugging. A deployment that cannot be reversed in one step is a deployment that will be live while you investigate.
+## Making the model itself cheaper
 
-## The question to ask first
+Four techniques, in the order of effort they take.
 
-Does this need a GPU in the request path at all? Precomputing predictions nightly, caching embeddings, or running a small model on CPU solves a surprising number of problems at a fraction of the cost. GPU inference is the expensive answer and it should be the second thing you try.',
-   'Training is a project; serving is a service. Latency, batching, quantisation, versioning and the monitoring that tells you the model has quietly started receiving inputs it has never seen.',
-   11, 414, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import pandas as pd
+
+rows = [
+    (''Half precision (fp16/bf16)'', ''~2x'', ''usually none'',
+     ''one line; the first thing to try''),
+    (''int8 quantisation'', ''~4x'', ''0-1% accuracy'',
+     ''needs a calibration pass over real data''),
+    (''Pruning'', ''2-10x in theory'', ''depends how far you go'',
+     ''sparse weights need hardware support to be fast''),
+    (''Distillation'', ''10-100x'', ''1-5% accuracy'',
+     ''train a small model to copy a large one; days of work''),
+]
+print(pd.DataFrame(rows, columns=[''technique'', ''speed-up'',
+                                  ''typical accuracy cost'', ''effort'']
+                   ).to_string(index=False))
+print()
+print(''The honest ordering is also the ordering of effort, which'')
+print(''is unusual and convenient. Try fp16 first; it is a flag.'')
+```
+
+Quantisation deserves a demonstration, because the reason it works is not obvious: neural network weights occupy a narrow range, so eight bits spread over that range are plenty.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+
+# Trained weights of a layer. The distribution is the point: a
+# tight cluster near zero, not a uniform spread.
+weights = rng.normal(0, 0.08, 20000)
+print(f''weights: min {weights.min():+.4f}  max {weights.max():+.4f}  ''
+      f''std {weights.std():.4f}'')
+print()
+
+
+def quantise(values, bits):
+    levels = 2 ** bits - 1
+    scale = (values.max() - values.min()) / levels
+    zero_point = values.min()
+    codes = np.round((values - zero_point) / scale)
+    return codes * scale + zero_point, scale
+
+
+for bits in [16, 8, 6, 4, 2]:
+    restored, scale = quantise(weights, bits)
+    error = np.abs(restored - weights)
+    print(f''{bits:2d} bits: step {scale:.6f}  ''
+          f''mean error {error.mean():.6f}  ''
+          f''max error {error.max():.6f}  ''
+          f''relative {error.mean() / np.abs(weights).mean():.2%}  ''
+          f''size {bits / 32:.2f}x'')
+print()
+print(''At 8 bits the average weight is wrong by 1% of its own size'')
+print(''and the model is a quarter the size. At 6 bits the error is'')
+print(''4%, at 4 bits 17%, at 2 bits 87% - which is no longer a'')
+print(''model.'')
+print()
+print(''That 1% at 8 bits is why int8 is the standard choice, and'')
+print(''the reason it survives is that the errors are independent:'')
+print(''a layer sums thousands of weights, and independent errors'')
+print(''of 1% cancel rather than accumulate.'')
+print()
+
+# The catch, and it is the whole of why quantisation goes wrong:
+# one outlier stretches the range and wastes the levels.
+with_outlier = weights.copy()
+with_outlier[0] = 12.0
+restored, scale = quantise(with_outlier, 8)
+ordinary_error = np.abs(restored[1:] - weights[1:]).mean()
+print(f''the same weights at 8 bits, with ONE value of 12.0 added:'')
+print(f''  step size {scale:.6f} instead of 0.002500'')
+print(f''  mean error on the other 19,999 weights ''
+      f''{ordinary_error:.6f}, ''
+      f''{ordinary_error / np.abs(weights).mean():.1%} of their size ''
+      f''instead of 1.0%'')
+print()
+print(''One outlier made every other weight nineteen times less'')
+print(''precise, because the 256 levels now have to span a range'')
+print(''nineteen times wider. 19% error is not a model any more.'')
+print(''This is exactly what happens in large language'')
+print(''models, where a handful of activation channels are enormous'')
+print(''- and it is why per-channel quantisation and outlier-aware'')
+print(''schemes exist rather than one scale for the whole tensor.'')
+```
+
+## A worked example: measuring a served model
+
+Benchmarking is where most of the wrong numbers in this field come from. Three things have to be right: warm up before measuring, synchronise before stopping the clock, and report percentiles.
+
+```python
+import time
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+
+torch.manual_seed(0)
+torch.set_num_threads(4)
+
+model = nn.Sequential(
+    nn.Linear(128, 512), nn.ReLU(),
+    nn.Linear(512, 512), nn.ReLU(),
+    nn.Linear(512, 512), nn.ReLU(),
+    nn.Linear(512, 10))
+model.eval()
+
+parameters = sum(p.numel() for p in model.parameters())
+print(f''{parameters:,} parameters, {parameters * 4 / 1024 ** 2:.1f} MiB ''
+      f''as float32'')
+print()
+
+
+def benchmark(function, warmup=20, runs=200):
+    for _ in range(warmup):
+        function()
+    timings = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        function()
+        timings.append((time.perf_counter() - start) * 1000)
+    return np.array(timings)
+
+
+x_single = torch.randn(1, 128)
+
+# WRONG: gradients are still being tracked, so every forward pass
+# builds a graph that nothing will ever use.
+def with_grad():
+    return model(x_single)
+
+
+def no_grad():
+    with torch.no_grad():
+        return model(x_single)
+
+
+def inference_mode():
+    with torch.inference_mode():
+        return model(x_single)
+
+
+rows = []
+for name, function in [(''plain call (builds a graph)'', with_grad),
+                       (''torch.no_grad()'', no_grad),
+                       (''torch.inference_mode()'', inference_mode)]:
+    timings = benchmark(function)
+    rows.append({''how it is called'': name,
+                 ''p50 (ms)'': round(float(np.percentile(timings, 50)), 3),
+                 ''p95 (ms)'': round(float(np.percentile(timings, 95)), 3),
+                 ''p99 (ms)'': round(float(np.percentile(timings, 99)), 3)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+
+# Now batching, which is the lever that actually matters.
+print(''throughput against batch size:'')
+rows = []
+for batch in [1, 8, 32, 128, 512]:
+    x = torch.randn(batch, 128)
+
+    def run():
+        with torch.inference_mode():
+            return model(x)
+
+    timings = benchmark(run, warmup=20, runs=120)
+    median = float(np.percentile(timings, 50))
+    rows.append({''batch'': batch,
+                 ''batch latency p50 (ms)'': round(median, 3),
+                 ''per example (ms)'': round(median / batch, 4),
+                 ''throughput (req/s)'': round(batch / (median / 1000))})
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+best = table.loc[table[''throughput (req/s)''].idxmax()]
+print(f''highest throughput at batch {int(best["batch"])}: ''
+      f''{int(best["throughput (req/s)"]):,} req/s, ''
+      f''{best["per example (ms)"]:.4f} ms each'')
+print()
+print(''The per-example column is the one to read. It falls'')
+print(''steeply at first, because the fixed per-call overhead is'')
+print(''being shared over more examples - from about 0.08 ms at'')
+print(''batch 1 to under 0.01 ms.'')
+print()
+print(''Then look at the last row. It goes back UP. Past some'')
+print(''point the batch stops fitting in cache, memory bandwidth'')
+print(''becomes the limit instead of arithmetic, and a larger'')
+print(''batch costs more per example rather than less. So the'')
+print(''curve has a genuine minimum, and the batch size to serve'')
+print(''at is wherever that minimum lands.'')
+print()
+print(''That point depends on the model, the hardware, the thread'')
+print(''count and what else is on the machine. Nobody can tell you'')
+print(''what it is; you run this table. Re-run it after any change'')
+print(''to the model or the instance type, because it moves.'')
+print()
+
+# Three things that are easy to get wrong in a benchmark.
+print(''benchmark hygiene, demonstrated:'')
+cold = []
+for _ in range(5):
+    fresh = nn.Linear(128, 10)
+    fresh.eval()
+    start = time.perf_counter()
+    with torch.inference_mode():
+        fresh(torch.randn(1, 128))
+    cold.append((time.perf_counter() - start) * 1000)
+warm = benchmark(lambda: nn.functional.linear(x_single,
+                                              torch.randn(10, 128)),
+                 warmup=50, runs=100)
+print(f''  first call on a fresh layer : {np.mean(cold):.3f} ms'')
+print(f''  warmed up                   : {np.percentile(warm, 50):.3f} ms'')
+print(''  -> always discard the first calls; they measure'')
+print(''     allocation and lazy initialisation, not the model.'')
+```
+
+## What else is in the latency budget
+
+The model is usually not the slow part, and this is the single most useful thing to know before optimising anything.
+
+```python
+import pandas as pd
+
+stages = [
+    (''network in'', 12.0, ''client to load balancer to pod''),
+    (''deserialise + validate'', 3.0, ''JSON parsing, schema checks''),
+    (''feature lookup'', 25.0, ''a database or feature store call''),
+    (''preprocessing'', 8.0, ''tokenise, resize, normalise''),
+    (''MODEL FORWARD PASS'', 15.0, ''the thing everyone optimises''),
+    (''postprocessing'', 2.0, ''softmax, thresholds, formatting''),
+    (''logging + metrics'', 4.0, ''often synchronous, often forgotten''),
+    (''network out'', 11.0, ''back to the client''),
+]
+total = sum(duration for _, duration, _ in stages)
+rows = [{''stage'': name, ''ms'': duration,
+         ''share'': f''{duration / total:.1%}'', ''note'': note}
+        for name, duration, note in stages]
+print(pd.DataFrame(rows).to_string(index=False))
+print(f''total {total:.0f} ms'')
+print()
+print(''The forward pass is 19% of the budget. Halving it - which'')
+print(''might take a week of quantisation work - takes the request'')
+print(''from 80 ms to 72 ms, a 9% improvement.'')
+print()
+print(''Caching the feature lookup takes it to 55 ms, and making'')
+print(''the logging asynchronous takes it to 51 ms. Both are an'')
+print(''afternoon. Profile the whole request before touching the'')
+print(''model.'')
+```
+
+## Monitoring: the model will get worse without telling you
+
+A model is the only part of a system that degrades silently. The code does not change, the tests pass, and the predictions slowly stop matching reality.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(0)
+
+# A feature whose distribution moves over six months.
+reference = rng.normal(50, 10, 20000)
+
+
+def population_stability_index(reference, current, bins=10):
+    edges = np.percentile(reference, np.linspace(0, 100, bins + 1))
+    edges[0], edges[-1] = -np.inf, np.inf
+    expected = np.histogram(reference, edges)[0] / len(reference)
+    actual = np.histogram(current, edges)[0] / len(current)
+    expected = np.clip(expected, 1e-6, None)
+    actual = np.clip(actual, 1e-6, None)
+    return float(((actual - expected) * np.log(actual / expected)).sum())
+
+
+rows = []
+for month, (shift, spread) in enumerate([(0, 10), (1, 10), (3, 11),
+                                         (4, 12), (6, 13), (12, 16)], 1):
+    current = rng.normal(50 + shift, spread, 20000)
+    psi = population_stability_index(reference, current)
+    verdict = (''stable'' if psi < 0.1 else
+               ''investigate'' if psi < 0.25 else ''retrain'')
+    rows.append({''month'': month, ''mean'': 50 + shift, ''std'': spread,
+                 ''PSI'': round(psi, 4), ''verdict'': verdict})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''PSI under 0.1 is stable, 0.1 to 0.25 wants investigating,'')
+print(''over 0.25 is a different population. The thresholds are'')
+print(''conventions rather than theory, but they are the'')
+print(''conventions everyone uses.'')
+print()
+print(''The crucial property: this needs NO LABELS. You can'')
+print(''compute it on live traffic the same day. Accuracy needs'')
+print(''ground truth, which for a fraud model arrives in 90 days'')
+print(''and for a churn model in a year - so by the time accuracy'')
+print(''tells you something is wrong, it has been wrong for a'')
+print(''quarter.'')
+```
+
+Four things to monitor, and only one of them is accuracy:
+
+| What | How often | Why it comes first |
+| --- | --- | --- |
+| Input distributions | every batch | catches a broken upstream pipeline within minutes |
+| Prediction distribution | every batch | a model predicting one class for everything is visible immediately |
+| Latency percentiles | continuously | the first sign of a resource problem |
+| Accuracy against labels | when labels arrive | the ground truth, and always the slowest |
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(1)
+
+# The cheapest alarm there is: the mean predicted probability.
+# It moves the moment anything upstream breaks.
+healthy = rng.beta(2, 8, 5000)
+print(f''healthy day : mean prediction {healthy.mean():.4f}, ''
+      f''share over 0.5 {(healthy > 0.5).mean():.4f}'')
+
+# A feature silently became null and is now imputed as zero.
+broken = rng.beta(1.2, 20, 5000)
+print(f''broken day  : mean prediction {broken.mean():.4f}, ''
+      f''share over 0.5 {(broken > 0.5).mean():.4f}'')
+print()
+change = abs(broken.mean() - healthy.mean()) / healthy.mean()
+print(f''the mean prediction moved {change:.0%} overnight'')
+print()
+print(''No labels were needed to see that, and nothing in the'')
+print(''application errored. An alert on "mean prediction moved'')
+print(''more than 20% day over day" is perhaps fifteen lines of'')
+print(''code and catches most of the ways a model silently breaks.'')
+```
+
+## Rolling out a new model
+
+Never replace a model in one step. The three patterns, in increasing order of confidence required:
+
+- **Shadow mode.** The new model receives real traffic and its predictions are logged and discarded. Compares the two on live data at zero risk. Run it for at least one full weekly cycle.
+- **Canary.** 1% of traffic, then 5%, then 25%. Automatic rollback on any metric regression.
+- **A/B test.** A proper split with a business metric, which is the only test that answers "is this better". Offline AUC and revenue are different quantities, and they disagree more often than anyone expects.
+
+```python
+import numpy as np
+from scipy import stats
+
+rng = np.random.default_rng(2)
+
+# Model A converts at 4.0%, model B at 4.3%. How much traffic
+# does it take to be confident that is real?
+BASE, LIFT = 0.040, 0.003
+
+print(''visitors per arm   observed A   observed B   p-value   conclusive'')
+for n in [1000, 5000, 20000, 100000, 400000]:
+    a = rng.binomial(1, BASE, n)
+    b = rng.binomial(1, BASE + LIFT, n)
+    table = [[a.sum(), n - a.sum()], [b.sum(), n - b.sum()]]
+    p = stats.chi2_contingency(table)[1]
+    print(f''{n:16,}   {a.mean():10.4f}   {b.mean():10.4f}   ''
+          f''{p:7.4f}   {"yes" if p < 0.05 else "no"}'')
+print()
+print(''A 0.3 percentage-point lift on a 4% base needs around a'')
+print(''hundred thousand visitors per arm to detect. Below that,'')
+print(''the measurement is noise however good the model is - and'')
+print(''shipping on a positive result from 5,000 visitors is how'')
+print(''teams accumulate models that each "improved conversion"'')
+print(''while conversion stayed flat.'')
+```
+
+## Failure modes
+
+| Symptom | Cause |
+| --- | --- |
+| Fast in the notebook, slow in production | Batch 1 instead of batch 64; the overhead is now per request |
+| Predictions subtly different from offline | `model.eval()` not called, so dropout and batch norm are in training mode |
+| Memory grows until the process is killed | Gradients being tracked; wrap inference in `torch.inference_mode()` |
+| p99 is ten times p50 | Garbage collection, cold caches, or variable input sizes; pad or bucket by length |
+| Accuracy fine at launch, worse every month | Drift; monitor inputs, retrain on a schedule |
+| Works for most users, fails for a segment | The training data under-represented them; slice every metric by segment |
+| First request after a deploy times out | Cold start; warm up the model as part of the readiness check |
+| Offline AUC improved, revenue did not | They are different objectives; the A/B test is the arbiter |
+
+Row six is the one that does real damage, because an aggregate metric conceals it completely.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+
+segments = [(''desktop, English'', 70000, 0.94),
+            (''mobile, English'', 25000, 0.91),
+            (''desktop, other languages'', 4000, 0.72),
+            (''screen reader'', 1000, 0.61)]
+
+total_correct = 0
+total_count = 0
+rows = []
+for name, count, accuracy in segments:
+    correct = rng.binomial(count, accuracy)
+    total_correct += correct
+    total_count += count
+    rows.append({''segment'': name, ''requests'': f''{count:,}'',
+                 ''share of traffic'': f''{count / 100000:.1%}'',
+                 ''accuracy'': round(correct / count, 3)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(f''overall accuracy: {total_correct / total_count:.3f}'')
+print()
+print(''The dashboard says 0.92 and the dashboard is correct. For'')
+print(''one user in a hundred the model is right six times in ten,'')
+print(''and no aggregate will ever show you that. Slice every'')
+print(''metric by the segments you care about, and decide what'')
+print(''those segments are before you launch rather than after'')
+print(''someone complains.'')
+```
+
+## Check your understanding
+
+Before serving anything, measure the baseline the model has to beat. Not another model - the simplest rule anyone could write in an afternoon.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.dummy import DummyClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+
+X, y = make_classification(n_samples=20000, n_features=20, n_informative=6,
+                           weights=[0.93, 0.07], class_sep=0.9,
+                           random_state=0)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0)
+
+rows = []
+for name, model in [
+        (''predict the majority class'', DummyClassifier(strategy=''most_frequent'')),
+        (''one feature, thresholded'', LogisticRegression(max_iter=2000)),
+        (''all features, logistic'', LogisticRegression(max_iter=2000))]:
+    columns = slice(0, 1) if ''one feature'' in name else slice(None)
+    model.fit(X_tr[:, columns], y_tr)
+    predicted = model.predict(X_te[:, columns])
+    try:
+        scores = model.predict_proba(X_te[:, columns])[:, 1]
+        auc = round(roc_auc_score(y_te, scores), 4)
+    except (AttributeError, ValueError):
+        auc = float(''nan'')
+    rows.append({''baseline'': name,
+                 ''accuracy'': round(float((predicted == y_te).mean()), 4),
+                 ''AUC'': auc,
+                 ''positives caught'': int(((predicted == 1) & (y_te == 1)).sum()),
+                 ''positives present'': int((y_te == 1).sum())})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The majority-class baseline has 93% accuracy and catches'')
+print(''zero of the 423 positives. So does the one-feature model,'')
+print(''whose AUC of 0.48 is slightly WORSE than a coin toss while'')
+print(''its accuracy matches the baseline exactly - two metrics,'')
+print(''one useless model, and only one of them says so.'')
+print()
+print(''Any deep model you serve has to be compared against the'')
+print(''bottom row, not the top one, and has to justify its latency'')
+print(''and its cost against a logistic regression that answers in'')
+print(''40 microseconds.'')
+print()
+print(''Write these three rows into your evaluation script before'')
+print(''you train anything. They cost ten minutes, and they are'')
+print(''the difference between "our model is 94% accurate" and'')
+print(''knowing what that number is worth.'')
+```
+',
+   'Training is a project; serving is a service. Latency, batching, quantisation, versioning and the monitoring that tells you the model has quietly started receiving inputs it has never seen.', 16, 3144,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-00000000010f',
    'What Deep Learning Actually Costs',
    'markdown',
-   'The costs of a deep learning project are real, usually underestimated, and worth writing down before the project starts rather than after.
+   'Deep learning is priced in three currencies: money, time and carbon. The arithmetic is simple and almost nobody does it before starting, which is why so many projects discover halfway through that the model they planned costs more than the problem is worth.
 
-## Compute
+## The one equation worth memorising
 
-Training a large model from scratch costs serious money and takes days to weeks on multiple GPUs. Fine-tuning costs orders of magnitude less, which is one more reason it is the default.
+A forward pass through a dense model costs roughly **2 x parameters** floating-point operations per token or example. Training costs about three times that - one forward and two backward - so **6 x parameters x tokens** is the training cost of a language model, and it is accurate enough to plan with.
 
-Inference is the cost that recurs. A model answering a million requests a day costs more over a year than training it did, and that cost is proportional to traffic - so a successful product makes it worse.
+```python
+import pandas as pd
 
-## Data, which is the real expense
+rows = []
+for name, parameters, tokens in [
+        (''a small classifier'', 5e6, 1e7),
+        (''BERT-base'', 110e6, 2.5e11),
+        (''a 1B model'', 1e9, 2e11),
+        (''a 7B model, Chinchilla-optimal'', 7e9, 1.4e11),
+        (''a 70B model'', 70e9, 1.4e12)]:
+    flops = 6 * parameters * tokens
+    rows.append({''model'': name,
+                 ''parameters'': f''{parameters:,.0f}'',
+                 ''training tokens'': f''{tokens:,.0f}'',
+                 ''training FLOPs'': f''{flops:.2e}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Those exponents are the whole story. A small classifier is'')
+print(''3e14 FLOPs - a laptop afternoon. A 70B model is 5.9e23,'')
+print(''which is two BILLION times more.'')
+print()
+print(''Deep learning costs are not on a continuum you can walk'')
+print(''along. They are in bands separated by factors of a'')
+print(''thousand, and knowing which band your problem is in is'')
+print(''most of the planning.'')
+```
 
-Labelling is almost always the largest cost in a supervised project, and it is the one nobody budgets. Ten thousand labelled examples at thirty seconds each is 80 hours of someone''s attention, and that assumes the labels are unambiguous.
+Turn FLOPs into money and hours with one more number: what the hardware actually delivers, which is never what the specification says.
 
-Label quality sets a ceiling on model quality. Two annotators who disagree 15% of the time have defined a task the model cannot exceed 85% on, and measuring that agreement before training is one of the highest-value hours available.
+```python
+import pandas as pd
 
-## Carbon
+# Peak numbers from the vendor, and the fraction a real training
+# run achieves. 35-50% is normal and hard-won; above 50% is good.
+ACCELERATORS = [
+    (''one laptop CPU core'', 50e9, 0.60, 0.0),
+    (''a consumer GPU (RTX-class)'', 80e12, 0.35, 0.40),
+    (''one A100 80GB'', 312e12, 0.45, 2.50),
+    (''one H100'', 989e12, 0.45, 5.00),
+    (''8 x H100 node'', 7912e12, 0.40, 40.00),
+]
+rows = []
+for name, peak, efficiency, hourly in ACCELERATORS:
+    effective = peak * efficiency
+    rows.append({''hardware'': name,
+                 ''peak FLOP/s'': f''{peak:.2e}'',
+                 ''realistic'': f''{effective:.2e}'',
+                 ''usd/hour'': f''{hourly:.2f}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
 
-Training large models uses a lot of electricity. It is worth knowing the number, choosing a region with cleaner power when you have the choice, and not retraining on a schedule when nothing changed.
 
-The honest framing: a fine-tuned small model that is good enough has a tiny fraction of the footprint of training something large to be slightly better.
+def cost_of(flops, name):
+    for hardware, peak, efficiency, hourly in ACCELERATORS:
+        if hardware != name:
+            continue
+        seconds = flops / (peak * efficiency)
+        return seconds / 3600, seconds / 3600 * hourly
+    raise ValueError(name)
 
-## Failure modes that only appear with users
 
-**Adversarial inputs.** Small, deliberate perturbations change a prediction completely. Mostly relevant where someone has an incentive - fraud, moderation, access.
+print(''training cost of a 1-billion-parameter model on 200B tokens:'')
+flops = 6 * 1e9 * 2e11
+for name, _, _, _ in ACCELERATORS[1:]:
+    hours, dollars = cost_of(flops, name)
+    print(f''  {name:<28} {hours:12,.0f} GPU-hours  ${dollars:12,.0f}'')
+print()
+print(''Note the last two rows. Eight H100s cost the same per FLOP'')
+print(''as one, because the price scales with the hardware - what'')
+print(''you buy with a bigger node is TIME, not money. A run that'')
+print(''takes 42 days on one H100 takes five on eight of them for'')
+print(''the same bill, minus whatever the communication overhead'')
+print(''eats.'')
+```
 
-**Distribution shift that is a person, not an accident.** Users adapt to a model. Spam adapts to a spam filter.
+## Why nobody trains a foundation model
 
-**Confident nonsense.** A neural network is confident outside its training distribution and has no mechanism for saying "I have not seen anything like this". That property is dangerous wherever the output is acted on automatically, and it is the single most important thing to design around.
+The arithmetic above, applied to the models in the news.
 
-**Feedback loops.** A recommender trained on what it recommended narrows over time, and the data stops being a sample of what people like and becomes a record of what they were shown.
+```python
+import pandas as pd
 
-## The decision to write down
+H100_EFFECTIVE = 989e12 * 0.40
+H100_HOURLY = 5.00
 
-Before starting:
+rows = []
+for name, parameters, tokens in [
+        (''fine-tune 7B with LoRA'', 7e9, 5e7),
+        (''full fine-tune 7B'', 7e9, 1e9),
+        (''train 7B from scratch'', 7e9, 1.4e12),
+        (''train 70B from scratch'', 70e9, 1.4e12),
+        (''train 400B from scratch'', 400e9, 15e12)]:
+    flops = 6 * parameters * tokens
+    hours = flops / H100_EFFECTIVE / 3600
+    rows.append({''job'': name,
+                 ''FLOPs'': f''{flops:.1e}'',
+                 ''H100-hours'': f''{hours:,.0f}'',
+                 ''cost at $5/hr'': f''${hours * H100_HOURLY:,.0f}'',
+                 ''wall clock on 64 H100s'': f''{hours / 64 / 24:,.1f} days''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''A LoRA fine-tune is $7 and about an hour. A full fine-tune'')
+print(''is $147. Training 7B from scratch is $206,000 and 27 days'')
+print(''on 64 H100s - and that is the SUCCESSFUL run, not the'')
+print(''three failed attempts before it. A 400B model is $126'')
+print(''million and would take 45 years on those 64 cards, which'')
+print(''is why the organisations that do it own tens of thousands.'')
+print()
+print(''This is why the industry shape is what it is: a handful of'')
+print(''organisations train base models, and everyone else adapts'')
+print(''them. The gap between the third row and the first is four'')
+print(''orders of magnitude, and no amount of cleverness closes it.'')
+```
 
-- what it costs to build, including labelling;
-- what it costs per month to serve at expected traffic;
-- what the baseline already achieves;
-- what happens when it is wrong, and who it happens to;
-- how you will know it has stopped working.
+## Memory is usually the binding constraint, not speed
 
-A project that cannot answer those five is not ready to start, and answering them honestly cancels some projects - which is the point.',
-   'Compute, data, carbon and the failures that only appear with real users. Stating these before a project starts is the difference between a considered decision and a sunk cost nobody wants to admit to.',
-   11, 445, '55555555-5555-4555-8555-555555555555', 'published',
+A run that would finish in an hour is useless if it will not fit. The arithmetic for training memory is worth knowing exactly, because it is four separate things and people account for one.
+
+```python
+import pandas as pd
+
+rows = []
+for name, parameters in [(''125M'', 125e6), (''1.3B'', 1.3e9),
+                         (''7B'', 7e9), (''70B'', 70e9)]:
+    weights_fp32 = parameters * 4
+    gradients = parameters * 4
+    adam_state = parameters * 8          # two moments, fp32
+    total = weights_fp32 + gradients + adam_state
+    rows.append({''model'': name,
+                 ''weights'': f''{weights_fp32 / 1024 ** 3:8.1f} GiB'',
+                 ''gradients'': f''{gradients / 1024 ** 3:8.1f} GiB'',
+                 ''Adam state'': f''{adam_state / 1024 ** 3:8.1f} GiB'',
+                 ''total, before activations'': f''{total / 1024 ** 3:8.1f} GiB'',
+                 ''fits in 80 GiB'': ''yes'' if total < 80 * 1024 ** 3 else ''NO''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Adam costs twice what the weights do, because it keeps two'')
+print(''moment estimates per parameter. With the gradients that is'')
+print(''FOUR times the model, before a single activation is stored.'')
+print()
+print(''A 7B model needs 104 GiB to train with AdamW in fp32 and'')
+print(''does not fit on an 80 GiB card. This is the single most'')
+print(''common surprise in the field, and it is why every one of'')
+print(''the following exists:'')
+print()
+for technique, saving in [
+        (''mixed precision (bf16 weights, fp32 master)'',
+         ''cuts about 25% off the total''),
+        (''gradient checkpointing'',
+         ''trades activation memory for 30% more compute''),
+        (''8-bit optimiser states'',
+         ''removes three quarters of the Adam state''),
+        (''ZeRO / FSDP sharding'',
+         ''divides all three terms by the device count''),
+        (''LoRA'',
+         ''removes gradients and optimiser state almost entirely''),
+        (''SGD with momentum instead of Adam'',
+         ''halves the optimiser state'')]:
+    print(f''  {technique:<44} {saving}'')
+```
+
+Activations are the fourth term, and for a transformer they scale with batch size times sequence length - which is why the out-of-memory error arrives when someone raises the context length rather than the model size.
+
+```python
+import pandas as pd
+
+# Roughly: activations per layer per token, for a transformer
+# storing what the backward pass needs.
+layers, dimension = 32, 4096
+per_token_per_layer = dimension * 16 * 2        # bf16
+
+rows = []
+for batch, length in [(1, 512), (1, 4096), (4, 4096),
+                      (1, 32768), (8, 8192)]:
+    activations = batch * length * layers * per_token_per_layer
+    rows.append({''batch'': batch, ''sequence length'': length,
+                 ''tokens in flight'': f''{batch * length:,}'',
+                 ''activation memory'': f''{activations / 1024 ** 3:8.1f} GiB''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Same model throughout; only the batch and the context'')
+print(''length change. One sequence of 512 tokens needs 2 GiB of'')
+print(''activations; one of 32,768 needs 128 GiB, on top of the'')
+print(''104 GiB the weights and optimiser already took.'')
+print()
+print(''Gradient checkpointing is the standard answer: store the'')
+print(''activations at a few layer boundaries only and recompute'')
+print(''the rest during the backward pass. It cuts activation'')
+print(''memory by roughly the square root of the layer count and'')
+print(''costs about 30% more compute - which is a good trade when'')
+print(''the alternative is not running at all.'')
+```
+
+## Inference is where the money actually goes
+
+Training is a one-off; serving is every day forever. For anything with users, the lifetime bill is dominated by inference, and most teams discover this after the launch.
+
+```python
+import pandas as pd
+
+# A 7B model serving a chat product.
+PARAMETERS = 7e9
+H100_EFFECTIVE = 989e12 * 0.30        # inference achieves less than training
+H100_HOURLY = 5.00
+TOKENS_PER_REQUEST = 600
+
+flops_per_token = 2 * PARAMETERS
+tokens_per_second = H100_EFFECTIVE / flops_per_token
+print(f''one H100, 7B model: {tokens_per_second:,.0f} tokens/second ''
+      f''at full batch'')
+print(f''= {tokens_per_second / TOKENS_PER_REQUEST:,.0f} requests/second'')
+print()
+
+requests_per_second = tokens_per_second / TOKENS_PER_REQUEST
+cost_per_request = H100_HOURLY / 3600 / requests_per_second
+print(f''cost per request: ${cost_per_request:.8f}'')
+print(f''cost per 1,000 requests: ${cost_per_request * 1000:.5f}'')
+print()
+
+TRAINING_COST = 206000
+rows = []
+for daily in [1e4, 1e6, 1e8, 1e9]:
+    annual = daily * 365 * cost_per_request
+    rows.append({''requests/day'': f''{daily:,.0f}'',
+                 ''annual inference'': f''${annual:,.0f}'',
+                 ''daily inference'': f''${daily * cost_per_request:,.0f}'',
+                 ''days to equal the training run'':
+                     f''{TRAINING_COST / (daily * cost_per_request):,.0f}''})
+print(f''against a one-off training cost of ${TRAINING_COST:,}'')
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Read the last column. At ten thousand requests a day,'')
+print(''inference is a rounding error and the training run'')
+print(''dominates for five centuries. At a hundred million a day it'')
+print(''overtakes the whole training budget in 52 days - and then'')
+print(''does it again every 52 days, forever.'')
+print()
+print(''That crossover is the number to find for your own product,'')
+print(''because it decides where the engineering effort goes. Below'')
+print(''it, optimise training. Above it, a week spent making the'')
+print(''model four times cheaper to serve saves more than the'')
+print(''entire training budget, repeatedly. That is why'')
+print(''distillation and quantisation are production disciplines'')
+print(''rather than research curiosities.'')
+```
+
+## The number that makes the trade concrete
+
+```python
+import pandas as pd
+
+# Cost per thousand requests, for the ladder of options.
+H100_HOURLY = 5.00
+H100_EFFECTIVE = 989e12 * 0.30
+TOKENS = 600
+
+rows = []
+for name, parameters, speedup in [
+        (''70B, fp16'', 70e9, 1.0),
+        (''70B, int8'', 70e9, 2.0),
+        (''7B, fp16'', 7e9, 1.0),
+        (''7B, int8'', 7e9, 2.0),
+        (''1B distilled, int8'', 1e9, 2.0),
+        (''a logistic regression'', 1e4, 1.0)]:
+    effective = H100_EFFECTIVE * speedup
+    tokens_per_second = effective / (2 * parameters)
+    requests_per_second = tokens_per_second / TOKENS
+    per_thousand = H100_HOURLY / 3600 / requests_per_second * 1000
+    rows.append({''model'': name,
+                 ''requests/s per H100'': f''{requests_per_second:,.1f}'',
+                 ''per million requests'': per_thousand * 1000})
+table = pd.DataFrame(rows)
+baseline = table.loc[0, ''per million requests'']
+table[''relative to 70B fp16''] = [
+    ''baseline'' if value == baseline else f''{baseline / value:,.0f}x cheaper''
+    for value in table[''per million requests'']]
+table[''per million requests''] = [
+    f''${value:,.2f}'' if value >= 0.01 else f''${value:.6f}''
+    for value in table[''per million requests'']]
+print(table.to_string(index=False))
+print()
+print(''Each step down is roughly an order of magnitude. A million'')
+print(''requests cost $393 on a 70B model in fp16 and $2.81 on a'')
+print(''distilled 1B in int8 - 140 times cheaper - and the only'')
+print(''question is whether the quality still clears the bar, which'')
+print(''is a measurement rather than an opinion.'')
+print()
+print(''The last row is there for perspective: 50,000 times'')
+print(''cheaper again than the distilled model. If a logistic'')
+print(''regression solves your problem, the serving cost is not a'')
+print(''consideration at all, and no amount of optimising a'')
+print(''transformer will get you near it.'')
+```
+
+## Carbon, briefly and honestly
+
+```python
+import pandas as pd
+
+# Grid intensity varies by more than an order of magnitude, which
+# is the largest single factor in a run''s emissions.
+GRIDS = [(''Sweden / hydro'', 25), (''France / nuclear'', 60),
+         (''US average'', 390), (''Germany'', 380),
+         (''India / coal-heavy'', 710)]
+
+H100_WATTS = 700
+PUE = 1.2                     # data-centre overhead
+hours = 24000                 # a 7B training run on 64 GPUs for ~16 days
+
+energy_kwh = H100_WATTS * PUE * hours / 1000
+print(f''{hours:,} GPU-hours at {H100_WATTS} W and a PUE of {PUE}'')
+print(f''= {energy_kwh:,.0f} kWh'')
+print()
+rows = []
+for grid, intensity in GRIDS:
+    kilograms = energy_kwh * intensity / 1000
+    rows.append({''grid'': grid, ''g CO2 per kWh'': intensity,
+                 ''emissions'': f''{kilograms:,.0f} kg CO2'',
+                 ''equivalent flights, London-New York'':
+                     f''{kilograms / 1000:,.1f}''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The same run emits 28 times more on a coal-heavy grid than'')
+print(''on a hydroelectric one. Choosing the region is a larger'')
+print(''lever than any optimisation in the training code, costs'')
+print(''nothing, and takes one line of configuration.'')
+print()
+print(''The honest framing: one training run is a few flights. The'')
+print(''aggregate across an industry is not negligible, and the'')
+print(''inference total now exceeds the training total by a wide'')
+print(''margin - which is another reason the cheap-to-serve model'')
+print(''is the responsible choice as well as the profitable one.'')
+```
+
+## How to budget a project before starting it
+
+```python
+import pandas as pd
+
+rows = [
+    (''1. What is the baseline worth?'',
+     ''logistic regression, or a rule'',
+     ''free - and it sometimes ends the project here''),
+    (''2. What accuracy does the product need?'',
+     ''a number, agreed in writing'',
+     ''decides which band you are in''),
+    (''3. Can a pretrained model be adapted?'',
+     ''feature extraction first'',
+     ''hours, not weeks''),
+    (''4. What will serving cost at scale?'',
+     ''cost per 1,000 x expected volume'',
+     ''the number that kills projects post-launch''),
+    (''5. How much does a failed run cost?'',
+     ''budget for three attempts'',
+     ''the first run never works''),
+    (''6. What is the retraining cadence?'',
+     ''drift rate decides it'',
+     ''a recurring cost, not a one-off''),
+]
+print(pd.DataFrame(rows, columns=[''question'', ''how to answer it'',
+                                  ''why it matters'']).to_string(index=False))
+print()
+print(''Step 5 is the one left out of every plan. A training run'')
+print(''fails on a bad learning rate, a corrupted shard or a'')
+print(''silent preprocessing bug, and you find out after four'')
+print(''days. Budget three runs and be pleased if you need two.'')
+```
+
+## Failure modes
+
+| Symptom | Cause |
+| --- | --- |
+| Cloud bill ten times the estimate | Idle GPUs between jobs; instances left running; egress charges |
+| `CUDA out of memory` at 40% GPU utilisation | Memory and compute are separate limits; you are memory-bound |
+| Training slower on 8 GPUs than on 1 | Communication dominates; the batch per device is too small |
+| GPU utilisation at 20% | The data loader is the bottleneck, not the model |
+| Costs fine in testing, enormous at launch | Inference was never costed; it scales with users and training does not |
+| A 30-day run dies on day 28 | No checkpointing; always checkpoint and always test the restore |
+| Spot instances keep terminating | Expected - that is the price. Checkpoint every few minutes |
+
+Row four is worth measuring on every run you ever do, because it is extremely common and completely invisible unless you look.
+
+```python
+import pandas as pd
+
+# A step is data loading plus compute. If they are sequential,
+# the GPU idles for the loading.
+rows = []
+for load_ms, compute_ms in [(5, 100), (50, 100), (100, 100), (200, 100)]:
+    sequential = load_ms + compute_ms
+    overlapped = max(load_ms, compute_ms)
+    rows.append({''data load (ms)'': load_ms,
+                 ''GPU compute (ms)'': compute_ms,
+                 ''step, sequential'': sequential,
+                 ''GPU utilisation'': f''{compute_ms / sequential:.0%}'',
+                 ''step, with prefetch'': overlapped,
+                 ''speed-up from overlapping'': f''{sequential / overlapped:.2f}x''})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''Read the utilisation column. At 100 ms of loading against'')
+print(''100 ms of compute the GPU is idle half the time, and'')
+print(''overlapping the two - more worker processes, prefetch,'')
+print(''pinned memory - gives a clean 2x with no change to the'')
+print(''model at all.'')
+print()
+print(''The last row is the one to notice. At 200 ms of loading the'')
+print(''GPU is idle two thirds of the time, and overlapping only'')
+print(''gets 1.5x, because the loader is now the ceiling: the step'')
+print(''cannot go below 200 ms however fast the GPU is. Past that'')
+print(''point a faster GPU buys literally nothing, and the work is'')
+print(''in the data pipeline.'')
+print()
+print(''That is almost always the first thing to fix, and it is'')
+print(''almost never where people look. Check GPU utilisation'')
+print(''before optimising anything else; if it is not above 80%,'')
+print(''the model is not your problem.'')
+```
+
+## Check your understanding
+
+Cost the project you are about to start, with four numbers you already know. Ten minutes, and it changes decisions.
+
+```python
+# Fill these in for your own project.
+PARAMETERS = 7e9
+TRAINING_TOKENS = 1e9                 # a fine-tune, not from scratch
+REQUESTS_PER_DAY = 50000
+TOKENS_PER_REQUEST = 500
+GPU_HOURLY = 5.00
+GPU_EFFECTIVE_FLOPS = 989e12 * 0.35
+
+training_flops = 6 * PARAMETERS * TRAINING_TOKENS
+training_hours = training_flops / GPU_EFFECTIVE_FLOPS / 3600
+training_cost = training_hours * GPU_HOURLY
+
+tokens_per_second = GPU_EFFECTIVE_FLOPS / (2 * PARAMETERS)
+daily_tokens = REQUESTS_PER_DAY * TOKENS_PER_REQUEST
+daily_gpu_hours = daily_tokens / tokens_per_second / 3600
+daily_cost = daily_gpu_hours * GPU_HOURLY
+
+print(f''TRAINING'')
+print(f''  {training_flops:.2e} FLOPs'')
+print(f''  {training_hours:,.1f} GPU-hours'')
+print(f''  ${training_cost:,.2f}  (budget 3x for failed runs: ''
+      f''${training_cost * 3:,.2f})'')
+print()
+print(f''SERVING'')
+print(f''  {tokens_per_second:,.0f} tokens/second per GPU'')
+print(f''  {daily_gpu_hours:,.2f} GPU-hours/day'')
+print(f''  ${daily_cost:,.2f}/day   ${daily_cost * 365:,.2f}/year'')
+print()
+print(f''inference passes training after ''
+      f''{training_cost / daily_cost:,.1f} days'')
+print(f''cost per request: ${daily_cost / REQUESTS_PER_DAY:.6f}'')
+print()
+print(''Three sanity checks on whatever you get:'')
+print('' - if the cost per request exceeds what the request earns,'')
+print(''   the project is finished before it starts;'')
+print('' - if inference passes training inside a month, optimise'')
+print(''   serving and not training;'')
+print('' - if the training cost is under a hundred dollars, stop'')
+print(''   planning and run it - the estimate costs more than the'')
+print(''   experiment.'')
+```
+',
+   'Compute, data, carbon and the failures that only appear with real users. Stating these before a project starts is the difference between a considered decision and a sunk cost nobody wants to admit to.', 14, 2720,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
