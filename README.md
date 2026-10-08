@@ -1362,3 +1362,6 @@ passed no matter what: a `CONTINUE HANDLER` was swallowing its own assertion.
   places MySQL needed a different approach from PostgreSQL.
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — why one database, what dropping
   cross-service foreign keys really costs, and what is deliberately missing.
+- [`docs/IMPORT.md`](docs/IMPORT.md) — adding courses to the live database.
+- [`docs/ADMIN.md`](docs/ADMIN.md) — the one statement that grants the `admin`
+  role, which is what the admin panel at `/ap/admin_panel` lets in.
