@@ -75,6 +75,30 @@ SELECT COUNT(*) FROM content_editorial_posts;
 `0` is the right answer — the table is empty until the guides and the blog
 posts are written.
 
+## If it stops at the preflight
+
+`content.sql` begins by checking that the database it was given actually holds
+the learning schema. If it does not, the import stops on its sixth statement,
+before writing anything, with the instruction in the error text:
+
+```
+#1146 - Table 'yourdb.STOP: no learning schema in this database
+         - see docs/IMPORT.md' doesn't exist
+```
+
+There is no such table. The message is the table name, which is the only way a
+plain `.sql` file can say something useful to the person running it.
+
+It means the database selected in phpMyAdmin is not the one the site uses.
+Pick another from the left-hand list and check it:
+
+```sql
+SELECT COUNT(*) FROM catalog_courses;
+```
+
+The right database answers with a number. **Do not** respond to this by running
+`install.sql` — see the last section.
+
 ## If it stops with "Table ... doesn't exist"
 
 A database installed by hand, or from an older `install.sql`, may be missing a
@@ -127,11 +151,18 @@ edit and want to keep it, say so and I will build a file limited to the eleven.
 
 ## Do not use install.sql
 
-`dist/install.sql` is for a first install, or a retry after one failed. It drops
-every table and replaces the data with the seeds. It refuses to run at all when
-the database holds an account that is not `@learning.test`, which the live
-database does — so it is not merely the wrong file, it will stop. The file to
-import for new content is always `content.sql`.
+`dist/install.sql` is for a first install into an empty database, or a retry
+after one failed. **It drops every table it manages and replaces the data with
+the seeds.**
+
+It has a guard: it refuses to run when the database holds an account that is
+not `@learning.test`. That guard protects the live learning database. It does
+**not** protect a database belonging to something else — a database with no
+learning accounts in it passes the check, and then the drops run.
+
+So if the preflight above told you that you are in the wrong database, the
+answer is to find the right one, never to install the schema where you are.
+The file to import for new content is always `content.sql`.
 
 ## Rebuilding these files yourself
 

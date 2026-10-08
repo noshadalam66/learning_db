@@ -214,6 +214,42 @@ mkdir -p dist
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 SET sql_mode = 'STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
+-- ---------------------------------------------------------------------------
+-- PREFLIGHT: is this the right database?
+--
+-- This file carries content and no schema, so it can only be imported into a
+-- database that already has the tables. Imported into the wrong one - an easy
+-- thing to do in phpMyAdmin, where the database is chosen by clicking a name
+-- in a list - the first seed stops with
+--
+--   #1146 - Table 'something.catalog_tags' doesn't exist
+--
+-- which says what is missing and not what to do about it. The three statements
+-- below stop first, with the instruction in the error text.
+--
+-- The trick is that the message is a TABLE NAME. A missing-table error prints
+-- the name it looked for, so the name is the message. It is built only when
+-- the check fails, which is why it goes through PREPARE: a reference to a
+-- table that does not exist cannot sit in a statement that is parsed either
+-- way.
+-- ---------------------------------------------------------------------------
+SELECT COUNT(*) INTO @learning_tables
+  FROM information_schema.tables
+ WHERE table_schema = DATABASE()
+   AND table_name IN ('catalog_categories', 'catalog_courses',
+                      'catalog_modules', 'catalog_lessons', 'catalog_tags',
+                      'catalog_course_tags', 'content_articles',
+                      'content_lesson_diagrams', 'assessment_quizzes',
+                      'assessment_questions', 'assessment_question_options');
+
+SET @preflight = IF(@learning_tables = 11,
+  'SELECT CONCAT(DATABASE(), '' has the learning schema'') AS preflight',
+  'SELECT 1 FROM \`STOP: no learning schema in this database - see docs/IMPORT.md\`');
+
+PREPARE preflight FROM @preflight;
+EXECUTE preflight;
+DEALLOCATE PREPARE preflight;
 HEADER
 
   for file in "${files[@]}"; do
