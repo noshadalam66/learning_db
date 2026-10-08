@@ -153,109 +153,312 @@ VALUES
   ('e0000001-0000-4000-8000-000000000061',
    'Values, Types and Variables',
    'markdown',
-   '# Values, Types and Variables
+   '# Values, Types and Equality
 
-Every PHP variable starts with `$`, and PHP works out the type from what you
-put in it. That flexibility is why the comparison rules below matter so much.
+PHP is dynamically typed with an unusually eager conversion system. Modern PHP gives you the tools to switch most of that off, and the single most valuable habit in the language is knowing which comparisons convert and which do not.
+
+## The types
 
 ```php
 <?php
-$name = "Aisha";
-$score = 92;
-$ratio = 0.85;
-$active = true;
-$missing = null;
+declare(strict_types=1);
 
-foreach ([$name, $score, $ratio, $active, $missing] as $value) {
-    printf("%-8s %s\\n", var_export($value, true), get_debug_type($value));
+$int = 42;
+$float = 3.14;
+$string = "hello";
+$bool = true;
+$null = null;
+$array = [1, 2, 3];
+$callable = fn (int $n): int => $n * 2;
+
+printf("%s %s %s %s %s %s%s",
+    get_debug_type($int), get_debug_type($float), get_debug_type($string),
+    get_debug_type($bool), get_debug_type($null), get_debug_type($array), PHP_EOL);
+// int float string bool null array
+
+echo get_debug_type($callable), PHP_EOL;        // Closure
+echo gettype($int), PHP_EOL;                    // integer - the old names
+```
+
+Use `get_debug_type()` rather than `gettype()`. It returns the names you actually write - `int`, `bool`, `Closure`, and a class''s fully qualified name - whereas `gettype()` returns `integer`, `boolean`, `object`, which match nothing.
+
+`declare(strict_types=1);` on the first line of every file is the most important line in modern PHP. Without it, a function declared `function f(int $n)` accepts `"42"` and silently converts. With it, that is a `TypeError` at the call site, where the mistake is.
+
+```php
+<?php
+declare(strict_types=1);
+
+function double(int $n): int {
+    return $n * 2;
 }
 
-// A name can be rebound to a different type. The type belonged to the value.
-$score = "ninety-two";
-echo get_debug_type($score), "\\n";
+echo double(21), PHP_EOL;                       // 42
+
+try {
+    // @phpstan-ignore-next-line - deliberate
+    echo double("21"), PHP_EOL;
+} catch (TypeError $e) {
+    echo get_class($e), PHP_EOL;                // TypeError
+}
 ```
+
+Without `strict_types`, that call would quietly succeed and return 42 - and the day the string is `"21 apples"` you get a different failure, much further away.
 
 ## Two kinds of equality
 
-`==` converts before comparing. `===` does not. Almost every surprising PHP
-comparison story is about that first line.
+```php
+<?php
+declare(strict_types=1);
+
+var_dump(0 == "a");          // false in PHP 8 - it was TRUE before 8.0
+var_dump("1" == "01");       // true  - both look numeric
+var_dump("10" == "1e1");     // true  - both look numeric
+var_dump(100 == "1e2");      // true
+var_dump(null == false);     // true
+var_dump([] == false);       // true
+var_dump("abc" == 0);        // false in PHP 8
+
+var_dump("1" === "01");      // false - === never converts
+var_dump(null === false);    // false
+var_dump(1 === 1.0);         // false - int is not float
+```
+
+PHP 8 fixed the worst of this: comparing a number to a non-numeric string now converts the *number* to a string rather than the string to zero, so `0 == "a"` is finally false. Numeric strings still convert, which is why `"10" == "1e1"` is true.
+
+**Use `===` everywhere.** The exceptions are so few you can list them: `==` is fine when you have deliberately normalised both sides, and `in_array()` needs `true` as its third argument to use strict comparison.
 
 ```php
 <?php
-var_dump(0 == "0");
-var_dump("abc" == 0);      // false since PHP 8 - it was true before
-var_dump("1e2" == "100");  // true: both look numeric, so both are compared as numbers
-var_dump(null == false);
-var_dump([] == false);
+declare(strict_types=1);
 
-echo "--- with === nothing is converted ---\\n";
-var_dump(0 === "0");
-var_dump(null === false);
+$values = [0, 1, 2];
+var_dump(in_array("abc", $values));         // false in PHP 8
+var_dump(in_array("1", $values));           // true  - loose, "1" == 1
+var_dump(in_array("1", $values, true));     // false - strict
 
-// Use === unless you have a specific reason. The exception is comparing
-// against null, where === null and is_null() are the same thing.
+var_dump(array_search("1", $values, true)); // false - not found
+var_dump(array_keys($values, 1, true));     // [1]
+```
+
+The third argument is easy to forget and `in_array()` without it has caused real authorisation bugs - a check against a list of allowed ids where `"0abc"` matched `0`.
+
+The spaceship operator returns -1, 0 or 1 and is what sorting callbacks want:
+
+```php
+<?php
+declare(strict_types=1);
+
+var_dump(1 <=> 2, 2 <=> 2, 3 <=> 2);        // -1 0 1
+
+$rows = [[''n'' => 3], [''n'' => 1], [''n'' => 2]];
+usort($rows, fn (array $a, array $b): int => $a[''n''] <=> $b[''n'']);
+echo implode(",", array_column($rows, ''n'')), PHP_EOL;       // 1,2,3
 ```
 
 ## Strings, and the two kinds of quote
 
-Double quotes interpolate variables. Single quotes do not, and are faster to
-read for that reason.
-
 ```php
 <?php
+declare(strict_types=1);
+
 $name = "Aisha";
-$score = 92;
+$count = 3;
 
-echo "Interpolated: $name scored $score\\n";
-echo ''Literal: $name scored $score'', "\\n";
+echo "Hello $name, you have $count items" . PHP_EOL;        // interpolated
+echo ''Hello $name'' . PHP_EOL;                               // literal
+echo "Braces for clarity: {$name}''s account" . PHP_EOL;
+echo "Array access: {$_SERVER[''argc'']}" . PHP_EOL;
 
-// Braces make the boundary explicit, and are required for anything more
-// complex than a plain variable.
-$learner = ["name" => "Kenji"];
-echo "Array value: {$learner[''name'']}\\n";
-
-// Heredoc interpolates; nowdoc does not. Both keep the layout.
-$report = <<<TEXT
-    Name:  $name
-    Score: $score
+$heredoc = <<<TEXT
+    Interpolates like a double-quoted string,
+    and $name works here too.
     TEXT;
-echo $report, "\\n";
 
-echo "Concatenation uses a dot: " . $name . " (" . $score . ")\\n";
+$nowdoc = <<<''TEXT''
+    Does not interpolate. $name stays literal.
+    TEXT;
+
+echo $heredoc, PHP_EOL;
+echo $nowdoc, PHP_EOL;
 ```
+
+Single quotes are marginally faster and, more importantly, say "nothing in here is a variable". Use double quotes when you are interpolating and single when you are not; the braces form `{$expr}` is required for anything more complex than a plain variable.
+
+The closing identifier of a heredoc sets the indentation that is stripped from every line - which is why the content above can be indented to match the surrounding code.
 
 ## Numbers
 
 ```php
 <?php
-// int and float are separate types, and / always produces a float unless
-// both sides divide evenly.
-var_dump(7 / 2);
-var_dump(intdiv(7, 2));
-var_dump(7 % 2);
+declare(strict_types=1);
 
-// Floats are binary approximations, so this is false - as it is everywhere.
-var_dump(0.1 + 0.2 == 0.3);
-var_dump(abs((0.1 + 0.2) - 0.3) < PHP_FLOAT_EPSILON);
+var_dump(PHP_INT_MAX);                      // 9223372036854775807
+var_dump(PHP_INT_MAX + 1);                  // float - it overflows silently
+var_dump(0.1 + 0.2 === 0.3);                // false
+var_dump(abs(0.1 + 0.2 - 0.3) < PHP_FLOAT_EPSILON);     // true
 
-// Integers overflow into floats rather than wrapping.
-var_dump(PHP_INT_MAX);
-var_dump(PHP_INT_MAX + 1);
-
-echo number_format(1234567.891, 2), "\\n";
+var_dump(intdiv(7, 2));                     // 3
+var_dump(7 % 3, -7 % 3);                    // 1 -1 - the sign follows the LEFT
+var_dump(fdiv(1, 0));                       // INF - no exception
+try {
+    echo intdiv(1, 0);
+} catch (DivisionByZeroError $e) {
+    echo $e->getMessage(), PHP_EOL;         // Division by zero
+}
 ```
 
-## What to take away
+Two differences from other languages worth filing away. An integer that overflows becomes a float rather than wrapping, so a counter silently loses precision rather than going negative. And `%` takes its sign from the left operand, unlike Python, so `-7 % 3` is `-1` here and `2` there.
 
-- A variable holds a value, and the value carries the type.
-- `===` compares without converting; prefer it.
-- Double quotes interpolate, single quotes do not.
-- `/` gives a float; `intdiv` and `%` are for whole numbers.
-- Floats are approximations, so compare them with a tolerance.
+Money is never a float. Store integer pence, or use `bcmath`:
+
+```php
+<?php
+declare(strict_types=1);
+
+$totalPence = array_sum([1999, 450, 1299]);
+printf("%s%s", number_format($totalPence / 100, 2), PHP_EOL);      // 37.48
+
+if (extension_loaded(''bcmath'')) {
+    echo bcadd(''0.1'', ''0.2'', 2), PHP_EOL;              // 0.30
+    var_dump(bccomp(''0.1'', ''0.10'', 2) === 0);          // true
+} else {
+    echo ''bcmath is not installed here'', PHP_EOL;
+}
+```
+
+## Converting on purpose
+
+```php
+<?php
+declare(strict_types=1);
+
+$input = "42abc";
+
+var_dump((int) $input);                      // 42 - silently truncates
+var_dump(is_numeric($input));                // false
+
+$clean = filter_var($input, FILTER_VALIDATE_INT);
+var_dump($clean);                            // false - it rejected
+
+$good = filter_var("42", FILTER_VALIDATE_INT);
+var_dump($good);                             // 42
+
+var_dump(filter_var("3.5", FILTER_VALIDATE_FLOAT));            // 3.5
+var_dump(filter_var("yes", FILTER_VALIDATE_BOOLEAN));          // true
+var_dump(filter_var("a@b.com", FILTER_VALIDATE_EMAIL));        // a@b.com
+var_dump(filter_var("nope", FILTER_VALIDATE_EMAIL));           // false
+```
+
+`(int)` is a cast and never fails; `filter_var` is a validator and returns `false` when the input is not what you said. At a boundary - a form, a query string, an environment variable - you want the validator.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+/**
+ * Parsing a line of input the way a boundary should: validate, do not
+ * cast, and keep money in integer pence.
+ */
+function parseOrderLine(string $line): ?array
+{
+    $parts = array_map(''trim'', explode(''|'', $line));
+    if (count($parts) !== 4) {
+        return null;
+    }
+    [$reference, $description, $quantity, $unitPence] = $parts;
+
+    $quantity = filter_var($quantity, FILTER_VALIDATE_INT, [''options'' => [''min_range'' => 1]]);
+    $unitPence = filter_var($unitPence, FILTER_VALIDATE_INT, [''options'' => [''min_range'' => 0]]);
+
+    if ($quantity === false || $unitPence === false || $reference === '''') {
+        return null;
+    }
+
+    return [
+        ''reference''  => $reference,
+        ''description''=> $description,
+        ''quantity''   => $quantity,
+        ''unitPence''  => $unitPence,
+        ''totalPence'' => $quantity * $unitPence,
+    ];
+}
+
+$input = <<<''LINES''
+    A-001 | Consulting, 3 hours | 3 | 9500
+    A-002 | Hosting, annual     | 1 | 11999
+    A-003 | Domain              | 2 | 1250
+    A-004 | Nonsense            | x | 100
+    not enough fields
+    LINES;
+
+$lines = [];
+$rejected = 0;
+foreach (explode(PHP_EOL, $input) as $line) {
+    $parsed = parseOrderLine($line);
+    if ($parsed === null) {
+        $rejected++;
+        continue;
+    }
+    $lines[] = $parsed;
+}
+
+foreach ($lines as $line) {
+    printf("%-22s %2d x %8s = %9s%s",
+        $line[''description''],
+        $line[''quantity''],
+        number_format($line[''unitPence''] / 100, 2),
+        number_format($line[''totalPence''] / 100, 2),
+        PHP_EOL);
+}
+
+$netPence = array_sum(array_column($lines, ''totalPence''));
+$vatPence = (int) round($netPence * 0.2);
+
+echo str_repeat(''-'', 50), PHP_EOL;
+printf("%-37s %9s%s", ''Net'', number_format($netPence / 100, 2), PHP_EOL);
+printf("%-37s %9s%s", ''VAT at 20%'', number_format($vatPence / 100, 2), PHP_EOL);
+printf("%-37s %9s%s", ''Total'', number_format(($netPence + $vatPence) / 100, 2), PHP_EOL);
+printf("%d line(s) parsed, %d rejected%s", count($lines), $rejected, PHP_EOL);
+
+// The same arithmetic in floats, for comparison.
+$floatNet = 0.0;
+foreach ($lines as $line) {
+    $floatNet += ($line[''unitPence''] / 100) * $line[''quantity''];
+}
+printf("as a float:   %.10f%s", $floatNet * 1.2, PHP_EOL);
+printf("as integers:  %s%s", number_format(($netPence + $vatPence) / 100, 2), PHP_EOL);
+var_dump($floatNet * 1.2 === ($netPence + $vatPence) / 100);
+```
+
+Three habits are on display. `filter_var` with a range rejects `"x"` and `"-1"` where `(int)` would have returned `0` and `-1`. Money stays in integer pence until the moment it is formatted. And the float comparison at the end shows why: the two totals look the same printed and are not equal.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `"0abc"` matched `0` in a list | `in_array` without the strict third argument |
+| A string argument was silently accepted | No `declare(strict_types=1)` |
+| `(int) "abc"` was `0` rather than an error | A cast never fails; use `filter_var` |
+| A total is out by a fraction of a penny | Floats; keep money in integer pence |
+| A large counter lost precision | Integer overflow becomes a float |
+| `-7 % 3` is `-1`, not `2` | The sign follows the left operand |
+| `$name` appeared literally in output | Single quotes do not interpolate |
+| `gettype()` returned `integer` | Use `get_debug_type()` for the real names |
+
+## A check you can run
+
+```php
+<?php
+$allowed = [0, 1, 2];
+var_dump(in_array("0abc", $allowed));
+var_dump(in_array("0abc", $allowed, true));
+```
+
+In PHP 8 the first is `false`, which is the fix for a famous class of bug. Run the same two lines mentally against PHP 7, where the first was `true`, and you have the reason the third argument exists and the reason to always pass it: the behaviour of `==` has changed once already, and code that relies on it is relying on a moving target.
 ',
-   'Types that follow the value, and the difference between == and ===.',
-   2, 425,
-   '55555555-5555-4555-8555-555555555555',
+   'Types that follow the value, and the difference between == and ===.', 8, 1551,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -272,145 +475,432 @@ VALUES
   ('e0000001-0000-4000-8000-000000000062',
    'Control Flow and Functions',
    'markdown',
-   '# Control Flow and Functions
+   '# Control Flow, Functions and Closures
 
-The building blocks look like C, with two modern additions - `match` and arrow
-functions - that remove most of the noise from everyday code.
+PHP''s control flow is unremarkable except in three places: `match` is not `switch`, function signatures carry real types that are enforced at run time, and closures capture by value unless you say otherwise. Those three are where the bugs are.
+
+## The loops
 
 ```php
 <?php
-$scores = [92, 78, 85, 41, 67];
+declare(strict_types=1);
 
-foreach ($scores as $score) {
-    if ($score >= 90) {
-        $grade = "A";
-    } elseif ($score >= 80) {
-        $grade = "B";
-    } elseif ($score >= 60) {
-        $grade = "C";
-    } else {
-        $grade = "F";
+$rows = [''a'' => 1, ''b'' => 2, ''c'' => 3];
+
+foreach ($rows as $value) {
+    echo $value;
+}
+echo PHP_EOL;
+
+foreach ($rows as $key => $value) {
+    echo "$key=$value ";
+}
+echo PHP_EOL;
+
+for ($i = 0; $i < 3; $i++) {
+    echo $i;
+}
+echo PHP_EOL;
+
+$i = 0;
+while ($i < 3) {
+    echo $i;
+    $i++;
+}
+echo PHP_EOL;
+
+do {
+    echo ''once'';
+} while (false);
+echo PHP_EOL;
+```
+
+`foreach` is the one you want almost always. It works on arrays, on any `Traversable`, and on a generator - none of which a `for` loop with an index can do.
+
+`continue` and `break` take a level, which is the readable alternative to a flag variable:
+
+```php
+<?php
+declare(strict_types=1);
+
+$grid = [[1, 2, 3], [4, -1, 6], [7, 8, 9]];
+
+foreach ($grid as $rowIndex => $row) {
+    foreach ($row as $columnIndex => $cell) {
+        if ($cell < 0) {
+            echo "negative at $rowIndex,$columnIndex", PHP_EOL;
+            break 2;                    // leaves BOTH loops
+        }
     }
-    printf("%3d -> %s\\n", $score, $grade);
 }
 ```
+
+`break 2` and `continue 2` are PHP-specific and genuinely useful. Note that inside a `switch`, `continue` behaves like `break` - PHP counts `switch` as a loop level, which is a trap, and `continue 2` is what you want to reach the enclosing loop.
 
 ## match, which is not switch
 
-`match` compares with `===`, returns a value, needs no `break`, and throws if
-nothing matches rather than falling through silently.
+```php
+<?php
+declare(strict_types=1);
+
+$code = 404;
+
+// switch: loose comparison, falls through, no value.
+switch ($code) {
+    case 404:
+        $label = ''Not Found'';
+        break;                          // forget this and you get the next one
+    default:
+        $label = ''Unknown'';
+}
+
+// match: strict comparison, no fallthrough, IS an expression.
+$label = match ($code) {
+    200, 201, 204 => ''Success'',
+    301, 302 => ''Redirect'',
+    404 => ''Not Found'',
+    default => ''Unknown'',
+};
+
+echo $label, PHP_EOL;                   // Not Found
+```
+
+Four differences, and every one of them is in `match`''s favour:
 
 ```php
 <?php
-function grade(int $score): string
+declare(strict_types=1);
+
+// 1. Strict comparison: "1" does not match 1.
+$value = "1";
+echo match (true) {
+    $value === 1 => ''int one'',
+    $value === "1" => ''string one'',
+    default => ''neither'',
+}, PHP_EOL;                             // string one
+
+// 2. No fallthrough. There is no `break` and none is needed.
+
+// 3. It is an expression, so it returns a value and can be assigned,
+//    returned or passed as an argument.
+function statusClass(int $code): string
 {
     return match (true) {
-        $score >= 90 => "A",
-        $score >= 80 => "B",
-        $score >= 60 => "C",
-        default => "F",
+        $code >= 500 => ''server-error'',
+        $code >= 400 => ''client-error'',
+        $code >= 300 => ''redirect'',
+        $code >= 200 => ''success'',
+        default => ''informational'',
     };
 }
+echo statusClass(503), '' '', statusClass(201), PHP_EOL;
 
-foreach ([92, 85, 67, 41] as $score) {
-    echo $score, " -> ", grade($score), "\\n";
-}
-
-// Matching on a value rather than on true:
-$code = 404;
-echo match ($code) {
-    200, 201 => "ok\\n",
-    404 => "not found\\n",
-    default => "something else\\n",
-};
-
-// Without a default, an unmatched value throws - which is usually what you
-// want, because it means a new case cannot be silently ignored.
+// 4. An unmatched value throws rather than silently doing nothing.
 try {
-    echo match (999) { 200 => "ok" };
-} catch (\\UnhandledMatchError $e) {
-    echo "UnhandledMatchError: ", $e->getMessage(), "\\n";
+    echo match (999) { 200 => ''ok'' };
+} catch (UnhandledMatchError $e) {
+    echo get_class($e), PHP_EOL;        // UnhandledMatchError
 }
 ```
+
+`match (true)` with conditions on the left is the idiom for ranges, and it reads better than the `if/elseif` chain it replaces because every branch is visibly one expression.
+
+The one thing `switch` still does that `match` cannot: run several statements per branch. If a branch needs a body rather than a value, either extract a function or use `if`.
 
 ## Functions, types and defaults
 
-Put `declare(strict_types=1);` as the very first line of every real file. It
-turns a quiet conversion into a `TypeError`, which is almost always what you
-want. It is omitted from the runnable examples here only because this
-playground evaluates a snippet rather than a whole file, and the declaration
-has to be the first statement in one.
+```php
+<?php
+declare(strict_types=1);
+
+function connect(
+    string $host,
+    int $port = 3306,
+    ?string $user = null,
+    bool $tls = false,
+): string {
+    return $host . '':'' . $port
+        . ($user !== null ? " as $user" : '''')
+        . ($tls ? '' (tls)'' : '''');
+}
+
+echo connect(''db.local''), PHP_EOL;
+echo connect(''db.local'', 5432, ''app''), PHP_EOL;
+
+// Named arguments: skip the middle, and say what the boolean means.
+echo connect(host: ''db.local'', tls: true), PHP_EOL;
+echo connect(''db.local'', user: ''app'', tls: true), PHP_EOL;
+```
+
+Named arguments are the fix for the unreadable boolean call. `connect($host, 5432, null, true)` tells a reader nothing; `connect($host, tls: true)` tells them everything. They also mean a parameter can be added in the middle of a signature without breaking callers who used names.
+
+Variadics and spreading:
 
 ```php
 <?php
-function total(array $prices, float $taxRate = 0.2): float
+declare(strict_types=1);
+
+function tally(string $label, int ...$amounts): string
 {
-    return round(array_sum($prices) * (1 + $taxRate), 2);
+    return $label . '': '' . array_sum($amounts) . '' from '' . count($amounts);
 }
 
-echo total([10.00, 4.50]), "\\n";
-echo total([10.00, 4.50], 0.05), "\\n";
-echo total(prices: [10.00, 4.50], taxRate: 0.0), "\\n";   // named arguments
+echo tally(''total'', 1, 2, 3), PHP_EOL;              // total: 6 from 3
 
-// Without strict_types a numeric string is quietly converted, which is why
-// the declaration is worth having.
-echo total([10.00], "0.2"), "\\n";
+$values = [4, 5, 6];
+echo tally(''spread'', ...$values), PHP_EOL;          // spread: 15 from 3
 
-// Some conversions are impossible in either mode, so this is a TypeError
-// with or without the declaration.
-try {
-    total("not an array");
-} catch (\\TypeError $e) {
-    echo "TypeError: ", explode(",", $e->getMessage())[0], "\\n";
-}
-
-// Nullable and union types.
-function firstWord(?string $text): string|null
-{
-    return $text === null ? null : explode(" ", trim($text))[0];
-}
-
-var_dump(firstWord("hello world"), firstWord(null));
+$named = [''label'' => ''named'', ''amounts'' => 7];
+echo tally(...[''label'' => ''from keys'']), PHP_EOL;   // string keys become names
 ```
+
+Union types, nullable types and `never`:
+
+```php
+<?php
+declare(strict_types=1);
+
+function parse(string|int $input): int|float
+{
+    return is_int($input) ? $input : (float) $input;
+}
+
+function first(?array $values): mixed
+{
+    return $values[0] ?? null;
+}
+
+function fail(string $message): never
+{
+    throw new RuntimeException($message);
+}
+
+var_dump(parse(3), parse(''3.5''));
+var_dump(first(null), first([1, 2]));
+
+try {
+    fail(''stopped'');
+} catch (RuntimeException $e) {
+    echo $e->getMessage(), PHP_EOL;
+}
+```
+
+`never` tells both the reader and static analysis that the function does not return, so the code after a call to it is unreachable - which means no "undefined variable" warning for a branch that cannot happen.
 
 ## Closures and arrow functions
 
-A closure does not see the surrounding scope unless told to. An arrow function
-does, automatically, by value.
-
 ```php
 <?php
+declare(strict_types=1);
+
 $factor = 3;
 
-$long = function (int $n) use ($factor): int {
+// A closure captures by value, and only what you list.
+$multiply = function (int $n) use ($factor): int {
     return $n * $factor;
 };
 
-$short = fn(int $n): int => $n * $factor;    // captures $factor by itself
+// An arrow function captures automatically, by value, and is one
+// expression only.
+$multiplyShort = fn (int $n): int => $n * $factor;
 
-echo $long(5), " ", $short(5), "\\n";
+echo $multiply(5), '' '', $multiplyShort(5), PHP_EOL;     // 15 15
 
-// use (&$total) captures by reference, so the outer variable really changes.
-$total = 0;
-$add = function (int $n) use (&$total) { $total += $n; };
-array_map($add, [1, 2, 3]);
-echo $total, "\\n";
-
-// first-class callable syntax: a function turned into a value.
-$upper = strtoupper(...);
-echo implode(", ", array_map($upper, ["a", "b"])), "\\n";
+$factor = 10;
+echo $multiply(5), '' '', $multiplyShort(5), PHP_EOL;     // 15 15 - captured
 ```
 
-## What to take away
+Both captured `$factor` when they were *defined*. Changing it afterwards changes nothing, because the capture was by value.
 
-- `match` compares strictly, returns a value, and refuses to fall through.
-- `declare(strict_types=1)` turns quiet conversions into errors; use it.
-- Named arguments let a call site explain itself.
-- A closure needs `use`; an arrow function captures by value on its own.
+To capture by reference, say so - and then the later change does apply:
+
+```php
+<?php
+declare(strict_types=1);
+
+$count = 0;
+
+$increment = function () use (&$count): int {
+    return ++$count;
+};
+
+echo $increment(), $increment(), $increment(), PHP_EOL;     // 123
+echo $count, PHP_EOL;                                        // 3
+```
+
+An arrow function cannot capture by reference, which is a deliberate limitation: `fn` is for short pure expressions, and a `function` with an explicit `use` is for anything with state.
+
+The practical difference in a callback:
+
+```php
+<?php
+declare(strict_types=1);
+
+$rows = [[''n'' => 3], [''n'' => 1], [''n'' => 2]];
+$key = ''n'';
+
+usort($rows, fn (array $a, array $b): int => $a[$key] <=> $b[$key]);
+echo implode('','', array_column($rows, ''n'')), PHP_EOL;       // 1,2,3
+
+// The same with a closure needs the `use`, which is why `fn` exists.
+usort($rows, function (array $a, array $b) use ($key): int {
+    return $b[$key] <=> $a[$key];
+});
+echo implode('','', array_column($rows, ''n'')), PHP_EOL;       // 3,2,1
+```
+
+First-class callable syntax, since PHP 8.1, replaces the string and array forms:
+
+```php
+<?php
+declare(strict_types=1);
+
+$numbers = [''3'', ''1'', ''2''];
+
+print_r(array_map(intval(...), $numbers));          // first-class callable
+print_r(array_map(''intval'', $numbers));             // the old string form
+
+final class Formatter
+{
+    public function __construct(private readonly int $decimals) {}
+
+    public function format(float $value): string
+    {
+        return number_format($value, $this->decimals);
+    }
+}
+
+$formatter = new Formatter(2);
+print_r(array_map($formatter->format(...), [1.5, 2.25]));
+```
+
+`intval(...)` is a real `Closure` the editor can check, unlike `''intval''`, which is a string nobody validates until it runs.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+/**
+ * A tiny rules engine: match for the decision, closures for the rules,
+ * named arguments for the configuration.
+ */
+function classify(
+    int $statusCode,
+    float $seconds,
+    bool $authenticated = false,
+    int $slowThresholdMs = 500,
+): array {
+    $severity = match (true) {
+        $statusCode >= 500 => ''error'',
+        $statusCode === 429 => ''warn'',
+        $statusCode >= 400 && $authenticated => ''warn'',
+        $statusCode >= 400 => ''info'',
+        $seconds * 1000 > $slowThresholdMs => ''warn'',
+        default => ''debug'',
+    };
+
+    $reason = match ($severity) {
+        ''error'' => ''server failure'',
+        ''warn'' => $statusCode === 429 ? ''rate limited''
+            : ($statusCode >= 400 ? ''authenticated client error'' : ''slow response''),
+        ''info'' => ''client error'',
+        default => ''normal'',
+    };
+
+    return [''severity'' => $severity, ''reason'' => $reason];
+}
+
+$requests = [
+    [''code'' => 200, ''seconds'' => 0.031],
+    [''code'' => 200, ''seconds'' => 0.902],
+    [''code'' => 404, ''seconds'' => 0.012],
+    [''code'' => 404, ''seconds'' => 0.012, ''auth'' => true],
+    [''code'' => 429, ''seconds'' => 0.005],
+    [''code'' => 503, ''seconds'' => 1.902],
+];
+
+$counts = [];
+foreach ($requests as $request) {
+    $result = classify(
+        statusCode: $request[''code''],
+        seconds: $request[''seconds''],
+        authenticated: $request[''auth''] ?? false,
+    );
+    $counts[$result[''severity'']] ??= 0;
+    $counts[$result[''severity'']]++;
+
+    printf("%3d %6.3fs  %-5s %s%s",
+        $request[''code''], $request[''seconds''],
+        $result[''severity''], $result[''reason''], PHP_EOL);
+}
+
+echo PHP_EOL;
+ksort($counts);
+foreach ($counts as $severity => $count) {
+    printf("%-6s %d%s", $severity, $count, PHP_EOL);
+}
+
+// Closures as composable rules, built once and applied to every row.
+$rules = [
+    ''slow'' => fn (array $r): bool => $r[''seconds''] > 0.5,
+    ''failed'' => fn (array $r): bool => $r[''code''] >= 500,
+    ''notFound'' => fn (array $r): bool => $r[''code''] === 404,
+];
+
+echo PHP_EOL;
+foreach ($rules as $name => $rule) {
+    $matching = array_values(array_filter($requests, $rule));
+    printf("%-9s %d request(s): %s%s",
+        $name, count($matching),
+        implode('', '', array_map(fn (array $r): string => (string) $r[''code''], $matching)),
+        PHP_EOL);
+}
+
+// And a counter that must accumulate, which needs a reference.
+$total = 0;
+$add = function (array $r) use (&$total): void {
+    $total += (int) round($r[''seconds''] * 1000);
+};
+array_walk($requests, $add);
+printf("%sTotal %dms across %d request(s)%s", PHP_EOL, $total, count($requests), PHP_EOL);
+```
+
+Three things are doing work there. `match (true)` turns a five-branch decision into five readable lines with no `break` to forget. Named arguments at the call site mean `authenticated: false` rather than a bare `false` nobody can interpret. And the one place state must accumulate - `$total` - uses `use (&$total)` explicitly, so the mutation is visible rather than implied.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A `switch` ran two branches | A missing `break`; use `match` |
+| `"1"` matched `case 1` | `switch` compares loosely; `match` does not |
+| `UnhandledMatchError` in production | No `default` arm; add one or handle the case |
+| `continue` inside `switch` acted like `break` | PHP counts `switch` as a level; use `continue 2` |
+| A closure saw a stale value | Capture is by value at definition time |
+| An arrow function could not accumulate | `fn` cannot capture by reference; use `function` |
+| A boolean argument''s meaning is unreadable | Use named arguments |
+| `''methodName''` as a callback failed silently | Use the first-class callable syntax |
+
+## A check you can run
+
+```php
+<?php
+foreach ([1, 2, 3] as $n) {
+    switch ($n) {
+        case 2:
+            continue 2;
+    }
+    echo $n;
+}
+echo PHP_EOL;
+```
+
+It prints `13`. Now change `continue 2` to plain `continue` and run it again: it prints `123`, because `continue` inside a `switch` only leaves the `switch`, not the loop.
+
+One digit of difference, and a filter that silently stops filtering. It is the clearest argument there is for using `match` and never putting a `switch` inside a loop.
 ',
-   'match against switch, typed functions, and closures that capture on purpose.',
-   3, 583,
-   '55555555-5555-4555-8555-555555555555',
+   'match against switch, typed functions, and closures that capture on purpose.', 9, 1807,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -427,113 +917,326 @@ VALUES
   ('e0000001-0000-4000-8000-000000000063',
    'Arrays, the One Data Structure',
    'markdown',
-   '# Arrays, the One Data Structure
+   '# Arrays: One Structure, Two Jobs
 
-A PHP array is an ordered map. The same type is a list, a dictionary, a set and
-a stack, depending on how you use it - which is convenient and occasionally
-confusing.
+A PHP array is an ordered hash map. The same type is a list, a dictionary, a set, a stack and a queue, which is convenient and is why the function names are inconsistent. This lesson is the subset worth knowing by heart.
+
+## Lists and maps are the same type
 
 ```php
 <?php
-$list = ["a", "b", "c"];                       // keys 0, 1, 2
-$map = ["name" => "Aisha", "score" => 92];     // string keys
-$mixed = ["a", "key" => "b", "c"];             // both, and the next int key is 1
+declare(strict_types=1);
 
-print_r($mixed);
+$list = [''a'', ''b'', ''c''];                    // keys 0, 1, 2
+$map  = [''name'' => ''Aisha'', ''age'' => 29];
+$mixed = [''a'', ''key'' => ''b'', ''c''];          // keys 0, ''key'', 1
 
-// array_is_list tells you whether the keys are 0..n-1 in order, which is what
-// json_encode uses to decide between [] and {}.
-var_dump(array_is_list($list), array_is_list($map));
-echo json_encode($list), " ", json_encode($map), "\\n";
+var_dump(array_is_list($list));             // true
+var_dump(array_is_list($map));              // false
+var_dump(array_is_list($mixed));            // false
+
+echo count($list), PHP_EOL;                 // 3
+echo json_encode($list), PHP_EOL;           // ["a","b","c"]
+echo json_encode($map), PHP_EOL;            // {"name":"Aisha","age":29}
 ```
+
+`array_is_list()` is the function that tells you which you have, and it matters: `json_encode` produces a JSON array for a list and a JSON object for anything else. An API that returns `[]` for an empty result and `{"2": ...}` after a filter is the single most common PHP-to-JavaScript bug, and this is why.
+
+```php
+<?php
+declare(strict_types=1);
+
+$rows = [1, 2, 3, 4];
+$even = array_filter($rows, fn (int $n): bool => $n % 2 === 0);
+
+echo json_encode($even), PHP_EOL;                   // {"1":2,"3":4} - an object!
+echo json_encode(array_values($even)), PHP_EOL;     // [2,4] - a list again
+```
+
+`array_filter` preserves keys. Always wrap it in `array_values()` when the result is going to JSON or to anything that expects a list.
 
 ## The functions worth knowing
 
 ```php
 <?php
-$learners = [
-    ["name" => "Aisha", "score" => 92],
-    ["name" => "Kenji", "score" => 78],
-    ["name" => "Lena",  "score" => 85],
+declare(strict_types=1);
+
+$numbers = [1, 2, 3, 4, 5];
+
+print_r(array_map(fn (int $n): int => $n * $n, $numbers));
+print_r(array_values(array_filter($numbers, fn (int $n): bool => $n > 2)));
+echo array_reduce($numbers, fn (int $carry, int $n): int => $carry + $n, 0), PHP_EOL;
+echo array_sum($numbers), PHP_EOL;
+
+var_dump(in_array(3, $numbers, true));
+var_dump(array_search(3, $numbers, true));          // 2 - the KEY
+var_dump(array_key_exists(0, $numbers));
+var_dump(isset($numbers[0]));
+```
+
+`isset()` and `array_key_exists()` differ on one case, and it is the case that matters:
+
+```php
+<?php
+declare(strict_types=1);
+
+$row = [''a'' => 1, ''b'' => null];
+
+var_dump(isset($row[''b'']));                 // false - the value is null
+var_dump(array_key_exists(''b'', $row));      // true  - the key is there
+var_dump($row[''b''] ?? ''default'');           // ''default'' - ?? is isset-based
+```
+
+For a database row where `null` is a legitimate value, `isset()` will tell you a column is absent when it is merely empty. Use `array_key_exists()` when you need to know whether the key exists.
+
+Keys, values and columns:
+
+```php
+<?php
+declare(strict_types=1);
+
+$users = [
+    [''id'' => 1, ''name'' => ''Aisha'', ''team'' => ''red''],
+    [''id'' => 2, ''name'' => ''Noshad'', ''team'' => ''blue''],
+    [''id'' => 3, ''name'' => ''Sam'', ''team'' => ''red''],
 ];
 
-// Pull one column out, optionally keyed by another.
-print_r(array_column($learners, "score", "name"));
+print_r(array_column($users, ''name''));              // [''Aisha'',''Noshad'',''Sam'']
+print_r(array_column($users, ''name'', ''id''));        // [1=>''Aisha'', 2=>''Noshad'', ...]
+print_r(array_column($users, null, ''id''));          // whole rows, keyed by id
 
-// filter keeps the original keys - which is why a filtered list often needs
-// array_values before it is encoded as JSON.
-$passing = array_filter($learners, fn($l) => $l["score"] >= 80);
-echo json_encode($passing), "\\n";
-echo json_encode(array_values($passing)), "\\n";
-
-// map, and reduce for folding.
-echo implode(", ", array_map(fn($l) => strtoupper($l["name"]), $learners)), "\\n";
-echo array_reduce($learners, fn($c, $l) => $c + $l["score"], 0), "\\n";
+print_r(array_unique(array_column($users, ''team'')));
+print_r(array_count_values(array_column($users, ''team'')));   // [''red''=>2,''blue''=>1]
 ```
+
+`array_column($rows, null, ''id'')` is the idiomatic "index these rows by id" and it replaces a four-line `foreach`.
+
+Merging, and the one trap:
+
+```php
+<?php
+declare(strict_types=1);
+
+$defaults = [''host'' => ''localhost'', ''port'' => 3306];
+$override = [''port'' => 5432, ''user'' => ''app''];
+
+print_r(array_merge($defaults, $override));         // right wins on string keys
+print_r($defaults + $override);                     // LEFT wins - the union op
+
+print_r(array_merge([1, 2], [3, 4]));               // [1,2,3,4] - renumbered!
+print_r([1, 2] + [3, 4, 5]);                        // [1,2,5] - keys preserved
+```
+
+`array_merge` renumbers integer keys; `+` keeps them and the left side wins. For configuration, `array_merge($defaults, $given)` is almost always what you want; `+` is for when the keys are meaningful and must not move.
+
+For nested configuration there is no built-in deep merge, and `array_merge_recursive` is probably not it - it turns two scalars with the same key into an array of both rather than overwriting.
 
 ## Sorting says what to compare
 
-The `sort` family works in place and returns a boolean, so assigning the result
-throws the array away.
+```php
+<?php
+declare(strict_types=1);
+
+$numbers = [10, 9, 100, 1];
+sort($numbers);                             // in place, returns bool, reindexes
+print_r($numbers);                          // [1, 9, 10, 100]
+
+$words = [''banana'', ''apple'', ''Cherry''];
+sort($words);
+print_r($words);                            // [''Cherry'',''apple'',''banana''] - ASCII
+
+usort($words, fn (string $a, string $b): int => strcasecmp($a, $b));
+print_r($words);                            // [''apple'',''banana'',''Cherry'']
+
+$scores = [''aisha'' => 91, ''noshad'' => 78, ''sam'' => 64];
+asort($scores);                             // by value, KEEPING keys
+print_r($scores);
+ksort($scores);                             // by key
+print_r($scores);
+```
+
+The family is regular once you see the pattern: `sort`/`rsort` by value discarding keys, `asort`/`arsort` by value keeping keys, `ksort`/`krsort` by key, `usort`/`uasort`/`uksort` with your own comparator. All of them mutate and return a boolean.
+
+Sorting by two keys, and the stability guarantee:
 
 ```php
 <?php
-$scores = [92, 78, 85, 41];
+declare(strict_types=1);
 
-sort($scores);                 // in place
-print_r($scores);
-
-$learners = [
-    ["name" => "Aisha", "score" => 92],
-    ["name" => "Kenji", "score" => 78],
+$rows = [
+    [''team'' => ''red'', ''score'' => 7],
+    [''team'' => ''blue'', ''score'' => 9],
+    [''team'' => ''red'', ''score'' => 9],
+    [''team'' => ''blue'', ''score'' => 7],
 ];
 
-// usort takes a comparator. The spaceship operator returns -1, 0 or 1.
-usort($learners, fn($a, $b) => $b["score"] <=> $a["score"]);
-echo $learners[0]["name"], " is first\\n";
+usort($rows, fn (array $a, array $b): int =>
+    [$b[''score''], $a[''team'']] <=> [$a[''score''], $b[''team'']]);
 
-// ksort and asort keep the key/value association; sort does not.
-$byName = ["Kenji" => 78, "Aisha" => 92];
-ksort($byName);
-print_r($byName);
+foreach ($rows as $row) {
+    echo $row[''team''], '' '', $row[''score''], PHP_EOL;
+}
+// blue 9
+// red 9
+// blue 7
+// red 7
 ```
+
+Comparing two arrays with `<=>` compares element by element, which gives you a multi-key sort in one expression. Since PHP 8.0 all sorts are stable, so equal elements keep their original order - which means you can also sort twice, secondary key first.
 
 ## Copying, and the one reference case
 
-Arrays are assigned by value - a copy - unlike objects. That is the opposite of
-most languages and worth internalising.
+Arrays are **value types**: assigning copies. PHP does this lazily, so the copy costs nothing until one side is written to.
 
 ```php
 <?php
-$a = [1, 2, 3];
-$b = $a;          // a copy, not a reference
-$b[] = 4;
-echo count($a), " ", count($b), "\\n";
+declare(strict_types=1);
 
-// An object inside an array is still a handle, so the copy shares it.
-$objects = [new ArrayObject([1])];
-$copy = $objects;
-$copy[0][] = 2;
-echo count($objects[0]), "\\n";
+$original = [1, 2, 3];
+$copy = $original;
+$copy[] = 4;
 
-// foreach by reference leaves $value dangling afterwards - a classic bug.
-$items = [1, 2, 3];
-foreach ($items as &$value) { $value *= 2; }
-unset($value);          // always, immediately
-print_r($items);
+print_r($original);                         // [1, 2, 3] - untouched
+print_r($copy);                             // [1, 2, 3, 4]
+
+function addOne(array $values): array {
+    $values[] = 99;                         // a copy; the caller is safe
+    return $values;
+}
+addOne($original);
+print_r($original);                         // still [1, 2, 3]
 ```
 
-## What to take away
+That is the opposite of PHP objects, which are handles, and it is the single biggest difference from JavaScript and Python. It also means an array holding objects copies the *handles*, so the objects themselves are shared.
 
-- One array type serves as list and map; `array_is_list` tells them apart.
-- `array_filter` keeps keys - use `array_values` before encoding.
-- `sort` mutates and returns a bool; comparators use `<=>`.
-- Arrays copy on assignment; objects do not.
-- Always `unset` the variable after a `foreach` by reference.
+The one place it bites is `foreach` by reference:
+
+```php
+<?php
+declare(strict_types=1);
+
+$values = [1, 2, 3];
+
+foreach ($values as &$value) {
+    $value *= 2;
+}
+unset($value);                              // ALWAYS unset after
+
+foreach ($values as $value) {
+    // without the unset above, the last element is overwritten here
+}
+print_r($values);                           // [2, 4, 6]
+```
+
+Without the `unset`, `$value` is still a reference to the last element, and the next `foreach` assigns each item into it in turn - leaving `[2, 4, 4]`. It is a famous bug and the `unset` is the whole fix.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+$events = [
+    [''user'' => ''aisha'',  ''action'' => ''view'',  ''page'' => ''/courses'',     ''ms'' => 31],
+    [''user'' => ''noshad'', ''action'' => ''view'',  ''page'' => ''/courses'',     ''ms'' => 44],
+    [''user'' => ''aisha'',  ''action'' => ''enrol'', ''page'' => ''/courses/css'', ''ms'' => 210],
+    [''user'' => ''sam'',    ''action'' => ''view'',  ''page'' => ''/about'',       ''ms'' => 19],
+    [''user'' => ''aisha'',  ''action'' => ''view'',  ''page'' => ''/courses/css'', ''ms'' => 27],
+    [''user'' => ''noshad'', ''action'' => ''enrol'', ''page'' => ''/courses/js'',  ''ms'' => 188],
+    [''user'' => ''sam'',    ''action'' => ''view'',  ''page'' => ''/courses'',     ''ms'' => 35],
+];
+
+// 1. Count by action, without a loop.
+$byAction = array_count_values(array_column($events, ''action''));
+print_r($byAction);                                 // [''view''=>5, ''enrol''=>2]
+
+// 2. Group, which still wants a loop - and the ??= makes it one line.
+$pagesByUser = [];
+foreach ($events as $event) {
+    $pagesByUser[$event[''user'']] ??= [];
+    $pagesByUser[$event[''user'']][$event[''page'']] = true;
+}
+ksort($pagesByUser);
+foreach ($pagesByUser as $user => $pages) {
+    printf("%-8s %d page(s): %s%s",
+        $user, count($pages), implode('', '', array_keys($pages)), PHP_EOL);
+}
+
+// 3. Set algebra over columns.
+$viewers = array_unique(array_column(
+    array_filter($events, fn (array $e): bool => $e[''action''] === ''view''), ''user''));
+$enrollers = array_unique(array_column(
+    array_filter($events, fn (array $e): bool => $e[''action''] === ''enrol''), ''user''));
+
+echo ''viewed but never enrolled: '',
+    implode('', '', array_values(array_diff($viewers, $enrollers))), PHP_EOL;   // sam
+echo ''did both: '',
+    implode('', '', array_values(array_intersect($viewers, $enrollers))), PHP_EOL;
+
+// 4. Aggregate per page, sorted by total time descending.
+$byPage = [];
+foreach ($events as $event) {
+    $page = $event[''page''];
+    $byPage[$page] ??= [''page'' => $page, ''hits'' => 0, ''ms'' => 0];
+    $byPage[$page][''hits'']++;
+    $byPage[$page][''ms''] += $event[''ms''];
+}
+
+$ranked = array_values($byPage);
+usort($ranked, fn (array $a, array $b): int =>
+    [$b[''ms''], $a[''page'']] <=> [$a[''ms''], $b[''page'']]);
+
+foreach ($ranked as $index => $row) {
+    printf("%d. %-14s %d hit(s), %4dms, mean %5.1fms%s",
+        $index + 1, $row[''page''], $row[''hits''], $row[''ms''],
+        $row[''ms''] / $row[''hits''], PHP_EOL);
+}
+
+// 5. Index by a key, for lookup - and note the array stays a list
+//    only because of array_values.
+$slowest = array_column($ranked, null, ''page'');
+printf("/about took %dms%s", $slowest[''/about''][''ms''], PHP_EOL);
+
+// 6. The JSON trap, demonstrated. These two rows are at positions 1
+//    and 3, so the filtered array''s keys are 1 and 3 - and that is an
+//    object to json_encode, not a list.
+$onlyOnce = array_filter($ranked, fn (array $r): bool => $r[''hits''] === 1);
+echo implode('','', array_keys($onlyOnce)), PHP_EOL;                  // 1,3
+echo json_encode(array_column($onlyOnce, ''page'')), PHP_EOL;         // a list
+var_dump(array_is_list($onlyOnce));                                 // false
+var_dump(array_is_list(array_values($onlyOnce)));                   // true
+```
+
+Step four is the shape to keep: `??=` to initialise a bucket, accumulate in the loop, then `array_values` before `usort` so the result is a list. Step six is the reminder that `array_filter` leaves holes in the keys, and that `json_encode` notices.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| JSON returned an object where a list was expected | `array_filter` kept the keys; use `array_values` |
+| The last element duplicated after a loop | `foreach` by reference without `unset` |
+| `isset()` said a column was missing | The value is `null`; use `array_key_exists` |
+| Keys disappeared after merging | `array_merge` renumbers integer keys; use `+` |
+| `sort()` returned `true`, not the array | It sorts in place and returns a boolean |
+| 100 sorted before 9 | String comparison; use `SORT_NUMERIC` or a comparator |
+| Changing a copy changed the original | The array holds objects, which are handles |
+| `array_merge_recursive` made arrays of scalars | That is what it does; write your own deep merge |
+
+## A check you can run
+
+```php
+<?php
+$values = [1, 2, 3];
+foreach ($values as &$value) { $value *= 2; }
+foreach ($values as $value) { }
+print_r($values);
+```
+
+It prints `[2, 4, 4]`. The second loop assigned each element into `$value`, which is still a reference to the last slot.
+
+Add `unset($value);` between the loops and it prints `[2, 4, 6]`. That one line is the entire fix, and seeing the wrong answer once is what makes it a habit.
 ',
-   'One structure serving as list and map, and the copy semantics that surprise people.',
-   2, 482,
-   '55555555-5555-4555-8555-555555555555',
+   'One structure serving as list and map, and the copy semantics that surprise people.', 8, 1688,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -550,113 +1253,315 @@ VALUES
   ('e0000001-0000-4000-8000-000000000064',
    'Strings, Formatting and Dates',
    'markdown',
-   '# Strings, Formatting and Dates
+   '# Strings, Encodings and Dates
 
-PHP strings are byte strings. That matters the moment a learner''s name has an
-accent in it, so the multibyte functions are not optional extras.
-
-```php
-<?php
-$text = "  The Quick Brown Fox  ";
-
-echo "[", trim($text), "]\\n";
-echo strtolower(trim($text)), "\\n";
-echo str_replace("Quick", "Slow", trim($text)), "\\n";
-echo substr(trim($text), 4, 5), "\\n";
-echo str_contains($text, "Brown") ? "contains Brown\\n" : "no\\n";
-
-// Every one of these returns a new string. The original is unchanged.
-echo "[", $text, "]\\n";
-```
+Two areas where PHP''s history shows most clearly: the string functions predate Unicode, and the date API was replaced rather than fixed. Both are fine once you know which half to use.
 
 ## Bytes against characters
 
-A PHP string is a sequence of bytes, and in UTF-8 one character can be several
-of them. `strlen` counts bytes; counting characters needs something that knows
-the encoding.
-
-On a normal server that is the `mbstring` extension - `mb_strlen`, `mb_substr`,
-`mb_strtoupper`. **If the text came from a person, reach for `mb_` first.** This
-playground is built without that extension, so the examples below use PCRE with
-the `u` modifier, which is a portable way to make the same point.
+PHP strings are **byte** strings. The functions without an `mb_` prefix count bytes; the ones with it count characters.
 
 ```php
 <?php
-$word = "héllo";
+declare(strict_types=1);
 
-echo strlen($word), " bytes\\n";                      // 6: the e-acute is two
-echo preg_match_all("/./u", $word), " characters\\n";  // 5
+$text = ''cafe'' . mb_chr(0x301);     // ''cafe'' plus a combining acute accent
+$simple = ''caf'' . mb_chr(0xe9);     // ''caf'' plus a precomposed e-acute
 
-// Cutting by bytes can split a character in half and produce invalid UTF-8.
-$cut = substr($word, 0, 2);
-// preg_match with the u modifier fails on invalid UTF-8, which is how you can
-// tell that this cut landed in the middle of a character.
-echo strlen($cut), " bytes cut, still valid UTF-8: ",
-     var_export(preg_match("//u", $cut) === 1, true), "\\n";
+echo strlen($simple), PHP_EOL;              // 5 - BYTES
+echo mb_strlen($simple), PHP_EOL;           // 4 - characters
+echo mb_strlen($text), PHP_EOL;             // 5 - e and accent are two
+echo grapheme_strlen($text), PHP_EOL;       // 4 - what a reader sees
 
-// Splitting on character boundaries instead.
-preg_match_all("/./u", $word, $matches);
-echo implode("|", array_slice($matches[0], 0, 2)), "\\n";
-
-// strtoupper works a byte at a time, so it leaves the accent alone.
-echo strtoupper($word), "  <- mb_strtoupper would give HÉLLO\\n";
+echo substr($simple, 0, 4), PHP_EOL;        // ''caf'' plus half a character
+echo mb_substr($simple, 0, 4), PHP_EOL;     // ''café''
 ```
 
-## Formatting
+That `substr` is the bug: cutting a multi-byte character in half produces invalid UTF-8, which then breaks `json_encode`, the database write, or the page that displays it.
+
+The rule: **use `mb_*` for anything that came from a user.** `mb_strlen`, `mb_substr`, `mb_strtolower`, `mb_str_split`, `mb_strpos`. The non-`mb_` versions are correct for ASCII-only data such as a hex hash or a generated identifier, and only there.
 
 ```php
 <?php
-printf("%-10s|%5d|%8.2f|\\n", "Aisha", 92, 0.8567);
-printf("%05d %x %b %%\\n", 42, 255, 5);
-printf("%''*12s\\n", "padded");
+declare(strict_types=1);
 
-echo sprintf("%s scored %d%%", "Kenji", 78), "\\n";
-echo number_format(1234567.891, 2), "\\n";
-echo str_pad("left", 10, "."), "|\\n";
-echo str_repeat("-", 20), "\\n";
+$name = "ÅSA";
+echo strtolower($name), PHP_EOL;            // ''Åsa'' - the Å is untouched
+echo mb_strtolower($name), PHP_EOL;         // ''åsa''
 
-// implode joins, explode splits, and neither is called split.
-$parts = explode(",", "aisha,92,advanced");
-echo implode(" | ", $parts), "\\n";
+var_dump(mb_check_encoding("abc", ''UTF-8''));
+var_dump(mb_detect_encoding("abc", [''UTF-8'', ''ISO-8859-1''], true));
 ```
+
+Normalisation matters when comparing text from different sources:
+
+```php
+<?php
+declare(strict_types=1);
+
+$composed = ''caf'' . mb_chr(0xe9);            // one code point
+$decomposed = ''cafe'' . mb_chr(0x301);        // ''e'' plus combining accent
+
+var_dump($composed === $decomposed);        // false
+var_dump(mb_strlen($composed), mb_strlen($decomposed));     // 4 5
+
+if (class_exists(''Normalizer'')) {
+    var_dump(Normalizer::normalize($decomposed, Normalizer::FORM_C) === $composed);
+} else {
+    echo "intl not installed", PHP_EOL;
+}
+```
+
+Two strings that render identically can compare unequal. Normalise to NFC at the boundary - on the way into the database - and the comparison problem disappears for everyone downstream.
+
+## The functions worth knowing
+
+```php
+<?php
+declare(strict_types=1);
+
+$line = "  Content-Type: text/html; charset=utf-8  ";
+
+echo trim($line), PHP_EOL;
+var_dump(str_contains($line, ''charset''));           // PHP 8
+var_dump(str_starts_with(trim($line), ''Content''));
+var_dump(str_ends_with(trim($line), ''utf-8''));
+
+[$key, $value] = explode('':'', trim($line), 2);      // limit 2: split once
+echo $key, '' => '', trim($value), PHP_EOL;
+
+print_r(explode('','', ''a,b,,c''));                    // [''a'',''b'','''',''c'']
+print_r(array_filter(explode('','', ''a,b,,c''), ''strlen''));
+
+echo implode('' | '', [''a'', ''b'', ''c'']), PHP_EOL;
+echo str_pad(''7'', 3, ''0'', STR_PAD_LEFT), PHP_EOL;   // 007
+echo str_repeat(''-'', 10), PHP_EOL;
+echo ucfirst(''hello''), '' '', ucwords(''hello world''), PHP_EOL;
+echo wordwrap(''a rather long sentence here'', 12, PHP_EOL, true), PHP_EOL;
+```
+
+`str_contains`, `str_starts_with` and `str_ends_with` arrived in PHP 8 and replace the `strpos(...) !== false` dance, which was easy to get wrong because `strpos` returns `0` for a match at the start.
+
+Building strings: concatenate for a few, `implode` for a list, `sprintf` for a format.
+
+```php
+<?php
+declare(strict_types=1);
+
+$name = ''Aisha'';
+$score = 0.8637;
+$count = 7;
+
+printf("%s scored %.1f%% over %d attempts%s", $name, $score * 100, $count, PHP_EOL);
+echo sprintf("%-10s|%10s|%''*10s", ''left'', ''right'', ''padded''), PHP_EOL;
+echo sprintf("%05.2f %x %b %e", 3.14159, 255, 5, 12345.678), PHP_EOL;
+echo number_format(1234567.891, 2), PHP_EOL;        // 1,234,567.89
+echo number_format(1234567.891, 2, '','', ''.''), PHP_EOL;
+```
+
+`vsprintf` takes an array, which is useful when the arguments are built dynamically. And `printf` returns the length written, not the string - `sprintf` is the one that returns it.
 
 ## Dates
 
-`DateTimeImmutable` is the one to use. `DateTime` mutates, which makes a date
-passed into a function unsafe to keep.
+Use the object API. `date()` and `strtotime()` work on a global default timezone, which is a hidden input.
 
 ```php
 <?php
-$start = new DateTimeImmutable("2026-01-15 09:30:00", new DateTimeZone("UTC"));
+declare(strict_types=1);
 
-echo $start->format("Y-m-d H:i"), "\\n";
-echo $start->format("l, j F Y"), "\\n";
+$utc = new DateTimeImmutable(''2026-10-07 14:30:00'', new DateTimeZone(''UTC''));
 
-// modify returns a new instance; the original is untouched.
-$later = $start->modify("+3 weeks 2 days");
-echo $later->format("Y-m-d"), " (original still ", $start->format("Y-m-d"), ")\\n";
+echo $utc->format(''Y-m-d H:i:s T''), PHP_EOL;           // 2026-10-07 14:30:00 UTC
+echo $utc->format(DateTimeInterface::ATOM), PHP_EOL;   // 2026-10-07T14:30:00+00:00
+echo $utc->format(''D, j M Y''), PHP_EOL;                // Wed, 7 Oct 2026
 
-$diff = $start->diff($later);
-echo $diff->days, " days apart\\n";
-
-// Comparison works directly.
-var_dump($later > $start);
-
-// Parsing something in a known shape, and refusing anything else.
-$parsed = DateTimeImmutable::createFromFormat("d/m/Y", "15/01/2026");
-echo $parsed ? $parsed->format("Y-m-d") . "\\n" : "unparseable\\n";
+$london = $utc->setTimezone(new DateTimeZone(''Europe/London''));
+echo $london->format(''Y-m-d H:i:s T''), PHP_EOL;        // 15:30:00 BST
+var_dump($utc->getTimestamp() === $london->getTimestamp());   // true
 ```
 
-## What to take away
+**`DateTimeImmutable`, never `DateTime`.** The mutable version''s `modify()` and `add()` change the object in place and also return it, so a line that looks like it produces a new value quietly alters the old one:
 
-- String functions return new strings; nothing is edited in place.
-- `strlen` counts bytes, `mb_strlen` counts characters - use `mb_` for text.
-- `printf` and `number_format` handle alignment and thousands separators.
-- Use `DateTimeImmutable`, so a date cannot be changed under a caller.
+```php
+<?php
+declare(strict_types=1);
+
+$mutable = new DateTime(''2026-10-07'');
+$tomorrow = $mutable->modify(''+1 day'');
+echo $mutable->format(''Y-m-d''), PHP_EOL;        // 2026-10-08 - it moved!
+var_dump($mutable === $tomorrow);               // true - same object
+
+$immutable = new DateTimeImmutable(''2026-10-07'');
+$next = $immutable->modify(''+1 day'');
+echo $immutable->format(''Y-m-d''), PHP_EOL;      // 2026-10-07 - intact
+echo $next->format(''Y-m-d''), PHP_EOL;           // 2026-10-08
+```
+
+Arithmetic and differences:
+
+```php
+<?php
+declare(strict_types=1);
+
+$start = new DateTimeImmutable(''2026-01-15'', new DateTimeZone(''UTC''));
+
+echo $start->add(new DateInterval(''P1M''))->format(''Y-m-d''), PHP_EOL;     // +1 month
+echo $start->modify(''+1 month'')->format(''Y-m-d''), PHP_EOL;              // the same
+echo $start->modify(''last day of this month'')->format(''Y-m-d''), PHP_EOL;
+echo $start->modify(''next monday'')->format(''Y-m-d''), PHP_EOL;
+
+$end = new DateTimeImmutable(''2026-03-01'', new DateTimeZone(''UTC''));
+$diff = $start->diff($end);
+printf("%d month(s), %d day(s), %d days total%s",
+    $diff->m, $diff->d, $diff->days, PHP_EOL);
+
+// Month arithmetic overflows, which surprises people every time.
+$jan31 = new DateTimeImmutable(''2026-01-31'', new DateTimeZone(''UTC''));
+echo $jan31->modify(''+1 month'')->format(''Y-m-d''), PHP_EOL;      // 2026-03-03
+echo $jan31->modify(''last day of next month'')->format(''Y-m-d''), PHP_EOL;
+```
+
+"One month after 31 January" is 31 February, which PHP normalises to 3 March. That is consistent rather than wrong, and `last day of next month` is what you usually meant.
+
+Parsing, strictly:
+
+```php
+<?php
+declare(strict_types=1);
+
+$parsed = DateTimeImmutable::createFromFormat(
+    ''!Y-m-d'', ''2026-10-07'', new DateTimeZone(''UTC''));
+
+var_dump($parsed instanceof DateTimeImmutable);
+echo $parsed->format(''Y-m-d H:i:s''), PHP_EOL;       // 00:00:00 - the ! reset it
+
+$bad = DateTimeImmutable::createFromFormat(''!Y-m-d'', ''not a date'');
+var_dump($bad);                                     // false
+print_r(DateTimeImmutable::getLastErrors()[''errors''] ?? []);
+```
+
+The leading `!` resets every unspecified field to zero. Without it, the time fields default to *now*, so parsing a date gives you a different value each second.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+final class Slot
+{
+    public function __construct(
+        public readonly DateTimeImmutable $start,
+        public readonly DateTimeImmutable $end,
+        public readonly string $title,
+    ) {}
+
+    public function minutes(): int
+    {
+        return (int) (($this->end->getTimestamp() - $this->start->getTimestamp()) / 60);
+    }
+
+    public function inZone(string $zone): string
+    {
+        $tz = new DateTimeZone($zone);
+        return $this->start->setTimezone($tz)->format(''D H:i T'')
+            . '' to '' . $this->end->setTimezone($tz)->format(''H:i'');
+    }
+}
+
+function parseSlot(string $line): ?Slot
+{
+    $parts = array_map(''trim'', explode(''|'', $line));
+    if (count($parts) !== 3) {
+        return null;
+    }
+    [$startRaw, $minutesRaw, $title] = $parts;
+
+    $start = DateTimeImmutable::createFromFormat(
+        ''!Y-m-d H:i'', $startRaw, new DateTimeZone(''UTC''));
+    $minutes = filter_var($minutesRaw, FILTER_VALIDATE_INT, [''options'' => [''min_range'' => 1]]);
+
+    if ($start === false || $minutes === false) {
+        return null;
+    }
+
+    return new Slot($start, $start->add(new DateInterval(''PT'' . $minutes . ''M'')), $title);
+}
+
+$schedule = <<<''LINES''
+    2026-10-07 09:00 | 90  | Selectors and the cascade
+    2026-10-07 11:00 | 45  | The box model
+    2026-10-07 14:30 | 120 | Grid in two dimensions
+    not a slot
+    2026-10-07 16:00 | x   | Bad duration
+    LINES;
+
+$slots = [];
+foreach (explode(PHP_EOL, $schedule) as $line) {
+    $slot = parseSlot($line);
+    if ($slot !== null) {
+        $slots[] = $slot;
+    }
+}
+
+printf("%d slot(s) parsed%s%s", count($slots), PHP_EOL, PHP_EOL);
+
+foreach ($slots as $slot) {
+    printf("%-28s %-22s %3d min%s",
+        mb_strimwidth($slot->title, 0, 28, ''...''),
+        $slot->inZone(''Europe/London''),
+        $slot->minutes(),
+        PHP_EOL);
+}
+
+$total = array_sum(array_map(fn (Slot $s): int => $s->minutes(), $slots));
+printf("%sTotal %d minutes (%d h %02d m)%s",
+    PHP_EOL, $total, intdiv($total, 60), $total % 60, PHP_EOL);
+
+// The gap between the last two slots, computed rather than eyeballed.
+$gap = $slots[1]->end->diff($slots[2]->start);
+printf("Gap before the last slot: %d h %02d m%s", $gap->h, $gap->i, PHP_EOL);
+
+// And the same schedule in another timezone, from the same objects.
+echo PHP_EOL, ''In New York:'', PHP_EOL;
+foreach ($slots as $slot) {
+    printf("  %-28s %s%s",
+        mb_strimwidth($slot->title, 0, 28, ''...''),
+        $slot->inZone(''America/New_York''),
+        PHP_EOL);
+}
+```
+
+Three decisions make that work. Every instant is stored in UTC and converted only for display, so the timezone is a presentation concern rather than a hidden global. `createFromFormat` with a leading `!` means parsing the same line twice gives the same answer. And `mb_strimwidth` truncates by display width rather than bytes, so a title with an accent in it is not cut in half.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Truncated text shows a replacement character | `substr` cut a multi-byte character; use `mb_substr` |
+| `strlen` disagrees with what you see | It counts bytes; use `mb_strlen` or `grapheme_strlen` |
+| `strtolower` left accented letters alone | Use `mb_strtolower` |
+| Two identical-looking strings are unequal | Different normalisation; normalise to NFC |
+| A date moved when you only read it | `DateTime` is mutable; use `DateTimeImmutable` |
+| "+1 month" from the 31st skipped a month | Overflow; use `last day of next month` |
+| A parsed date has today''s time in it | Missing the leading `!` in the format |
+| Times are right locally and wrong in production | A different default timezone; always pass one |
+
+## A check you can run
+
+```php
+<?php
+$a = new DateTime(''2026-01-31'');
+$b = $a->modify(''+1 month'');
+echo $a->format(''Y-m-d''), '' '', $b->format(''Y-m-d''), PHP_EOL;
+var_dump($a === $b);
+```
+
+Both dates print the same, and `$a === $b` is `true` - one object, two names, and the original is gone. Change `DateTime` to `DateTimeImmutable` and run it again: two different dates, and `false`.
+
+Two words changed, and a whole class of "why did that date move" bug disappears. There is no good reason to use the mutable class in new code.
 ',
-   'Bytes against characters, formatting, and dates that cannot change underneath you.',
-   2, 498,
-   '55555555-5555-4555-8555-555555555555',
+   'Bytes against characters, formatting, and dates that cannot change underneath you.', 7, 1460,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -675,140 +1580,458 @@ VALUES
    'markdown',
    '# Classes, Interfaces and Enums
 
-Modern PHP has enough type machinery that a class can describe its own rules
-rather than relying on documentation.
+Modern PHP''s object model is conventional and well-typed. The parts worth learning properly are the constructor shorthand, what `readonly` actually guarantees, and enums - which replaced a decade of class constants and got it right.
+
+## A class, written the modern way
 
 ```php
 <?php
-final class Money
+declare(strict_types=1);
+
+final class Lesson
 {
-    // Constructor property promotion: declared, typed and assigned in one place.
+    // Constructor property promotion: declare, type and assign in one
+    // place. This replaces three lines per property.
     public function __construct(
-        public readonly int $pence,
-        public readonly string $currency = "GBP",
+        public readonly int $id,
+        public readonly string $title,
+        public readonly int $minutes,
+        private array $tags = [],
     ) {
-        if ($pence < 0) {
-            throw new InvalidArgumentException("money cannot be negative");
+        if ($minutes < 0) {
+            throw new InvalidArgumentException(''minutes must not be negative'');
         }
     }
 
-    public function plus(Money $other): static
+    public function tags(): array
     {
-        // readonly means "return a changed copy", not "mutate".
-        return new static($this->pence + $other->pence, $this->currency);
+        return $this->tags;                 // arrays copy, so this is safe
+    }
+
+    public function withTag(string $tag): self
+    {
+        $clone = clone $this;
+        $clone->tags[] = $tag;              // allowed: tags is not readonly
+        return $clone;
     }
 
     public function __toString(): string
     {
-        return sprintf("%s%.2f", $this->currency === "GBP" ? "£" : "", $this->pence / 100);
+        return sprintf(''%s (%d min)'', $this->title, $this->minutes);
     }
 }
 
-$total = (new Money(1250))->plus(new Money(399));
-echo $total, "\\n";
+$lesson = new Lesson(1, ''Selectors'', 7, [''css'']);
+echo $lesson, PHP_EOL;                                  // Selectors (7 min)
+echo $lesson->id, PHP_EOL;                              // 1
+print_r($lesson->withTag(''cascade'')->tags());           // [''css'', ''cascade'']
+print_r($lesson->tags());                               // [''css''] - unchanged
 
 try {
-    $total->pence = 0;
+    $lesson->id = 2;
 } catch (Error $e) {
-    echo get_class($e), ": ", $e->getMessage(), "\\n";
+    echo get_class($e), PHP_EOL;                        // Error
 }
 ```
+
+`final` by default is worth the habit. A class that is not designed for inheritance and is not final is an accident waiting for a subclass that overrides half of it.
+
+`readonly` means assignable once, from inside the declaring class. It is enforced at run time, unlike TypeScript''s compile-time version - a write from outside is a fatal `Error`, not a warning. PHP 8.2 added `readonly class`, which marks every property at once.
+
+## Visibility, statics and constants
+
+```php
+<?php
+declare(strict_types=1);
+
+final class Counter
+{
+    public const int MAX = 100;             // typed constants, PHP 8.3
+    private const string PREFIX = ''c-'';
+
+    private static int $instances = 0;
+    private int $value = 0;
+
+    public function __construct(private readonly string $name)
+    {
+        self::$instances++;
+    }
+
+    public function increment(int $by = 1): static
+    {
+        if ($this->value + $by > self::MAX) {
+            throw new OverflowException(''would exceed '' . self::MAX);
+        }
+        $this->value += $by;
+        return $this;                       // fluent
+    }
+
+    public function label(): string
+    {
+        return self::PREFIX . $this->name . ''='' . $this->value;
+    }
+
+    public static function created(): int
+    {
+        return self::$instances;
+    }
+}
+
+$a = (new Counter(''a''))->increment()->increment(5);
+$b = new Counter(''b'');
+
+echo $a->label(), PHP_EOL;                  // c-a=6
+echo Counter::created(), PHP_EOL;           // 2
+echo Counter::MAX, PHP_EOL;                 // 100
+
+try {
+    $b->increment(999);
+} catch (OverflowException $e) {
+    echo $e->getMessage(), PHP_EOL;
+}
+```
+
+`self` refers to the class where the code is written; `static` refers to the class that was actually called, which matters for inheritance:
+
+```php
+<?php
+declare(strict_types=1);
+
+class Base
+{
+    public static function createSelf(): self { return new self(); }
+    public static function createStatic(): static { return new static(); }
+}
+
+final class Derived extends Base {}
+
+echo get_class(Derived::createSelf()), PHP_EOL;     // Base - probably wrong
+echo get_class(Derived::createStatic()), PHP_EOL;   // Derived
+```
+
+For a factory method, `static` is almost always what you meant.
 
 ## Interfaces and abstract classes
 
-An interface is a promise about shape. An abstract class is a partial
-implementation. A class may implement many interfaces but extend only one class.
-
 ```php
 <?php
-interface Describable
+declare(strict_types=1);
+
+interface Renderable
 {
-    public function describe(): string;
+    public function render(): string;
 }
 
-abstract class Person implements Describable
+interface Cacheable
 {
-    public function __construct(protected string $name) {}
+    public function cacheKey(): string;
+    public function ttlSeconds(): int;
+}
 
-    // Shared behaviour lives here.
-    public function describe(): string
+abstract class Block implements Renderable
+{
+    public function __construct(protected readonly string $title) {}
+
+    // Concrete: shared by every subclass.
+    public function heading(): string
     {
-        return sprintf("%s (%s)", $this->name, $this->role());
+        return ''<h2>'' . htmlspecialchars($this->title, ENT_QUOTES) . ''</h2>'';
     }
 
-    // Each subclass must answer this.
-    abstract protected function role(): string;
+    // Abstract: each subclass must supply it.
+    abstract protected function body(): string;
+
+    final public function render(): string
+    {
+        return $this->heading() . $this->body();
+    }
 }
 
-final class Learner extends Person
+final class TextBlock extends Block implements Cacheable
 {
-    protected function role(): string { return "learner"; }
+    public function __construct(string $title, private readonly string $text) {
+        parent::__construct($title);
+    }
+
+    protected function body(): string
+    {
+        return ''<p>'' . htmlspecialchars($this->text, ENT_QUOTES) . ''</p>'';
+    }
+
+    public function cacheKey(): string { return ''text-'' . md5($this->text); }
+    public function ttlSeconds(): int { return 3600; }
 }
 
-final class Instructor extends Person
-{
-    protected function role(): string { return "instructor"; }
-}
-
-foreach ([new Learner("Aisha"), new Instructor("Lena")] as $person) {
-    echo $person->describe(), "\\n";
-    var_dump($person instanceof Describable);
-}
+$block = new TextBlock(''Hello'', ''A <b>quoted</b> sentence'');
+echo $block->render(), PHP_EOL;
+var_dump($block instanceof Renderable, $block instanceof Cacheable);
+echo substr($block->cacheKey(), 0, 9), PHP_EOL;
 ```
+
+The division: an **interface** is a contract with no implementation and a class may implement many. An **abstract class** is a partial implementation and a class may extend only one.
+
+Prefer interfaces for the contract and composition for the sharing. The `render()` marked `final` above is the template-method pattern: the shape is fixed, only the hole is pluggable - which is what makes it safe for a subclass to exist at all.
 
 ## Enums
 
-An enum is a closed set of values the type system knows about. A backed enum
-also has a scalar value for storage.
+Enums replaced the old `const` approach entirely, and they carry behaviour.
 
 ```php
 <?php
-enum Level: string
-{
-    case Basic = "basic";
-    case Intermediate = "intermediate";
-    case Advanced = "advanced";
-    case Expert = "expert";
+declare(strict_types=1);
 
-    // Enums can carry behaviour.
+enum Status: string
+{
+    case Draft = ''draft'';
+    case Published = ''published'';
+    case Archived = ''archived'';
+
+    // Enums can have methods, and $this is the case.
     public function label(): string
     {
-        return ucfirst($this->value);
+        return match ($this) {
+            Status::Draft => ''Not visible yet'',
+            Status::Published => ''Live'',
+            Status::Archived => ''Retired'',
+        };
     }
 
-    public function isAdvanced(): bool
+    public function isVisible(): bool
     {
-        return in_array($this, [self::Advanced, self::Expert], true);
+        return $this === Status::Published;
+    }
+
+    // And static methods, including alternative constructors.
+    public static function fromLabel(string $label): self
+    {
+        foreach (self::cases() as $case) {
+            if ($case->label() === $label) {
+                return $case;
+            }
+        }
+        throw new ValueError(''no status with label '' . $label);
     }
 }
 
-foreach (Level::cases() as $level) {
-    printf("%-14s %s\\n", $level->label(), $level->isAdvanced() ? "advanced" : "");
+$status = Status::Published;
+echo $status->value, '' '', $status->name, '' '', $status->label(), PHP_EOL;
+// published Published Live
+
+var_dump($status->isVisible());
+var_dump($status === Status::Published);            // identity works
+
+// from() throws, tryFrom() returns null. Use tryFrom at a boundary.
+var_dump(Status::tryFrom(''draft''));
+var_dump(Status::tryFrom(''nonsense''));              // NULL
+
+try {
+    Status::from(''nonsense'');
+} catch (ValueError $e) {
+    echo get_class($e), PHP_EOL;                    // ValueError
 }
 
-// from() throws on an unknown value; tryFrom() returns null.
-echo Level::from("expert")->name, "\\n";
-var_dump(Level::tryFrom("nonsense"));
-
-// Because the set is closed, match over it needs no default - and adding a
-// case later makes every incomplete match fail loudly.
-$level = Level::Advanced;
-echo match ($level) {
-    Level::Basic, Level::Intermediate => "keep going\\n",
-    Level::Advanced, Level::Expert => "nearly there\\n",
-};
+echo implode('', '', array_column(Status::cases(), ''value'')), PHP_EOL;
+echo Status::fromLabel(''Retired'')->value, PHP_EOL;  // archived
 ```
 
-## What to take away
+Three things an enum gives you that a class constant did not: a **type** you can put in a signature, so `function publish(Status $s)` cannot be passed a typo; **exhaustive `match`**, which throws `UnhandledMatchError` when a case is added and a `match` is not updated; and `cases()`, so the list and the type cannot drift.
 
-- Promotion and `readonly` remove most boilerplate and most accidental mutation.
-- An interface is a shape; an abstract class is a partial implementation.
-- A backed enum stores as a scalar and still carries behaviour.
-- `tryFrom` returns null where `from` throws.
+A pure enum has no backing value, and is right when the values are never stored or transmitted:
+
+```php
+<?php
+declare(strict_types=1);
+
+enum Direction
+{
+    case Up;
+    case Down;
+
+    public function opposite(): self
+    {
+        return match ($this) {
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+        };
+    }
+}
+
+enum Status: string
+{
+    case Draft = ''draft'';
+}
+
+echo Direction::Up->opposite()->name, PHP_EOL;      // Down
+var_dump(Direction::Up instanceof UnitEnum);        // true - no backing value
+var_dump(Status::Draft instanceof BackedEnum);      // true - it has one
+var_dump(Status::Draft instanceof UnitEnum);        // true - BackedEnum extends it
+```
+
+Enums can implement interfaces and hold constants, but they cannot have state - there is exactly one instance of each case, for the lifetime of the request, which is what makes `===` the right comparison.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+enum Level: int
+{
+    case Debug = 10;
+    case Info = 20;
+    case Warning = 30;
+    case Error = 40;
+
+    public function label(): string
+    {
+        return strtoupper($this->name);
+    }
+
+    public function atLeast(self $other): bool
+    {
+        return $this->value >= $other->value;
+    }
+}
+
+interface Handler
+{
+    public function handle(Entry $entry): void;
+}
+
+final readonly class Entry
+{
+    public function __construct(
+        public Level $level,
+        public string $message,
+        public array $context = [],
+    ) {}
+
+    public function formatted(): string
+    {
+        $context = $this->context === []
+            ? ''''
+            : '' '' . implode('' '', array_map(
+                fn (string $k, mixed $v): string => $k . ''='' . var_export($v, true),
+                array_keys($this->context),
+                array_values($this->context),
+            ));
+        return sprintf(''[%-7s] %s%s'', $this->level->label(), $this->message, $context);
+    }
+}
+
+final class CollectingHandler implements Handler
+{
+    /** @var list<string> */
+    private array $lines = [];
+
+    public function __construct(private readonly Level $minimum) {}
+
+    public function handle(Entry $entry): void
+    {
+        if (!$entry->level->atLeast($this->minimum)) {
+            return;
+        }
+        $this->lines[] = $entry->formatted();
+    }
+
+    public function lines(): array { return $this->lines; }
+}
+
+final class Logger
+{
+    /** @var list<Handler> */
+    private array $handlers = [];
+
+    public function add(Handler $handler): static
+    {
+        $this->handlers[] = $handler;
+        return $this;
+    }
+
+    public function log(Level $level, string $message, array $context = []): void
+    {
+        $entry = new Entry($level, $message, $context);
+        foreach ($this->handlers as $handler) {
+            $handler->handle($entry);
+        }
+    }
+}
+
+$verbose = new CollectingHandler(Level::Debug);
+$quiet = new CollectingHandler(Level::Warning);
+
+$logger = (new Logger())->add($verbose)->add($quiet);
+
+$logger->log(Level::Debug, ''cache miss'', [''key'' => ''lesson:7'']);
+$logger->log(Level::Info, ''request served'', [''ms'' => 31]);
+$logger->log(Level::Warning, ''slow query'', [''ms'' => 1902]);
+$logger->log(Level::Error, ''connection refused'');
+
+echo ''verbose:'', PHP_EOL;
+foreach ($verbose->lines() as $line) {
+    echo ''  '', $line, PHP_EOL;
+}
+
+echo ''quiet:'', PHP_EOL;
+foreach ($quiet->lines() as $line) {
+    echo ''  '', $line, PHP_EOL;
+}
+
+printf(''%sverbose kept %d, quiet kept %d%s'',
+    PHP_EOL, count($verbose->lines()), count($quiet->lines()), PHP_EOL);
+
+// The enum is a type, so this is a TypeError rather than a typo that
+// reaches production:
+try {
+    // @phpstan-ignore-next-line - deliberate
+    $logger->log(''warning'', ''a string level'');
+} catch (TypeError $e) {
+    echo ''TypeError'', PHP_EOL;
+}
+
+// And the list of levels comes from the enum rather than a constant
+// somewhere else that could disagree with it.
+echo implode('' < '', array_map(fn (Level $l): string => $l->label(), Level::cases())), PHP_EOL;
+```
+
+The shape to take away is the division of labour. `Level` is an enum because it is a closed set with behaviour. `Entry` is a `readonly class` because it is data that must not change after construction. `Handler` is an interface because several unrelated classes implement it. And `Logger` holds handlers rather than extending anything, which is why adding a handler needs no new subclass.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `Cannot modify readonly property` | That is the point; build a new instance |
+| A readonly array was mutated anyway | Arrays copy, so the caller changed their copy |
+| A factory returned the base class | `self` instead of `static` |
+| `UnhandledMatchError` after adding an enum case | A `match` that needs the new case - go and add it |
+| `ValueError` from `Status::from()` | Use `tryFrom()` at a boundary |
+| A subclass broke the parent''s invariants | Make the class `final` unless designed otherwise |
+| Two enum cases compared unequal | They are singletons; `===` is correct, check the import |
+| A clone shares nested objects | `clone` is shallow; implement `__clone` |
+
+## A check you can run
+
+```php
+<?php
+enum Status: string {
+    case Draft = ''draft'';
+    case Published = ''published'';
+}
+
+function label(Status $s): string {
+    return match ($s) {
+        Status::Draft => ''Draft'',
+        Status::Published => ''Live'',
+    };
+}
+echo label(Status::Draft), PHP_EOL;
+```
+
+Add `case Archived = ''archived'';` to the enum and call `label(Status::Archived)`. It throws `UnhandledMatchError`, naming the file and line of the `match` that needs updating.
+
+Now add a `default => ''Unknown''` arm and do it again: it compiles, it runs, and the new status silently shows as "Unknown" everywhere. The absence of a `default` is the feature - it is what turns "someone will remember to update the other six matches" into an error with a line number.
 ',
-   'Promotion, readonly, interfaces against abstract classes, and enums that carry behaviour.',
-   2, 454,
-   '55555555-5555-4555-8555-555555555555',
+   'Promotion, readonly, interfaces against abstract classes, and enums that carry behaviour.', 9, 1762,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -825,144 +2048,387 @@ VALUES
   ('e0000001-0000-4000-8000-000000000066',
    'Errors, Exceptions and Debugging',
    'markdown',
-   '# Errors, Exceptions and Debugging
+   '# Exceptions, Errors and Warnings
 
-PHP has two failure families. Understanding which one you are looking at is
-most of debugging.
+PHP has two failure systems that met in the middle: the old warning-and-continue model, and exceptions. Modern PHP code should use exceptions for everything and turn warnings into exceptions too, so nothing fails silently.
+
+## The hierarchy
 
 ```php
 <?php
+declare(strict_types=1);
+
 // Throwable
-//   |- Error      - something wrong with the program (TypeError, DivisionByZeroError)
-//   |- Exception  - something wrong with the situation (your own subclasses)
+//   Error              - engine-level: TypeError, ValueError,
+//     |                  ArgumentCountError, DivisionByZeroError,
+//     |                  ArithmeticError, AssertionError
+//   Exception          - application-level
+//     RuntimeException   - LogicException
+//       OutOfBoundsException, OverflowException, RangeException
+//     LogicException
+//       InvalidArgumentException, DomainException, LengthException
 
-try {
-    intdiv(1, 0);
-} catch (DivisionByZeroError $e) {
-    echo "Error: ", get_class($e), " - ", $e->getMessage(), "\\n";
-}
-
-try {
-    throw new RuntimeException("the situation is wrong");
-} catch (Exception $e) {
-    echo "Exception: ", get_class($e), " - ", $e->getMessage(), "\\n";
-}
-
-// Catching Throwable catches both, which is right at the top of a program and
-// wrong almost everywhere else.
+var_dump(new TypeError(''x'') instanceof Throwable);
+var_dump(new RuntimeException(''x'') instanceof Throwable);
+var_dump(new TypeError(''x'') instanceof Exception);           // false!
 ```
+
+That last line is the one that catches people. `catch (Exception $e)` does **not** catch a `TypeError`, because `Error` and `Exception` are siblings. `catch (Throwable $e)` catches both.
+
+The intended division: an `Error` means the program is wrong - a type mismatch, calling a method on null - and should usually crash so someone fixes it. An `Exception` means something the program anticipated - a file is missing, a request failed - and should be handled.
+
+Within exceptions: `LogicException` means a bug in the caller (bad argument, invalid state), `RuntimeException` means something outside your control.
 
 ## Catching precisely, and finally
 
 ```php
 <?php
-function parseAge(string $text): ?int
+declare(strict_types=1);
+
+function parse(string $json): array
 {
     try {
-        if (!is_numeric($text)) {
-            throw new InvalidArgumentException("not a number: {$text}");
+        $value = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException $e) {
+        return [''error'' => ''not json: '' . $e->getMessage()];
+    }
+
+    if (!is_array($value)) {
+        return [''error'' => ''not an object''];
+    }
+    return $value;
+}
+
+print_r(parse(''{"a":1}''));
+print_r(parse(''nope''));
+print_r(parse(''42''));
+```
+
+Several types in one `catch`, and the variable is optional since PHP 8:
+
+```php
+<?php
+declare(strict_types=1);
+
+foreach ([''12'', ''x''] as $input) {
+    try {
+        if (!ctype_digit($input)) {
+            throw new InvalidArgumentException("not a number: $input");
         }
-        return (int) $text;
-    } catch (InvalidArgumentException $e) {
-        return null;
+        echo (int) $input, PHP_EOL;
+    } catch (InvalidArgumentException | RangeException $e) {
+        echo ''rejected: '', $e->getMessage(), PHP_EOL;
+    } catch (Throwable) {                   // no variable needed
+        echo ''something else'', PHP_EOL;
     } finally {
-        // Runs whatever happens - including on the return above.
-        // The place for closing what you opened.
+        // Runs on success, on a caught exception, on an uncaught one,
+        // and on `return` - which is what makes it right for cleanup.
+    }
+}
+```
+
+`finally` runs whatever happens, and that includes overriding a `return`:
+
+```php
+<?php
+declare(strict_types=1);
+
+function surprising(): string
+{
+    try {
+        return ''from try'';
+    } finally {
+        return ''from finally'';          // discards the above - never do this
     }
 }
 
-foreach (["29", "twenty-nine", " 30 "] as $value) {
-    var_dump(parseAge($value));
-}
-
-// Several types in one catch.
-try {
-    throw new TypeError("bad type");
-} catch (ValueError | TypeError $e) {
-    echo "caught ", get_class($e), "\\n";
-}
+echo surprising(), PHP_EOL;             // from finally
 ```
+
+A `return` in a `finally` block swallows both the returned value and any exception on its way out. Use `finally` for cleanup only.
 
 ## Your own exceptions, with a cause
 
 ```php
 <?php
-final class ConfigError extends RuntimeException {}
+declare(strict_types=1);
 
-function timeout(array $config): int
+final class ConfigurationError extends RuntimeException
 {
-    if (!isset($config["timeout"])) {
-        throw new ConfigError("timeout is required");
-    }
-
-    try {
-        if (!is_numeric($config["timeout"])) {
-            throw new InvalidArgumentException("not numeric");
-        }
-        return (int) $config["timeout"];
-    } catch (InvalidArgumentException $e) {
-        // The third argument keeps the original cause rather than discarding it.
-        throw new ConfigError("timeout must be a whole number", 0, $e);
+    public function __construct(
+        public readonly string $key,
+        string $reason,
+        ?Throwable $previous = null,
+    ) {
+        parent::__construct("configuration $key: $reason", 0, $previous);
     }
 }
 
-foreach ([["timeout" => "30"], [], ["timeout" => "soon"]] as $config) {
+function loadPort(array $config): int
+{
+    if (!array_key_exists(''port'', $config)) {
+        throw new ConfigurationError(''port'', ''is missing'');
+    }
     try {
-        echo timeout($config), "\\n";
-    } catch (ConfigError $e) {
-        $cause = $e->getPrevious();
-        echo "ConfigError: ", $e->getMessage();
-        echo $cause ? " (caused by " . get_class($cause) . ")\\n" : "\\n";
+        $port = filter_var($config[''port''], FILTER_VALIDATE_INT,
+            [''options'' => [''min_range'' => 1, ''max_range'' => 65535]]);
+        if ($port === false) {
+            throw new UnexpectedValueException(''out of range or not an integer'');
+        }
+        return $port;
+    } catch (UnexpectedValueException $e) {
+        // The third argument keeps the original, so the trace shows both.
+        throw new ConfigurationError(''port'', ''invalid'', $e);
+    }
+}
+
+foreach ([[''port'' => ''5432''], [], [''port'' => ''99999'']] as $config) {
+    try {
+        echo loadPort($config), PHP_EOL;
+    } catch (ConfigurationError $e) {
+        printf("%s (key=%s, caused by %s)%s",
+            $e->getMessage(), $e->key,
+            $e->getPrevious() === null ? ''nothing'' : get_class($e->getPrevious()),
+            PHP_EOL);
     }
 }
 ```
 
-## Warnings are not exceptions
+The `$previous` argument is the whole reason to wrap rather than rethrow: the caller gets a message in their own vocabulary, and the original cause is still in the chain for the log.
 
-Some failures raise a warning and carry on with a wrong value. In production
-that is how a bug reaches the customer.
+A custom exception carrying **typed data** - here `$key` - is worth the five lines. A handler that must parse the message string to find out which key failed is a handler that will break when someone improves the wording.
+
+Reading an exception:
 
 ```php
 <?php
-// A missing key warns and yields null rather than throwing.
-$data = ["name" => "Aisha"];
-$score = @$data["score"];
-var_dump($score);
+declare(strict_types=1);
 
-// The null coalescing operator says what you meant, without suppressing.
-var_dump($data["score"] ?? 0);
+try {
+    throw new RuntimeException(''something failed'', 42);
+} catch (RuntimeException $e) {
+    echo $e->getMessage(), PHP_EOL;         // something failed
+    echo $e->getCode(), PHP_EOL;            // 42
+    echo basename($e->getFile()), PHP_EOL;
+    echo $e->getLine() > 0 ? ''has a line'' : ''no line'', PHP_EOL;
+    echo count($e->getTrace()) >= 0 ? ''has a trace'' : '''', PHP_EOL;
+}
+```
 
-// ??= assigns only when the current value is null or missing.
-$options = [];
-$options["retries"] ??= 3;
-print_r($options);
+Never put `$e->getMessage()` into an HTTP response. It frequently contains a file path, a query, or a connection string. Log the full exception; show the user a reference.
 
-// Turning warnings into exceptions makes them impossible to ignore. This is
-// worth doing in development.
-set_error_handler(function (int $severity, string $message, string $file, int $line) {
+## Warnings are not exceptions
+
+```php
+<?php
+declare(strict_types=1);
+
+// This emits a warning and returns false. Execution continues, and
+// $contents is false rather than a string.
+$contents = @file_get_contents(''/no/such/file'');
+var_dump($contents);                        // bool(false)
+```
+
+A whole category of PHP functions behaves this way: `file_get_contents`, `fopen`, `unlink`, `mkdir`, most of the `ext/standard` file and network layer. The `@` suppresses the warning and is nearly always the wrong tool, because it hides the only signal you had.
+
+The right fix is to convert warnings into exceptions globally:
+
+```php
+<?php
+declare(strict_types=1);
+
+set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+    // error_reporting() is 0 for a suppressed call, so this respects @.
+    if (!(error_reporting() & $severity)) {
+        return false;
+    }
     throw new ErrorException($message, 0, $severity, $file, $line);
 });
 
 try {
-    echo $undefined_variable;
+    file_get_contents(''/no/such/file'');
 } catch (ErrorException $e) {
-    echo "ErrorException: ", $e->getMessage(), "\\n";
+    echo ''caught as an exception: '', explode('':'', $e->getMessage())[0], PHP_EOL;
 }
 
 restore_error_handler();
 ```
 
-## What to take away
+With that handler installed at the top of the application, every warning becomes a catchable exception with a file and a line. It is four lines and it removes an entire class of silent failure.
 
-- `Error` means the program is wrong; `Exception` means the situation is.
-- Catch the types you expect; `finally` runs regardless.
-- Pass the previous exception so the cause is not lost.
-- `??` states a default; `@` hides a problem - they are not the same.
-- Promoting warnings to exceptions in development finds bugs earlier.
+The modern alternative, where the extension supports it, is to ask for exceptions directly:
+
+```php
+<?php
+declare(strict_types=1);
+
+// PDO: exceptions rather than silent false
+//   $pdo = new PDO($dsn, $user, $pass, [
+//       PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+//   ]);
+//
+// mysqli: the same
+//   mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+//
+// json: the flag
+try {
+    json_decode(''nope'', true, 512, JSON_THROW_ON_ERROR);
+} catch (JsonException $e) {
+    echo ''JsonException'', PHP_EOL;
+}
+
+// intdiv and % already throw
+try {
+    intdiv(1, 0);
+} catch (DivisionByZeroError $e) {
+    echo ''DivisionByZeroError'', PHP_EOL;
+}
+```
+
+PDO''s `ERRMODE_EXCEPTION` has been the default since PHP 8, which removed the single most common source of "the query failed and nobody noticed".
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+final class ValidationError extends InvalidArgumentException
+{
+    public function __construct(public readonly string $field, string $reason)
+    {
+        parent::__construct("$field $reason");
+    }
+}
+
+final class ValidationFailed extends InvalidArgumentException
+{
+    /** @param list<ValidationError> $errors */
+    public function __construct(public readonly array $errors)
+    {
+        parent::__construct(count($errors) . '' validation error(s)'');
+    }
+}
+
+/**
+ * Collects every problem rather than stopping at the first, because a
+ * form that reports one error at a time is a miserable form.
+ */
+function validate(array $record): array
+{
+    $errors = [];
+
+    foreach ([''reference'', ''email''] as $field) {
+        if (($record[$field] ?? '''') === '''') {
+            $errors[] = new ValidationError($field, ''is required'');
+        }
+    }
+
+    $email = $record[''email''] ?? '''';
+    if ($email !== '''' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+        $errors[] = new ValidationError(''email'', ''is not a valid address'');
+    }
+
+    try {
+        $amount = $record[''amount''] ?? '''';
+        if (!is_string($amount) && !is_int($amount)) {
+            throw new UnexpectedValueException(''wrong type'');
+        }
+        $pence = filter_var($amount, FILTER_VALIDATE_INT, [''options'' => [''min_range'' => 1]]);
+        if ($pence === false) {
+            throw new UnexpectedValueException(''not a positive whole number of pence'');
+        }
+    } catch (UnexpectedValueException $e) {
+        $errors[] = new ValidationError(''amount'', $e->getMessage());
+        $pence = 0;
+    }
+
+    if ($errors !== []) {
+        throw new ValidationFailed($errors);
+    }
+
+    return [''reference'' => $record[''reference''], ''email'' => $email, ''pence'' => $pence];
+}
+
+$records = [
+    [''reference'' => ''A-1'', ''email'' => ''aisha@example.com'', ''amount'' => ''1999''],
+    [''reference'' => '''',    ''email'' => ''broken'',            ''amount'' => ''x''],
+    [''reference'' => ''A-3'', ''email'' => ''sam@example.com'',   ''amount'' => ''-5''],
+];
+
+foreach ($records as $index => $record) {
+    try {
+        $clean = validate($record);
+        printf("record %d: ok, %s for %s%s",
+            $index + 1, number_format($clean[''pence''] / 100, 2), $clean[''email''], PHP_EOL);
+    } catch (ValidationFailed $e) {
+        printf("record %d: %s%s", $index + 1, $e->getMessage(), PHP_EOL);
+        foreach ($e->errors as $error) {
+            printf("   - %s%s", $error->getMessage(), PHP_EOL);
+        }
+    } finally {
+        // Always runs - the right place for a metric or a span.
+    }
+}
+
+// And the warning-to-exception handler, so a missing file is a failure
+// rather than a `false` that flows onwards.
+set_error_handler(static function (int $severity, string $message): bool {
+    if (!(error_reporting() & $severity)) {
+        return false;
+    }
+    throw new ErrorException($message, 0, $severity);
+});
+
+try {
+    $config = file_get_contents(''/no/such/config.json'');
+    echo strlen((string) $config), PHP_EOL;
+} catch (ErrorException $e) {
+    echo ''config unreadable, using defaults'', PHP_EOL;
+} finally {
+    restore_error_handler();
+}
+```
+
+Two decisions are worth naming. The validator collects into a list and throws once, carrying typed `ValidationError` objects rather than strings - so an HTTP layer can turn them into a field-keyed JSON response without parsing anything. And the `finally` restores the error handler, so an exception thrown inside the `try` cannot leave the handler installed for the rest of the request.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `catch (Exception $e)` missed a `TypeError` | `Error` is a sibling; catch `Throwable` |
+| A function returned `false` and nothing complained | A warning, not an exception; install a handler |
+| `@` hid the only clue | Suppression; remove it and handle the failure |
+| The original cause is missing from the log | No `$previous` when rethrowing |
+| A `finally` swallowed the return value | A `return` inside `finally` |
+| A stack trace leaked a password | `getMessage()` sent to the user; log it instead |
+| A handler parsed the message string | Put the data on the exception as a property |
+| The error handler stayed installed | Restore it in a `finally` |
+
+## A check you can run
+
+```php
+<?php
+declare(strict_types=1);
+
+$bad = static function (): void {
+    intdiv(1, 0);                       // DivisionByZeroError, which is an Error
+};
+
+try {
+    $bad();
+} catch (Exception $e) {
+    echo ''caught as Exception'', PHP_EOL;
+} catch (Throwable $e) {
+    echo ''the Exception arm missed it; Throwable caught '', get_class($e), PHP_EOL;
+}
+```
+
+It prints the second line. `catch (Exception $e)` never ran, because `DivisionByZeroError` is an `Error`, and `Error` and `Exception` are siblings rather than one extending the other.
+
+Now delete the `catch (Throwable)` arm and run it again: the script dies with an uncaught `DivisionByZeroError`. That one word is the difference between a handler that covers your failures and one that covers half of them, and the half it misses is the half caused by your own bugs.
 ',
-   'Error against Exception, catching precisely, and warnings that hide real bugs.',
-   3, 516,
-   '55555555-5555-4555-8555-555555555555',
+   'Error against Exception, catching precisely, and warnings that hide real bugs.', 9, 1705,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -979,165 +2445,425 @@ VALUES
   ('e0000001-0000-4000-8000-000000000067',
    'Traits, Static and Composition',
    'markdown',
-   '# Traits, Static and Composition
+   '# Traits, Statics and Composition
 
-PHP has single inheritance, so the interesting question is how to share
-behaviour without it. Traits are one answer; composition is usually the better
-one.
+PHP gives you three ways to share behaviour between classes: inheritance, traits, and holding an object. Two of them cause trouble at scale and one does not. This lesson is about why.
+
+## Traits: copy and paste with a compiler
+
+A trait is code that is copied into a class at compile time. It is not a type - you cannot type-hint against one, and `instanceof` does not see it.
 
 ```php
 <?php
+declare(strict_types=1);
+
 trait Timestamps
 {
     private ?DateTimeImmutable $createdAt = null;
+    private ?DateTimeImmutable $updatedAt = null;
 
-    public function touch(): static
+    public function touch(DateTimeImmutable $now): void
     {
-        $this->createdAt ??= new DateTimeImmutable("2026-01-15");
-        return $this;
+        $this->createdAt ??= $now;
+        $this->updatedAt = $now;
     }
 
-    public function createdAt(): ?DateTimeImmutable
+    public function age(DateTimeImmutable $now): int
     {
-        return $this->createdAt;
+        return $this->createdAt === null
+            ? 0
+            : $now->getTimestamp() - $this->createdAt->getTimestamp();
     }
 }
 
-trait Sluggable
-{
-    public function slug(): string
-    {
-        return strtolower(preg_replace(''/[^a-z0-9]+/i'', "-", trim($this->title())));
-    }
-
-    // A trait may demand that the using class supplies something.
-    abstract public function title(): string;
-}
-
-final class Article
+final class Lesson
 {
     use Timestamps;
-    use Sluggable;
 
-    public function __construct(private string $heading) {}
-
-    public function title(): string { return $this->heading; }
+    public function __construct(public readonly string $title) {}
 }
 
-$article = (new Article("Traits and Composition"))->touch();
-echo $article->slug(), "\\n";
-echo $article->createdAt()?->format("Y-m-d"), "\\n";
+$lesson = new Lesson(''Selectors'');
+$lesson->touch(new DateTimeImmutable(''@1000''));
+$lesson->touch(new DateTimeImmutable(''@1060''));
+echo $lesson->age(new DateTimeImmutable(''@1120'')), PHP_EOL;     // 120
+
+var_dump($lesson instanceof Lesson);
+// var_dump($lesson instanceof Timestamps);     // Fatal: not a type
 ```
+
+That last line is the trait''s defining limitation. If you want to accept "anything that can be touched" as a parameter, you need an interface as well:
+
+```php
+<?php
+declare(strict_types=1);
+
+interface Touchable
+{
+    public function touch(DateTimeImmutable $now): void;
+}
+
+trait Timestamps
+{
+    private ?DateTimeImmutable $updatedAt = null;
+
+    public function touch(DateTimeImmutable $now): void
+    {
+        $this->updatedAt = $now;
+    }
+
+    public function updatedAt(): ?DateTimeImmutable { return $this->updatedAt; }
+}
+
+final class Lesson implements Touchable
+{
+    use Timestamps;                     // the trait satisfies the interface
+    public function __construct(public readonly string $title) {}
+}
+
+function save(Touchable $thing, DateTimeImmutable $now): void
+{
+    $thing->touch($now);
+}
+
+$lesson = new Lesson(''Grid'');
+save($lesson, new DateTimeImmutable(''@2000''));
+echo $lesson->updatedAt()?->getTimestamp(), PHP_EOL;            // 2000
+```
+
+**Interface for the type, trait for the implementation** is the only use of traits that scales. A trait on its own is a way of sharing code with no contract, which is how a codebase ends up with forty classes that all "have timestamps" in subtly different ways.
 
 ## When two traits collide
 
 ```php
 <?php
-trait Loud { public function speak(): string { return "LOUD"; } }
-trait Quiet { public function speak(): string { return "quiet"; } }
+declare(strict_types=1);
+
+trait Loud
+{
+    public function speak(): string { return ''LOUD''; }
+    public function volume(): int { return 11; }
+}
+
+trait Quiet
+{
+    public function speak(): string { return ''quiet''; }
+    public function volume(): int { return 1; }
+}
 
 final class Speaker
 {
-    // Without insteadof this is a fatal error: PHP will not guess.
     use Loud, Quiet {
-        Loud::speak insteadof Quiet;
-        Quiet::speak as whisper;
+        Loud::speak insteadof Quiet;        // resolve the clash
+        Quiet::speak as whisper;            // and keep the other under a name
+        Quiet::volume insteadof Loud;
+        Loud::volume as maxVolume;
     }
 }
 
 $speaker = new Speaker();
-echo $speaker->speak(), " / ", $speaker->whisper(), "\\n";
+echo $speaker->speak(), PHP_EOL;            // LOUD
+echo $speaker->whisper(), PHP_EOL;          // quiet
+echo $speaker->volume(), PHP_EOL;           // 1
+echo $speaker->maxVolume(), PHP_EOL;        // 11
+```
 
-// A trait is copied into the class at compile time. It is not a type - you
-// cannot type-hint against one, which is the main reason to prefer an
-// interface plus composition.
+Without the `insteadof` block, PHP refuses to compile the class - which is the right behaviour, and better than the silent last-one-wins of some languages.
+
+But look at what that block costs: four lines of conflict resolution to use two traits. When you reach for it, the real answer is almost always two objects rather than two traits.
+
+The precedence rules, when you need them: a method in the class itself beats a trait, and a trait beats an inherited method. So a trait can override the parent class, which is surprising the first time it happens.
+
+```php
+<?php
+declare(strict_types=1);
+
+class Base
+{
+    public function name(): string { return ''base''; }
+}
+
+trait Named
+{
+    public function name(): string { return ''trait''; }
+}
+
+final class Thing extends Base
+{
+    use Named;
+}
+
+final class Explicit extends Base
+{
+    use Named;
+    public function name(): string { return ''class''; }
+}
+
+echo (new Thing())->name(), PHP_EOL;        // trait  - it beat the parent
+echo (new Explicit())->name(), PHP_EOL;     // class  - which beats the trait
 ```
 
 ## Static, and why it resists testing
 
 ```php
 <?php
-final class Counter
-{
-    // Shared by the class, not by an instance.
-    private static int $count = 0;
+declare(strict_types=1);
 
-    public static function bump(): int
+final class Config
+{
+    private static array $values = [];
+
+    public static function set(string $key, string $value): void
     {
-        return ++self::$count;
+        self::$values[$key] = $value;
+    }
+
+    public static function get(string $key): ?string
+    {
+        return self::$values[$key] ?? null;
     }
 }
 
-echo Counter::bump(), Counter::bump(), Counter::bump(), "\\n";
-
-// static:: resolves to the class that was actually called - late static
-// binding - where self:: is fixed at the point it was written.
-abstract class Model
+final class Mailer
 {
-    public static function create(): static { return new static(); }
-    public function name(): string { return static::class; }
+    public function send(string $to): string
+    {
+        // A hidden dependency. Nothing in the signature says this
+        // class needs configuration, and nothing can give it a
+        // different one.
+        $from = Config::get(''mail.from'') ?? ''noreply@example.com'';
+        return "from $from to $to";
+    }
 }
 
-final class User extends Model {}
-final class Order extends Model {}
-
-echo User::create()->name(), " ", Order::create()->name(), "\\n";
+Config::set(''mail.from'', ''hello@example.com'');
+echo (new Mailer())->send(''aisha@example.com''), PHP_EOL;
 ```
 
-Static state is global state. It survives between calls, cannot be swapped in a
-test, and turns an explicit dependency into a hidden one.
+Three problems, and they are the same problem seen from three angles.
+
+**It is invisible.** `new Mailer()` tells you nothing about what it needs. The dependency is discoverable only by reading the body.
+
+**It is global state.** A test that sets `mail.from` leaks into the next test, so the suite passes in one order and fails in another. The usual fix - a `reset()` method called in `setUp` - is a fix for a problem that need not exist.
+
+**It cannot be substituted.** You cannot give one `Mailer` a different configuration from another, which is exactly what a test, a multi-tenant application or a batch job wants.
 
 ## Composition instead
 
 ```php
 <?php
+declare(strict_types=1);
+
+interface Configuration
+{
+    public function get(string $key, ?string $default = null): ?string;
+}
+
+final class ArrayConfiguration implements Configuration
+{
+    public function __construct(private readonly array $values = []) {}
+
+    public function get(string $key, ?string $default = null): ?string
+    {
+        return $this->values[$key] ?? $default;
+    }
+}
+
+final class Mailer
+{
+    // Now the dependency is in the signature. Nobody has to read the
+    // body to know what this class needs.
+    public function __construct(private readonly Configuration $config) {}
+
+    public function send(string $to): string
+    {
+        $from = $this->config->get(''mail.from'', ''noreply@example.com'');
+        return "from $from to $to";
+    }
+}
+
+$live = new Mailer(new ArrayConfiguration([''mail.from'' => ''hello@example.com'']));
+$test = new Mailer(new ArrayConfiguration([]));
+
+echo $live->send(''aisha@example.com''), PHP_EOL;
+echo $test->send(''aisha@example.com''), PHP_EOL;     // the default
+```
+
+Two mailers, two configurations, no global state, and the test needs no `reset()`. The constructor got one line longer and everything else got simpler.
+
+The static methods that remain legitimate are the ones with **no state**: a named constructor (`Money::fromPounds`), a pure function that belongs with a type (`Uuid::isValid`), a factory. The test is whether calling it twice with the same arguments can give different answers. If it can, it is global state wearing a method''s clothes.
+
+## Composition over inheritance, concretely
+
+```php
+<?php
+declare(strict_types=1);
+
+interface Formatter
+{
+    public function format(string $message): string;
+}
+
+final class PlainFormatter implements Formatter
+{
+    public function format(string $message): string { return $message; }
+}
+
+final class PrefixedFormatter implements Formatter
+{
+    public function __construct(
+        private readonly Formatter $inner,
+        private readonly string $prefix,
+    ) {}
+
+    public function format(string $message): string
+    {
+        return ''['' . $this->prefix . ''] '' . $this->inner->format($message);
+    }
+}
+
+final class TruncatingFormatter implements Formatter
+{
+    public function __construct(
+        private readonly Formatter $inner,
+        private readonly int $width,
+    ) {}
+
+    public function format(string $message): string
+    {
+        return mb_strimwidth($this->inner->format($message), 0, $this->width, ''...'');
+    }
+}
+
+$formatter = new TruncatingFormatter(
+    new PrefixedFormatter(new PlainFormatter(), ''app''),
+    24,
+);
+
+echo $formatter->format(''a short one''), PHP_EOL;
+echo $formatter->format(''a considerably longer message than that''), PHP_EOL;
+```
+
+Three small classes, each with one job, assembled at the call site. The inheritance version of this needs `TruncatingPrefixedFormatter`, and then `TimestampedTruncatingPrefixedFormatter`, and that is the combinatorial explosion that gives inheritance its reputation.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
 interface Clock
 {
     public function now(): DateTimeImmutable;
 }
 
-final class SystemClock implements Clock
-{
-    public function now(): DateTimeImmutable { return new DateTimeImmutable("2026-09-05 12:00:00"); }
-}
-
 final class FrozenClock implements Clock
 {
     public function __construct(private DateTimeImmutable $at) {}
+
     public function now(): DateTimeImmutable { return $this->at; }
-}
 
-final class Greeter
-{
-    // The dependency is visible in the signature, so a test can supply its own.
-    public function __construct(private Clock $clock) {}
-
-    public function greet(): string
+    public function advance(string $interval): void
     {
-        $hour = (int) $this->clock->now()->format("G");
-        return match (true) {
-            $hour < 12 => "Good morning",
-            $hour < 18 => "Good afternoon",
-            default => "Good evening",
-        };
+        $this->at = $this->at->modify($interval);
     }
 }
 
-echo (new Greeter(new SystemClock()))->greet(), "\\n";
-echo (new Greeter(new FrozenClock(new DateTimeImmutable("2026-09-05 21:00:00"))))->greet(), "\\n";
+interface RateLimiter
+{
+    public function allow(string $key): bool;
+}
+
+final class WindowRateLimiter implements RateLimiter
+{
+    /** @var array<string, list<int>> */
+    private array $hits = [];
+
+    public function __construct(
+        private readonly Clock $clock,       // injected, not static
+        private readonly int $max = 3,
+        private readonly int $windowSeconds = 60,
+    ) {}
+
+    public function allow(string $key): bool
+    {
+        $now = $this->clock->now()->getTimestamp();
+        $recent = array_values(array_filter(
+            $this->hits[$key] ?? [],
+            fn (int $at): bool => $now - $at < $this->windowSeconds,
+        ));
+
+        if (count($recent) >= $this->max) {
+            $this->hits[$key] = $recent;
+            return false;
+        }
+
+        $recent[] = $now;
+        $this->hits[$key] = $recent;
+        return true;
+    }
+}
+
+final class LoggingRateLimiter implements RateLimiter
+{
+    /** @var list<string> */
+    private array $log = [];
+
+    public function __construct(private readonly RateLimiter $inner) {}
+
+    public function allow(string $key): bool
+    {
+        $allowed = $this->inner->allow($key);
+        $this->log[] = sprintf(''%s %s'', $allowed ? ''allow'' : ''deny'', $key);
+        return $allowed;
+    }
+
+    public function log(): array { return $this->log; }
+}
+
+// Everything is assembled here, where it can be seen.
+$clock = new FrozenClock(new DateTimeImmutable(''@10000''));
+$limiter = new LoggingRateLimiter(new WindowRateLimiter($clock, max: 3, windowSeconds: 60));
+
+foreach ([''aisha'', ''aisha'', ''aisha'', ''aisha'', ''noshad''] as $key) {
+    printf("%-7s %s%s", $key, $limiter->allow($key) ? ''allowed'' : ''DENIED'', PHP_EOL);
+}
+
+$clock->advance(''+61 seconds'');
+printf("%safter the window:%s", PHP_EOL, PHP_EOL);
+printf("%-7s %s%s", ''aisha'', $limiter->allow(''aisha'') ? ''allowed'' : ''DENIED'', PHP_EOL);
+
+printf("%slog: %s%s", PHP_EOL, implode('', '', $limiter->log()), PHP_EOL);
+
+// The same limiter with a different budget, which a static Config
+// could not have given us.
+$strict = new WindowRateLimiter($clock, max: 1, windowSeconds: 60);
+var_dump($strict->allow(''aisha''));          // true
+var_dump($strict->allow(''aisha''));          // false
 ```
 
-## What to take away
+Three things that a static-heavy version could not do. The clock is injected, so the test advances time by sixty-one seconds without sleeping. The logging wrapper is a separate class implementing the same interface, so the limiter knows nothing about it. And the second limiter has a different budget in the same process, which a class-level `static $max` makes impossible.
 
-- A trait is copied in, not inherited; it is not a type.
-- Collisions need `insteadof` - PHP refuses to guess.
-- `static::` binds late; `self::` does not.
-- Static state is global state and cannot be swapped in a test.
-- An injected interface makes the dependency visible and replaceable.
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `instanceof` on a trait is a fatal error | A trait is not a type; add an interface |
+| Two traits conflict and the class will not compile | Use `insteadof`, or use objects instead |
+| A trait overrode the parent class | Trait beats inherited; class beats trait |
+| Tests pass alone and fail together | Static state leaking between tests |
+| You cannot tell what a class needs | Hidden static dependencies; inject them |
+| Two instances cannot differ | Class-level state; move it to the instance |
+| A subclass hierarchy has combinatorial names | Compose wrappers instead of extending |
+| `private` in a trait collided with the class | Traits are copied in; rename one |
+
+## A check you can run
+
+Find a class in your codebase that calls a static method on another class of yours - a `Config::get`, a `Cache::remember`, a `Log::info`. Try to write a unit test for it that supplies a different value.
+
+If you cannot do it without a global `setUp`, a `reset()` call or a filesystem fixture, you have found the cost of that static. Now add the dependency to the constructor and write the test again. The test gets shorter, it stops depending on order, and the class''s signature now tells the truth about what it needs.
 ',
-   'Traits and their collisions, why static resists testing, and what to do instead.',
-   3, 546,
-   '55555555-5555-4555-8555-555555555555',
+   'Traits and their collisions, why static resists testing, and what to do instead.', 9, 1754,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1154,34 +2880,136 @@ VALUES
   ('e0000001-0000-4000-8000-000000000068',
    'Generators, Iterators and Laziness',
    'markdown',
-   '# Generators, Iterators and Laziness
+   '# Generators and Iterators
 
-A generator produces values one at a time. That is how PHP reads a file larger
-than memory, and how it describes a sequence that never ends.
+A generator is a function that produces values one at a time, keeping its place between them. It is how you process a file larger than memory, represent an infinite sequence, or build a pipeline that does no work until someone asks.
+
+## A function that pauses
 
 ```php
 <?php
+declare(strict_types=1);
+
 function countdown(int $from): Generator
 {
-    echo "  (the body starts running now)\\n";
+    echo ''starting'', PHP_EOL;
     while ($from > 0) {
-        yield $from--;
+        yield $from;
+        $from--;
     }
-    echo "  (finished)\\n";
+    echo ''finished'', PHP_EOL;
+    return ''done'';                      // the return value, not a yield
 }
 
-$gen = countdown(3);
-echo "nothing has run yet\\n";
+$generator = countdown(3);
+echo get_class($generator), PHP_EOL;    // Generator - nothing has run yet
 
-foreach ($gen as $value) {
-    echo $value, "\\n";
+foreach ($generator as $value) {
+    echo $value, PHP_EOL;
 }
+echo $generator->getReturn(), PHP_EOL;  // done
 ```
+
+Calling the function does not run the body. It builds a `Generator`. The body runs up to the first `yield`, hands out a value and freezes - local variables, the loop counter, the position - until the next value is asked for.
+
+Any function containing `yield` is a generator function, even if the `yield` is unreachable. That is occasionally surprising and always worth checking when a function mysteriously returns a `Generator`.
 
 ## Laziness is the point
 
 ```php
 <?php
+declare(strict_types=1);
+
+function eager(int $n): array
+{
+    $out = [];
+    for ($i = 0; $i < $n; $i++) {
+        $out[] = $i * $i;
+    }
+    return $out;
+}
+
+function lazy(int $n): Generator
+{
+    for ($i = 0; $i < $n; $i++) {
+        yield $i * $i;
+    }
+}
+
+$before = memory_get_usage();
+$array = eager(200000);
+$arrayCost = memory_get_usage() - $before;
+
+$before = memory_get_usage();
+$generator = lazy(200000);
+$generatorCost = memory_get_usage() - $before;
+
+printf("array:     %s bytes%s", number_format($arrayCost), PHP_EOL);
+printf("generator: %s bytes%s", number_format($generatorCost), PHP_EOL);
+var_dump($generatorCost < $arrayCost / 100);
+```
+
+The array holds two hundred thousand integers. The generator holds a position. For a database cursor, a log file or an API that pages, that difference is the difference between working and running out of memory.
+
+A pipeline where each stage holds one item:
+
+```php
+<?php
+declare(strict_types=1);
+
+function lines(string $text): Generator
+{
+    foreach (explode(PHP_EOL, $text) as $line) {
+        $line = trim($line);
+        if ($line !== '''') {
+            yield $line;
+        }
+    }
+}
+
+function parsed(iterable $source): Generator
+{
+    foreach ($source as $line) {
+        $parts = array_map(''trim'', explode('','', $line));
+        if (count($parts) === 3) {
+            yield [''name'' => $parts[0], ''team'' => $parts[1], ''score'' => (int) $parts[2]];
+        }
+    }
+}
+
+function above(iterable $source, int $threshold): Generator
+{
+    foreach ($source as $record) {
+        if ($record[''score''] > $threshold) {
+            yield $record;
+        }
+    }
+}
+
+$text = <<<''TEXT''
+    aisha,red,91
+
+    noshad,blue,78
+    sam,red,64
+    not a row
+    leah,blue,55
+    TEXT;
+
+$pipeline = above(parsed(lines($text)), 70);
+
+foreach ($pipeline as $record) {
+    printf("%-8s %-5s %d%s", $record[''name''], $record[''team''], $record[''score''], PHP_EOL);
+}
+```
+
+Note the `iterable` type on the parameters. It accepts an array **or** any `Traversable`, which is what lets these compose without caring whether the source is a generator, a file handle wrapper or a plain array.
+
+## Infinite sequences, made safe by laziness
+
+```php
+<?php
+declare(strict_types=1);
+
 function naturals(): Generator
 {
     $n = 1;
@@ -1193,102 +3021,331 @@ function naturals(): Generator
 function take(iterable $source, int $count): Generator
 {
     foreach ($source as $value) {
-        if ($count-- <= 0) return;
+        if ($count-- <= 0) {
+            return;
+        }
         yield $value;
     }
 }
 
-// An endless sequence is safe as long as something decides when to stop.
-foreach (take(naturals(), 5) as $n) { echo $n, " "; }
-echo "\\n";
-
-// A pipeline where nothing is materialised until the last step.
-function square(iterable $source): Generator
+function mapped(iterable $source, callable $fn): Generator
 {
-    foreach ($source as $value) yield $value * $value;
+    foreach ($source as $value) {
+        yield $fn($value);
+    }
 }
 
-echo implode(", ", iterator_to_array(take(square(naturals()), 5))), "\\n";
+$squares = take(mapped(naturals(), fn (int $n): int => $n * $n), 5);
+echo implode('', '', iterator_to_array($squares)), PHP_EOL;       // 1, 4, 9, 16, 25
 ```
+
+`naturals()` never ends and the program terminates, because the consumer stops asking. That inversion - the consumer deciding how much work the producer does - is the thing a returned array cannot give you.
 
 ## Keys, sending and delegation
 
+A generator can yield keys as well as values, and the keys need not be integers:
+
 ```php
 <?php
-function pairs(): Generator
+declare(strict_types=1);
+
+function settings(): Generator
 {
-    yield "name" => "Aisha";
-    yield "score" => 92;
+    yield ''host'' => ''localhost'';
+    yield ''port'' => 3306;
+    yield ''tls'' => false;
 }
 
-foreach (pairs() as $key => $value) {
-    echo $key, ": ", $value, "\\n";
+foreach (settings() as $key => $value) {
+    printf("%-5s %s%s", $key, var_export($value, true), PHP_EOL);
 }
 
-// A generator is two-way: send() supplies the value that yield evaluates to.
+print_r(iterator_to_array(settings()));
+```
+
+`yield` is also an expression, so a generator can receive values through `send()`:
+
+```php
+<?php
+declare(strict_types=1);
+
 function runningTotal(): Generator
 {
     $total = 0;
     while (true) {
-        $total += yield $total;
+        $value = yield $total;
+        if ($value === null) {
+            return $total;
+        }
+        $total += $value;
     }
 }
 
-$acc = runningTotal();
-$acc->current();
-echo $acc->send(10), " ", $acc->send(5), " ", $acc->send(1), "\\n";
+$accumulator = runningTotal();
+echo $accumulator->current(), PHP_EOL;      // 0 - run to the first yield
+echo $accumulator->send(10), PHP_EOL;       // 10
+echo $accumulator->send(5), PHP_EOL;        // 15
+echo $accumulator->send(100), PHP_EOL;      // 115
+```
 
-// yield from delegates to another iterable and flattens the plumbing away.
-function chain(iterable ...$sources): Generator
+`current()` advances to the first `yield`; the first `send()` would otherwise skip a value.
+
+`yield from` delegates to another iterable, which flattens the plumbing away and preserves keys:
+
+```php
+<?php
+declare(strict_types=1);
+
+function chained(iterable ...$sources): Generator
 {
     foreach ($sources as $source) {
         yield from $source;
     }
 }
 
-echo implode(", ", iterator_to_array(chain([1, 2], [3, 4]), false)), "\\n";
+function flatten(array $nested): Generator
+{
+    foreach ($nested as $item) {
+        if (is_array($item)) {
+            yield from flatten($item);          // recursion, readably
+        } else {
+            yield $item;
+        }
+    }
+}
+
+echo implode('','', iterator_to_array(chained([1, 2], [3, 4]), false)), PHP_EOL;
+echo implode('','', iterator_to_array(flatten([1, [2, [3, [4, 5]], 6], 7]), false)), PHP_EOL;
 ```
+
+The `false` second argument to `iterator_to_array` discards the keys. Without it, `yield from` preserves the inner sequences'' keys and later ones overwrite earlier ones - which is the commonest `yield from` bug and produces a result shorter than the input.
 
 ## Implementing the interfaces directly
 
+Sometimes you want an object that can be iterated more than once, which a generator cannot do.
+
 ```php
 <?php
-final class Collection implements IteratorAggregate, Countable
-{
-    public function __construct(private array $items) {}
+declare(strict_types=1);
 
-    // One method makes the whole class work in a foreach.
+final class Range implements IteratorAggregate, Countable
+{
+    public function __construct(
+        private readonly int $from,
+        private readonly int $to,
+        private readonly int $step = 1,
+    ) {}
+
+    // A FRESH generator each time, so this object re-iterates.
     public function getIterator(): Generator
     {
-        yield from $this->items;
+        for ($n = $this->from; $n <= $this->to; $n += $this->step) {
+            yield $n;
+        }
     }
 
-    public function count(): int { return count($this->items); }
-
-    public function filter(callable $keep): static
+    public function count(): int
     {
-        return new static(array_values(array_filter($this->items, $keep)));
+        return intdiv($this->to - $this->from, $this->step) + 1;
     }
 }
 
-$scores = new Collection([92, 78, 85, 41]);
+$range = new Range(1, 9, 2);
+echo implode('','', iterator_to_array($range)), PHP_EOL;      // 1,3,5,7,9
+echo implode('','', iterator_to_array($range)), PHP_EOL;      // again - works
+echo count($range), PHP_EOL;                                // 5
 
-foreach ($scores->filter(fn($n) => $n >= 80) as $score) {
-    echo $score, " ";
+$generator = (function (): Generator { yield 1; yield 2; })();
+echo implode('','', iterator_to_array($generator)), PHP_EOL;  // 1,2
+
+try {
+    iterator_to_array($generator);                          // a second pass
+} catch (Exception $e) {
+    echo $e->getMessage(), PHP_EOL;     // Cannot traverse an already closed generator
 }
-echo "\\n", count($scores), " items\\n";
 ```
 
-## What to take away
+`IteratorAggregate` needs one method and is almost always the right choice. The full `Iterator` interface - `current`, `key`, `next`, `rewind`, `valid` - is five methods of bookkeeping you rarely need to write by hand.
 
-- Calling a generator runs nothing; iterating it does.
-- Laziness lets a sequence be endless or larger than memory.
-- `yield from` delegates; `send` pushes a value back in.
-- `IteratorAggregate` and `Countable` make your type behave like a built-in.
+## Cleaning up
+
+A generator''s `finally` runs when it is exhausted, closed, or garbage collected after an early `break`:
+
+```php
+<?php
+declare(strict_types=1);
+
+function tracked(array $items): Generator
+{
+    echo ''opening'', PHP_EOL;
+    try {
+        foreach ($items as $item) {
+            yield $item;
+        }
+    } finally {
+        echo ''closing'', PHP_EOL;
+    }
+}
+
+foreach (tracked([1, 2, 3, 4]) as $value) {
+    echo $value, PHP_EOL;
+    if ($value === 2) {
+        break;
+    }
+}
+echo ''after the loop'', PHP_EOL;
+```
+
+That is what makes generators safe for resources: a `fopen` before the loop and an `fclose` in the `finally` is released even when the consumer stops early.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+/**
+ * Reading a large delimited source in batches, without ever holding
+ * more than one batch in memory - the shape of every "import a file
+ * into the database" job.
+ */
+function sourceLines(string $text): Generator
+{
+    $handle = fopen(''php://memory'', ''r+'');
+    try {
+        fwrite($handle, $text);
+        rewind($handle);
+        while (($line = fgets($handle)) !== false) {
+            $line = rtrim($line);
+            if ($line !== '''') {
+                yield $line;
+            }
+        }
+    } finally {
+        fclose($handle);
+        echo ''[handle closed]'', PHP_EOL;
+    }
+}
+
+function records(iterable $lines): Generator
+{
+    $lineNumber = 0;
+    foreach ($lines as $line) {
+        $lineNumber++;
+        $parts = array_map(''trim'', explode(''|'', $line));
+        if (count($parts) !== 3) {
+            continue;
+        }
+        [$sku, $name, $pence] = $parts;
+        if (!ctype_digit($pence)) {
+            continue;
+        }
+        yield $lineNumber => [''sku'' => $sku, ''name'' => $name, ''pence'' => (int) $pence];
+    }
+}
+
+function batched(iterable $source, int $size): Generator
+{
+    $batch = [];
+    foreach ($source as $item) {
+        $batch[] = $item;
+        if (count($batch) === $size) {
+            yield $batch;
+            $batch = [];
+        }
+    }
+    if ($batch !== []) {
+        yield $batch;
+    }
+}
+
+$catalogue = <<<''TEXT''
+    CSS-01 | Selectors and the cascade | 0
+    CSS-02 | The box model             | 0
+    BAD ROW
+    CSS-03 | Colour, units and type    | 0
+    JS-01  | Values and types          | 1999
+    JS-02  | Closures                  | 2499
+    PY-01  | Values and names          | not a number
+    PY-02  | Lists and tuples          | 1299
+    TEXT;
+
+$inserted = 0;
+$batches = 0;
+
+foreach (batched(records(sourceLines($catalogue)), 3) as $batch) {
+    $batches++;
+    $skus = array_column($batch, ''sku'');
+    printf("batch %d: %d row(s) - %s%s", $batches, count($batch), implode('', '', $skus), PHP_EOL);
+    $inserted += count($batch);
+}
+
+printf("%s%d row(s) in %d batch(es)%s", PHP_EOL, $inserted, $batches, PHP_EOL);
+
+// Early exit: the finally still runs, so the handle is closed even
+// though the consumer stopped after the first batch.
+echo PHP_EOL, ''stopping early:'', PHP_EOL;
+foreach (batched(records(sourceLines($catalogue)), 3) as $batch) {
+    printf("  first batch has %d row(s)%s", count($batch), PHP_EOL);
+    break;
+}
+
+// And keys survive the pipeline, so an error can name the line.
+echo PHP_EOL, ''line numbers of the paid items:'', PHP_EOL;
+foreach (records(sourceLines($catalogue)) as $lineNumber => $record) {
+    if ($record[''pence''] > 0) {
+        printf("  line %d: %s at %s%s",
+            $lineNumber, $record[''sku''],
+            number_format($record[''pence''] / 100, 2), PHP_EOL);
+    }
+}
+```
+
+`batched` is the piece worth keeping. It takes any iterable, including an infinite one, and yields fixed-size arrays without materialising the source - which is exactly "insert a thousand rows at a time from a stream of unknown length". And because `records` yields keys, an error message can name the line it came from, which an array of values could not.
+
+## When not to use one
+
+- **The collection is small and used twice.** A generator is consumed once; a second `foreach` sees nothing.
+- **You need `count()`, sorting or random access.** None of those exist on a generator; build the array.
+- **The consumer is the same function.** If nothing else sees the sequence, a loop with an accumulator is clearer.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The second loop over a generator was empty | Generators are consumed once |
+| `iterator_to_array` lost rows | Duplicate keys; pass `false` as the second argument |
+| `count()` on a generator is a fatal error | No `Countable`; use `iterator_count` or an array |
+| A function unexpectedly returned a `Generator` | Any `yield` in the body makes it one |
+| The first `send()` skipped a value | Call `current()` first |
+| A file handle stayed open | Nothing closed the generator; put it in `finally` |
+| A pipeline did nothing | Nothing consumed it; a generator is inert |
+| Memory grew anyway | An `iterator_to_array` in the middle of the pipeline |
+
+## A check you can run
+
+```php
+<?php
+function noisy(int $n): Generator {
+    for ($i = 0; $i < $n; $i++) {
+        echo "producing $i", PHP_EOL;
+        yield $i;
+    }
+}
+
+echo ''built'', PHP_EOL;
+$gen = noisy(3);
+echo ''about to loop'', PHP_EOL;
+foreach ($gen as $value) {
+    echo "got $value", PHP_EOL;
+}
+```
+
+Nothing is produced between "built" and "about to loop", and then production and consumption alternate one at a time rather than all the producing happening first.
+
+Watching that interleaving once is what makes laziness stop being an abstract word, and it is the moment the memory numbers above stop being surprising.
 ',
-   'Producing one value at a time, and making your own type work in a foreach.',
-   2, 423,
-   '55555555-5555-4555-8555-555555555555',
+   'Producing one value at a time, and making your own type work in a foreach.', 9, 1868,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1305,110 +3362,395 @@ VALUES
   ('e0000001-0000-4000-8000-000000000069',
    'Input, Output and Staying Safe',
    'markdown',
-   '# Input, Output and Staying Safe
+   '# Escaping, Queries and Passwords
 
-Every serious PHP vulnerability is one of three mistakes: trusting input,
-building a query by pasting strings together, or printing data as markup.
-
-```php
-<?php
-// Input is a string until proven otherwise, and it may be absent, and it may
-// be an array when you expected a scalar.
-$raw = ["age" => "29", "name" => "  Aisha  ", "tags" => ["a", "b"]];
-
-$age = filter_var($raw["age"] ?? null, FILTER_VALIDATE_INT);
-var_dump($age);
-
-var_dump(filter_var("not a number", FILTER_VALIDATE_INT));   // false, not 0
-var_dump(filter_var("aisha@example.test", FILTER_VALIDATE_EMAIL));
-
-// Validate, then normalise - in that order.
-$name = trim((string) ($raw["name"] ?? ""));
-// mb_strlen on a normal server; preg_match_all here, since this build has no
-// mbstring. Either way the point is to bound the length by characters.
-if ($name === "" || preg_match_all("/./u", $name) > 100) {
-    echo "invalid name\\n";
-} else {
-    echo "name: [", $name, "]\\n";
-}
-
-// An unexpected array where a string belongs is a real attack shape.
-var_dump(is_string($raw["tags"] ?? null));
-```
+Three vulnerabilities account for most of what goes wrong in a PHP application, and all three have a one-line fix that is easier than the unsafe version. The difficulty is not the technique; it is remembering that the rule is about the *destination*.
 
 ## Escaping is about the destination
 
-There is no such thing as "safe data". There is data escaped correctly for
-where it is going.
+The same string needs different treatment depending on where it is going. There is no such thing as a "safe string" - only a string correctly encoded for one context.
 
 ```php
 <?php
-$comment = ''<script>alert("xss")</script> & "quoted" text'';
+declare(strict_types=1);
 
-// For HTML text and attributes.
-echo htmlspecialchars($comment, ENT_QUOTES | ENT_SUBSTITUTE, "UTF-8"), "\\n";
+$input = ''<script>alert("x")</script> & an ampersand'';
 
-// For a URL query value.
-echo "?q=", urlencode($comment), "\\n";
+// HTML body text
+echo htmlspecialchars($input, ENT_QUOTES | ENT_SUBSTITUTE, ''UTF-8''), PHP_EOL;
 
-// For JSON embedded in a page, the flags matter: without them a </script> in
-// the data closes the element it sits in.
-echo json_encode($comment, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), "\\n";
+// A URL query parameter
+echo ''/search?q='' . urlencode($input), PHP_EOL;
 
-// The same string escaped for HTML would be wrong inside a URL, and vice
-// versa. Escape at the point of output, never on the way in.
+// Inside a JSON document, or a JavaScript literal
+echo json_encode($input, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE), PHP_EOL;
+```
+
+Three destinations, three different outputs, and using the wrong one is a vulnerability rather than a formatting bug.
+
+The arguments to `htmlspecialchars` are not optional decoration:
+
+```php
+<?php
+declare(strict_types=1);
+
+$value = "it''s a " . chr(34) . "quote" . chr(34);
+
+echo htmlspecialchars($value), PHP_EOL;
+echo htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, ''UTF-8''), PHP_EOL;
+
+// Identical output, because ENT_QUOTES joined the default in PHP 8.1.
+// ENT_SUBSTITUTE did not, and that is the one that matters most.
+```
+
+- **`ENT_QUOTES`** escapes single quotes as well as double. It has been part of the default since PHP 8.1, which is why the two lines above agree - but say it anyway, because a codebase that runs on 8.0 or passes an explicit flag set of its own does not get it for free, and `<a title=''...''>` is injectable without it.
+- **`ENT_SUBSTITUTE`** replaces invalid UTF-8 with a replacement character. Without it, invalid input makes the function return an **empty string**, which has silently blanked many a page. This one is *not* in the default.
+- **`''UTF-8''`** is the default in PHP 8.1 and later, and naming it costs nothing.
+
+Where the escaping goes matters as much as which one:
+
+```php
+<?php
+declare(strict_types=1);
+
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, ''UTF-8'');
+}
+
+$name = ''<b>Aisha</b>'';
+$url = ''https://example.com/profile?id=7&tab=posts'';
+
+// Attribute values need quoting AND escaping.
+printf(''<a href="%s" title="%s">%s</a>%s'', e($url), e($name), e($name), PHP_EOL);
+
+// Escape at OUTPUT, not at input. Storing escaped text means you no
+// longer know what the user typed, and double-escaping follows.
+$stored = $name;                            // store the raw value
+echo e($stored), PHP_EOL;                   // escape when rendering
+echo e(e($stored)), PHP_EOL;                // what double escaping looks like
+```
+
+The one-line rule: **store raw, escape at output, escape for the destination**. A template engine that escapes by default removes the need to remember, which is most of why template engines exist.
+
+Three contexts `htmlspecialchars` does **not** cover, and where you need something else entirely:
+
+```php
+<?php
+declare(strict_types=1);
+
+$userValue = ''javascript:alert(1)'';
+
+// A URL in an href: validate the scheme, do not merely escape.
+$safe = filter_var($userValue, FILTER_VALIDATE_URL) !== false
+    && in_array(parse_url($userValue, PHP_URL_SCHEME), [''http'', ''https''], true);
+var_dump($safe);                            // false - rejected
+
+// Inside a <script> block or an event handler, HTML escaping is not
+// enough; use json_encode, or better, keep data out of script source
+// and read it from a data attribute.
+echo ''<div data-config="'',
+    htmlspecialchars(json_encode([''id'' => 7]), ENT_QUOTES, ''UTF-8''),
+    ''"></div>'', PHP_EOL;
+
+// Inside CSS, neither works. Do not interpolate user input into CSS.
 ```
 
 ## Queries take parameters, not concatenation
 
 ```php
 <?php
-// This is the vulnerability, written out so it is recognisable:
-$name = "''; DROP TABLE users; --";
-$bad = "SELECT * FROM users WHERE name = ''" . $name . "''";
-echo $bad, "\\n\\n";
+declare(strict_types=1);
 
-// A prepared statement sends the query and the values separately, so the
-// value can never be read as syntax. Shown here without a live connection:
-$sql = "SELECT id, name FROM users WHERE name = ? AND score >= ?";
-echo $sql, "\\n";
-echo "-- parameters travel apart from the statement: ", json_encode([$name, 80]), "\\n";
+$pdo = new PDO(''sqlite::memory:'', null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES => false,
+]);
 
-// The rule has no exceptions worth learning. Even a value you generated
-// yourself goes in as a parameter, because the next person to edit the line
-// will not know where it came from.
+$pdo->exec(''CREATE TABLE lessons (id INTEGER PRIMARY KEY, title TEXT, minutes INTEGER)'');
+
+$insert = $pdo->prepare(''INSERT INTO lessons (title, minutes) VALUES (:title, :minutes)'');
+foreach ([[''Selectors'', 7], [''The box model'', 7], [''Grid'', 6]] as [$title, $minutes]) {
+    $insert->execute([''title'' => $title, ''minutes'' => $minutes]);
+}
+
+// The input that breaks a concatenated query.
+$search = "'' OR 1=1 --";
+
+$statement = $pdo->prepare(''SELECT id, title FROM lessons WHERE title = :title'');
+$statement->execute([''title'' => $search]);
+$rows = $statement->fetchAll();
+printf("parameterised: %d row(s)%s", count($rows), PHP_EOL);        // 0
+
+// What concatenation would have done - shown, not executed.
+echo "concatenated:  SELECT ... WHERE title = ''" . $search . "''", PHP_EOL;
+// ...which is SELECT ... WHERE title = '''' OR 1=1 --'' and returns everything.
+
+$all = $pdo->query(''SELECT COUNT(*) AS n FROM lessons'')->fetch();
+printf("the table holds %d row(s)%s", $all[''n''], PHP_EOL);
 ```
+
+Three settings in that constructor matter:
+
+- **`ERRMODE_EXCEPTION`** - the default since PHP 8. A failing query throws instead of returning `false`.
+- **`EMULATE_PREPARES => false`** - the driver sends the query and the values separately, so the database never parses the value as SQL. With emulation on, PDO interpolates them itself, correctly but in PHP.
+- **`DEFAULT_FETCH_MODE => FETCH_ASSOC`** - no duplicate numeric keys in every row.
+
+A placeholder stands for a **value**. It cannot stand for a table name, a column name, or a sort direction - those must come from an allow-list:
+
+```php
+<?php
+declare(strict_types=1);
+
+function orderClause(string $requestedColumn, string $requestedDirection): string
+{
+    $columns = [''title'' => ''title'', ''minutes'' => ''minutes'', ''id'' => ''id''];
+    $directions = [''asc'' => ''ASC'', ''desc'' => ''DESC''];
+
+    $column = $columns[$requestedColumn] ?? ''id'';
+    $direction = $directions[strtolower($requestedDirection)] ?? ''ASC'';
+
+    return '' ORDER BY '' . $column . '' '' . $direction;
+}
+
+echo orderClause(''minutes'', ''desc''), PHP_EOL;           //  ORDER BY minutes DESC
+echo orderClause(''title; DROP TABLE lessons'', ''x''), PHP_EOL;   //  ORDER BY id ASC
+```
+
+The allow-list is a **map**, not a check. Looking the value up means the string that reaches the query was written by you, not by the request.
+
+A variable number of placeholders, for an `IN` clause:
+
+```php
+<?php
+declare(strict_types=1);
+
+$ids = [1, 2, 3];
+$placeholders = implode('','', array_fill(0, count($ids), ''?''));
+$sql = ''SELECT id FROM lessons WHERE id IN ('' . $placeholders . '')'';
+echo $sql, PHP_EOL;                     // SELECT id FROM lessons WHERE id IN (?,?,?)
+```
+
+The count comes from `count($ids)`, so the string is still built from your own characters.
 
 ## Passwords and comparisons
 
 ```php
 <?php
-// password_hash picks the algorithm, the cost and a per-password salt.
-$hash = password_hash("correct horse battery staple", PASSWORD_DEFAULT);
-echo substr($hash, 0, 7), "... (", strlen($hash), " chars)\\n";
+declare(strict_types=1);
 
-var_dump(password_verify("correct horse battery staple", $hash));
-var_dump(password_verify("wrong", $hash));
+$password = ''a-long-enough-password'';
 
-// Never == on a secret: it returns as soon as it finds a difference, and the
-// time that takes leaks the answer.
-var_dump(hash_equals("expected-token", "expected-token"));
+$hash = password_hash($password, PASSWORD_DEFAULT);
+echo substr($hash, 0, 4), ''...'', PHP_EOL;       // the algorithm prefix
+echo strlen($hash) >= 60 ? ''long enough'' : ''too short'', PHP_EOL;
 
-// Randomness for tokens comes from the cryptographic source, not from rand().
-echo bin2hex(random_bytes(8)), "\\n";
+var_dump(password_verify($password, $hash));
+var_dump(password_verify(''wrong'', $hash));
+
+// Two hashes of the same password differ - the salt is generated and
+// stored inside the hash, so there is no separate salt column.
+var_dump($hash === password_hash($password, PASSWORD_DEFAULT));
+
+// Rehash when the default algorithm or cost changes.
+if (password_needs_rehash($hash, PASSWORD_DEFAULT)) {
+    $hash = password_hash($password, PASSWORD_DEFAULT);
+}
+echo ''checked for rehash'', PHP_EOL;
 ```
 
-## What to take away
+Four rules, and each one has a famous breach behind it:
 
-- Validate input by type, and treat absence and arrays as expected cases.
-- Escape for the destination, at the moment of output.
-- Parameters, never concatenation - with no exceptions.
-- `password_hash` and `password_verify`; never your own hashing.
-- `hash_equals` for secrets, `random_bytes` for tokens.
+- **Never `md5` or `sha1` a password.** They are fast, which is exactly wrong: a GPU tries billions a second.
+- **Never write your own salt handling.** `password_hash` generates one and stores it in the output.
+- **Always `password_verify`** rather than comparing hashes yourself.
+- **Store the whole output string**, not just part of it - the algorithm, cost and salt are all in there.
+
+For comparing any other secret - a token, a signature, an API key - the comparison itself must not leak timing:
+
+```php
+<?php
+declare(strict_types=1);
+
+$expected = bin2hex(random_bytes(16));
+$provided = $expected;
+
+var_dump($expected === $provided);                  // leaks WHERE it differs
+var_dump(hash_equals($expected, $provided));        // constant time
+
+// Tokens come from the CSPRNG, never from rand() or uniqid().
+$token = bin2hex(random_bytes(32));
+echo strlen($token), PHP_EOL;                       // 64 hex characters
+var_dump(random_int(1, 6) >= 1);
+```
+
+`===` on strings returns as soon as it finds a difference, so the time it takes reveals how many leading characters were right. `hash_equals` compares every byte regardless. It matters for anything an attacker can submit repeatedly.
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+final class Lessons
+{
+    private const array SORTABLE = [''title'' => ''title'', ''minutes'' => ''minutes'', ''id'' => ''id''];
+
+    public function __construct(private readonly PDO $pdo) {}
+
+    public static function inMemory(): self
+    {
+        $pdo = new PDO(''sqlite::memory:'', null, null, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ]);
+        $pdo->exec(''CREATE TABLE lessons (
+            id INTEGER PRIMARY KEY, title TEXT NOT NULL, minutes INTEGER NOT NULL)'');
+        return new self($pdo);
+    }
+
+    public function add(string $title, int $minutes): int
+    {
+        $statement = $this->pdo->prepare(
+            ''INSERT INTO lessons (title, minutes) VALUES (:title, :minutes)'');
+        $statement->execute([''title'' => $title, ''minutes'' => $minutes]);
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /** @return list<array{id:int,title:string,minutes:int}> */
+    public function search(string $term, string $sort = ''id'', string $direction = ''asc''): array
+    {
+        // The VALUE is a parameter; the COLUMN comes from an allow-list.
+        $column = self::SORTABLE[$sort] ?? ''id'';
+        $order = strtolower($direction) === ''desc'' ? ''DESC'' : ''ASC'';
+
+        $statement = $this->pdo->prepare(
+            ''SELECT id, title, minutes FROM lessons
+             WHERE title LIKE :term
+             ORDER BY '' . $column . '' '' . $order);
+        $statement->execute([''term'' => ''%'' . $term . ''%'']);
+
+        return $statement->fetchAll();
+    }
+
+    /** @param list<int> $ids */
+    public function byIds(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode('','', array_fill(0, count($ids), ''?''));
+        $statement = $this->pdo->prepare(
+            ''SELECT id, title FROM lessons WHERE id IN ('' . $placeholders . '')'');
+        $statement->execute(array_values($ids));
+        return $statement->fetchAll();
+    }
+}
+
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, ''UTF-8'');
+}
+
+$lessons = Lessons::inMemory();
+$lessons->add(''Selectors & the cascade'', 7);
+$lessons->add(''The <box> model'', 7);
+$lessons->add("Grid''s two dimensions", 6);
+$lessons->add(''Container queries'', 6);
+
+// A hostile search term and a hostile sort column, both handled.
+$term = "'' OR 1=1 --";
+printf("hostile search returned %d row(s)%s", count($lessons->search($term)), PHP_EOL);
+
+$rows = $lessons->search('''', sort: ''title; DROP TABLE lessons'', direction: ''desc'');
+printf("hostile sort fell back, %d row(s)%s%s", count($rows), PHP_EOL, PHP_EOL);
+
+// Rendering: escape at output, for the destination.
+echo ''<ul>'', PHP_EOL;
+foreach ($lessons->search('''', sort: ''minutes'', direction: ''asc'') as $row) {
+    printf(''  <li><a href="/lessons?id=%s" title="%s">%s</a> - %d min</li>%s'',
+        urlencode((string) $row[''id'']),
+        e($row[''title'']),
+        e($row[''title'']),
+        $row[''minutes''],
+        PHP_EOL);
+}
+echo ''</ul>'', PHP_EOL;
+
+// A variable IN clause, still fully parameterised.
+print_r(array_column($lessons->byIds([1, 3]), ''title''));
+
+// And a session token plus its constant-time comparison.
+$issued = bin2hex(random_bytes(32));
+$submitted = $issued;
+printf("%stoken length %d, matches: %s%s",
+    PHP_EOL, strlen($issued), hash_equals($issued, $submitted) ? ''yes'' : ''no'', PHP_EOL);
+var_dump(hash_equals($issued, substr($issued, 0, -1) . ''0''));
+```
+
+Three separations are doing all the work. Values go in as parameters and never touch the SQL string. Identifiers come from a constant map, so the only column names that reach the query are ones written in the source. And escaping happens at the moment of output, with the function chosen by where the value is going - `e()` inside an attribute, `urlencode` inside a URL.
+
+## The other headers and settings
+
+```php
+<?php
+declare(strict_types=1);
+
+// Set before any output. Shown as strings here because headers cannot
+// be sent from a CLI script.
+$headers = [
+    ''Content-Security-Policy'' => "default-src ''self''; object-src ''none''",
+    ''X-Content-Type-Options'' => ''nosniff'',
+    ''Referrer-Policy'' => ''strict-origin-when-cross-origin'',
+    ''Strict-Transport-Security'' => ''max-age=31536000; includeSubDomains'',
+];
+foreach ($headers as $name => $value) {
+    printf("%-28s %s%s", $name . '':'', $value, PHP_EOL);
+}
+
+// Session cookie settings, before session_start():
+$cookieSettings = [
+    ''httponly'' => true,     // not readable from JavaScript
+    ''secure'' => true,       // HTTPS only
+    ''samesite'' => ''Lax'',    // not sent on cross-site POSTs
+];
+print_r($cookieSettings);
+
+// And a CSRF token, which is a random value in the session compared
+// with hash_equals on every state-changing request.
+$csrf = bin2hex(random_bytes(32));
+var_dump(hash_equals($csrf, $csrf));
+```
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A page went blank after an accented character | `htmlspecialchars` without `ENT_SUBSTITUTE` |
+| An attribute was injectable | Missing `ENT_QUOTES` |
+| `&amp;amp;` appeared in the output | Escaped at input and again at output |
+| A query returned every row | Concatenated input; use a placeholder |
+| A placeholder in `ORDER BY` did nothing | Placeholders are values; use an allow-list |
+| A query failed and returned `false` | `ERRMODE_EXCEPTION` not set |
+| Two users had the same password hash | A fixed salt, or a raw digest; use `password_hash` |
+| A token comparison leaked timing | `===` on a secret; use `hash_equals` |
+
+## A check you can run
+
+```php
+<?php
+$bad = ''caf'' . chr(0xe9);            // a latin-1 byte, not valid UTF-8
+var_dump(htmlspecialchars($bad));
+var_dump(htmlspecialchars($bad, ENT_QUOTES | ENT_SUBSTITUTE, ''UTF-8''));
+```
+
+The first returns an **empty string**. Not an error, not a warning - an empty string, which in a template means the user''s name silently disappears from the page and nobody can reproduce it.
+
+The second returns the text with a replacement character where the invalid byte was. Those two flags are the difference between a rendering bug you will never find and one that is visible on the page.
 ',
-   'Validating input, escaping for the destination, and queries that take parameters.',
-   3, 554,
-   '55555555-5555-4555-8555-555555555555',
+   'Validating input, escaping for the destination, and queries that take parameters.', 10, 2037,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1427,133 +3769,396 @@ VALUES
    'markdown',
    '# Attributes and Reflection
 
-An attribute is structured metadata attached to a declaration. Reflection is
-how you read it back. Together they are how modern PHP frameworks configure
-themselves without a configuration file.
+An attribute is structured metadata attached to a class, method, property or parameter, readable at run time through reflection. It replaced docblock annotations, which were comments that a library had to parse with regular expressions.
+
+## Declaring and reading one
 
 ```php
 <?php
+declare(strict_types=1);
+
 #[Attribute(Attribute::TARGET_METHOD)]
 final class Route
 {
     public function __construct(
         public readonly string $method,
         public readonly string $path,
+        public readonly ?string $name = null,
     ) {}
 }
 
-final class ArticleController
+final class LessonController
 {
-    #[Route("GET", "/articles")]
-    public function index(): string { return "list"; }
+    #[Route(''GET'', ''/lessons'', name: ''lessons.index'')]
+    public function index(): string { return ''all lessons''; }
 
-    #[Route("GET", "/articles/{id}")]
-    public function show(string $id): string { return "one: {$id}"; }
+    #[Route(''GET'', ''/lessons/{id}'', name: ''lessons.show'')]
+    public function show(int $id): string { return "lesson $id"; }
 
-    public function notARoute(): string { return "hidden"; }
+    #[Route(''POST'', ''/lessons'')]
+    public function store(): string { return ''created''; }
+
+    public function notARoute(): string { return ''ignored''; }
 }
 
-// Reading them back is ordinary code, not magic.
-$class = new ReflectionClass(ArticleController::class);
+$reflection = new ReflectionClass(LessonController::class);
 
-foreach ($class->getMethods() as $method) {
+foreach ($reflection->getMethods() as $method) {
     foreach ($method->getAttributes(Route::class) as $attribute) {
+        // newInstance() constructs the attribute class, with its
+        // arguments type-checked exactly like any other constructor.
         $route = $attribute->newInstance();
-        printf("%-6s %-20s -> %s\\n", $route->method, $route->path, $method->getName());
+        printf("%-6s %-20s -> %s::%s  (%s)%s",
+            $route->method, $route->path,
+            $reflection->getShortName(), $method->getName(),
+            $route->name ?? ''unnamed'', PHP_EOL);
     }
 }
 ```
 
-An attribute does nothing on its own. It is inert until something reflects over
-it - which is exactly why it is safe to add.
+Three properties make attributes better than the docblocks they replaced. They are **syntax**, so a typo in the attribute name is a fatal error rather than a silently ignored comment. They are **constructed**, so their arguments go through the same type checks as any constructor. And they are **inert** - PHP does not execute an attribute unless something asks for it, so declaring one costs nothing at run time.
+
+The `#[Attribute(...)]` declaration takes flags saying where it may be used:
+
+```php
+<?php
+declare(strict_types=1);
+
+#[Attribute(Attribute::TARGET_PROPERTY | Attribute::IS_REPEATABLE)]
+final class Validate
+{
+    public function __construct(
+        public readonly string $rule,
+        public readonly int|string|null $value = null,
+    ) {}
+}
+
+final class Registration
+{
+    #[Validate(''required'')]
+    #[Validate(''email'')]
+    public string $email = '''';
+
+    #[Validate(''required'')]
+    #[Validate(''minLength'', 8)]
+    public string $password = '''';
+
+    #[Validate(''range'', ''1-120'')]
+    public int $age = 0;
+
+    public string $notValidated = '''';
+}
+
+$reflection = new ReflectionClass(Registration::class);
+foreach ($reflection->getProperties() as $property) {
+    $rules = array_map(
+        fn (ReflectionAttribute $a): Validate => $a->newInstance(),
+        $property->getAttributes(Validate::class),
+    );
+    if ($rules === []) {
+        continue;
+    }
+    printf("%-14s %s%s", $property->getName(),
+        implode('', '', array_map(
+            fn (Validate $v): string => $v->rule . ($v->value === null ? '''' : ''('' . $v->value . '')''),
+            $rules)),
+        PHP_EOL);
+}
+```
+
+Without `IS_REPEATABLE`, applying the same attribute twice is a fatal error. The targets are `TARGET_CLASS`, `TARGET_FUNCTION`, `TARGET_METHOD`, `TARGET_PROPERTY`, `TARGET_CLASS_CONSTANT`, `TARGET_PARAMETER` and `TARGET_ALL`.
 
 ## Reflection for real work
 
+Reflection is the API attributes are read through, and it does a good deal more than that.
+
 ```php
 <?php
-final class Mailer
+declare(strict_types=1);
+
+final class Service
 {
-    public function __construct(private string $from) {}
-    public function send(string $to, string $subject): bool { return true; }
+    public function __construct(
+        private readonly string $name,
+        private readonly int $retries = 3,
+    ) {}
+
+    public function describe(string $prefix = '''', ?int $limit = null): string
+    {
+        return $prefix . $this->name . ''/'' . ($limit ?? $this->retries);
+    }
 }
 
-$class = new ReflectionClass(Mailer::class);
+$class = new ReflectionClass(Service::class);
 
-echo $class->getName(), " is ", $class->isFinal() ? "final" : "open", "\\n";
+echo $class->getShortName(), PHP_EOL;
+var_dump($class->isFinal(), $class->isInstantiable());
 
-foreach ($class->getMethod("send")->getParameters() as $parameter) {
-    printf("  %s: %s%s\\n",
+$constructor = $class->getConstructor();
+foreach ($constructor?->getParameters() ?? [] as $parameter) {
+    printf("  %s: %s%s%s",
         $parameter->getName(),
         (string) $parameter->getType(),
-        $parameter->isOptional() ? " (optional)" : "");
+        $parameter->isDefaultValueAvailable()
+            ? '' = '' . var_export($parameter->getDefaultValue(), true) : '''',
+        PHP_EOL);
 }
 
-// A minimal container: look at the constructor and build what it asks for.
-function make(string $className, array $scalars = []): object
-{
-    $constructor = (new ReflectionClass($className))->getConstructor();
-    if ($constructor === null) {
-        return new $className();
-    }
+$method = $class->getMethod(''describe'');
+printf("describe() returns %s and takes %d parameter(s), %d required%s",
+    (string) $method->getReturnType(),
+    $method->getNumberOfParameters(),
+    $method->getNumberOfRequiredParameters(),
+    PHP_EOL);
 
-    $arguments = [];
-    foreach ($constructor->getParameters() as $parameter) {
-        $name = $parameter->getName();
-        $type = $parameter->getType();
-
-        if (array_key_exists($name, $scalars)) {
-            $arguments[] = $scalars[$name];
-        } elseif ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
-            $arguments[] = make($type->getName());
-        } elseif ($parameter->isDefaultValueAvailable()) {
-            $arguments[] = $parameter->getDefaultValue();
-        } else {
-            throw new RuntimeException("cannot resolve \\${$name}");
-        }
-    }
-
-    return new $className(...$arguments);
-}
-
-$mailer = make(Mailer::class, ["from" => "hello@example.test"]);
-var_dump($mailer instanceof Mailer);
+// Constructing from reflection, which is what a container does.
+$service = $class->newInstanceArgs([''content'', 5]);
+echo $service->describe(''svc:''), PHP_EOL;           // svc:content/5
 ```
+
+That constructor loop is the core of every dependency-injection container: read the parameters, resolve each type to an instance, call `newInstanceArgs`. Everything else a container does is caching and error messages.
+
+Reflection can also reach private state, which is why it is the tool of last resort:
+
+```php
+<?php
+declare(strict_types=1);
+
+final class Secretive
+{
+    private string $hidden = ''not for you'';
+}
+
+$property = new ReflectionProperty(Secretive::class, ''hidden'');
+echo $property->getValue(new Secretive()), PHP_EOL;     // not for you
+```
+
+Since PHP 8.1, `setAccessible(true)` is no longer required. That is convenient and it is also a reminder: `private` is a design statement, not a security boundary.
 
 ## The cost
 
-Reflection reads structure at runtime, so it is slower than a direct call and
-invisible to a static analyser. Frameworks pay that cost once at boot and cache
-the result. Reaching for it inside a loop is how a fast application becomes a
-slow one.
+Reflection is slow relative to ordinary code, and attributes are read through reflection. The numbers matter more than the principle:
 
 ```php
 <?php
-final class Point { public function __construct(public int $x = 1, public int $y = 2) {} }
+declare(strict_types=1);
 
-$rounds = 20000;
+#[Attribute(Attribute::TARGET_METHOD)]
+final class Marker {}
 
-$t = microtime(true);
-for ($i = 0; $i < $rounds; $i++) { new Point(); }
-$direct = microtime(true) - $t;
+final class Subject
+{
+    #[Marker] public function nothing(): void {}
+}
 
-$reflection = new ReflectionClass(Point::class);
-$t = microtime(true);
-for ($i = 0; $i < $rounds; $i++) { $reflection->newInstance(); }
-$reflected = microtime(true) - $t;
+$iterations = 20000;
 
-printf("direct     %.4fs\\n", $direct);
-printf("reflection %.4fs (%.1fx)\\n", $reflected, $reflected / max($direct, 1e-9));
+$start = hrtime(true);
+for ($i = 0; $i < $iterations; $i++) {
+    $class = new ReflectionClass(Subject::class);
+    $class->getMethods();
+}
+$reflected = (hrtime(true) - $start) / 1e6;
+
+$start = hrtime(true);
+for ($i = 0; $i < $iterations; $i++) {
+    get_class_methods(Subject::class);
+}
+$direct = (hrtime(true) - $start) / 1e6;
+
+printf("reflection: %.1fms%s", $reflected, PHP_EOL);
+printf("direct:     %.1fms%s", $direct, PHP_EOL);
+var_dump($reflected > $direct);
 ```
 
-## What to take away
+The rule that follows: **read attributes once, cache the result**. Every framework that uses them compiles the metadata into a plain PHP array at build time, and the production code never calls reflection at all.
 
-- An attribute is inert metadata; something must reflect over it to matter.
-- Reflection turns a constructor signature into a build plan.
-- It is slower and invisible to static analysis - do it once and cache it.
+```php
+<?php
+declare(strict_types=1);
+
+// The shape of that cache - a plain array, written by a build step,
+// loaded by opcache, and containing no reflection at run time.
+$compiledRoutes = [
+    [''GET'', ''/lessons'', ''LessonController'', ''index''],
+    [''GET'', ''/lessons/{id}'', ''LessonController'', ''show''],
+    [''POST'', ''/lessons'', ''LessonController'', ''store''],
+];
+
+foreach ($compiledRoutes as [$method, $path, $class, $action]) {
+    printf("%-6s %-20s %s::%s%s", $method, $path, $class, $action, PHP_EOL);
+}
+```
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+#[Attribute(Attribute::TARGET_PROPERTY | Attribute::IS_REPEATABLE)]
+final class Rule
+{
+    public function __construct(
+        public readonly string $name,
+        public readonly int|string|null $argument = null,
+        public readonly ?string $message = null,
+    ) {}
+}
+
+final class Validator
+{
+    /** @var array<class-string, array<string, list<Rule>>> */
+    private static array $cache = [];
+
+    /** @return list<string> */
+    public function validate(object $subject): array
+    {
+        $errors = [];
+
+        foreach ($this->rulesFor($subject::class) as $property => $rules) {
+            $value = (new ReflectionProperty($subject::class, $property))->getValue($subject);
+            foreach ($rules as $rule) {
+                $problem = $this->check($rule, $value);
+                if ($problem !== null) {
+                    $errors[] = $rule->message ?? ($property . '' '' . $problem);
+                }
+            }
+        }
+
+        return $errors;
+    }
+
+    /** @return array<string, list<Rule>> */
+    private function rulesFor(string $class): array
+    {
+        // Read reflection ONCE per class, then never again.
+        if (isset(self::$cache[$class])) {
+            return self::$cache[$class];
+        }
+
+        $rules = [];
+        foreach ((new ReflectionClass($class))->getProperties() as $property) {
+            $attributes = $property->getAttributes(Rule::class);
+            if ($attributes === []) {
+                continue;
+            }
+            $rules[$property->getName()] = array_map(
+                fn (ReflectionAttribute $a): Rule => $a->newInstance(),
+                $attributes,
+            );
+        }
+
+        return self::$cache[$class] = $rules;
+    }
+
+    private function check(Rule $rule, mixed $value): ?string
+    {
+        return match ($rule->name) {
+            ''required'' => ($value === null || $value === '''' || $value === [])
+                ? ''is required'' : null,
+            ''email'' => (is_string($value) && $value !== ''''
+                && filter_var($value, FILTER_VALIDATE_EMAIL) === false)
+                ? ''is not a valid address'' : null,
+            ''minLength'' => (is_string($value) && mb_strlen($value) < (int) $rule->argument)
+                ? ''must be at least '' . $rule->argument . '' characters'' : null,
+            ''min'' => (is_int($value) && $value < (int) $rule->argument)
+                ? ''must be at least '' . $rule->argument : null,
+            ''max'' => (is_int($value) && $value > (int) $rule->argument)
+                ? ''must be at most '' . $rule->argument : null,
+            default => throw new InvalidArgumentException(''unknown rule '' . $rule->name),
+        };
+    }
+}
+
+final class Registration
+{
+    public function __construct(
+        #[Rule(''required'')]
+        #[Rule(''email'')]
+        public string $email = '''',
+
+        #[Rule(''required'')]
+        #[Rule(''minLength'', 8, ''the password is too short'')]
+        public string $password = '''',
+
+        #[Rule(''min'', 13)]
+        #[Rule(''max'', 120)]
+        public int $age = 0,
+
+        public string $referrer = '''',
+    ) {}
+}
+
+$validator = new Validator();
+
+$cases = [
+    new Registration(''aisha@example.com'', ''a-long-enough-password'', 29),
+    new Registration('''', ''short'', 7),
+    new Registration(''not-an-address'', ''another-good-one'', 150),
+];
+
+foreach ($cases as $index => $registration) {
+    $errors = $validator->validate($registration);
+    printf("case %d: %s%s", $index + 1,
+        $errors === [] ? ''valid'' : count($errors) . '' problem(s)'', PHP_EOL);
+    foreach ($errors as $error) {
+        printf("   - %s%s", $error, PHP_EOL);
+    }
+}
+
+// The rules live beside the fields they describe, which is the whole
+// argument for attributes - and the cache means reflection ran once
+// for the class rather than once per object.
+printf("%sreflection ran for %d class(es)%s", PHP_EOL, 1, PHP_EOL);
+```
+
+Three design points. The rules sit next to the properties they constrain, so adding a field and forgetting its validation is visible in one place rather than two. The attribute arguments go through a real constructor, so `#[Rule(''minLength'', ''eight'')]` would be a `TypeError` at the moment the attribute is instantiated. And `rulesFor` caches per class, so a thousand registrations cost one reflection pass.
+
+## When not to
+
+- **For something a method could express.** A `#[Deprecated]` marker is fine; a `#[Calculate(''price * 1.2'')]` that gets `eval`ed is a language inside a language.
+- **In a hot path without a cache.** Reflection in a loop over ten thousand rows is a measurable cost for no benefit.
+- **When the metadata is not about the code.** Configuration that changes per environment belongs in configuration, not compiled into the class.
+
+Attributes are at their best describing something intrinsic to the code they sit on: a route, a validation rule, a serialised name, an ORM column. That is metadata that belongs with the declaration and would otherwise live in a file far away that nobody updates.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `getAttributes()` returned nothing | Filter class mismatch, or the attribute is on a parent |
+| "Attribute cannot be applied here" | Wrong `TARGET_*` flag |
+| "Cannot be repeated" | Missing `IS_REPEATABLE` |
+| An attribute class was not found | It must be autoloadable, like any class |
+| Reflection is slow in production | Cache the parsed metadata; do not reflect per request |
+| `newInstance()` threw a `TypeError` | The arguments do not match the constructor - which is the point |
+| Private state was readable | Reflection bypasses visibility by design |
+| The attribute had no effect | Nothing read it; attributes are inert until asked for |
+
+## A check you can run
+
+```php
+<?php
+#[Attribute]
+final class Marker {}
+
+final class Thing {
+    #[Marker]
+    public function one(): void {}
+}
+
+$method = new ReflectionMethod(Thing::class, ''one'');
+var_dump(count($method->getAttributes()));
+var_dump(count($method->getAttributes(Marker::class)));
+var_dump(count($method->getAttributes(''NoSuchAttribute'')));
+```
+
+The third line prints `0` without complaining, because filtering by a class that does not exist is simply a filter that matches nothing.
+
+That silence is the thing to remember about attributes: nothing validates that anyone reads yours. An attribute with a typo in its arguments fails loudly at `newInstance()`, but an attribute nobody ever calls `getAttributes()` for is a comment with better syntax highlighting.
 ',
-   'Metadata that does nothing until something reads it, and what reading it costs.',
-   2, 481,
-   '55555555-5555-4555-8555-555555555555',
+   'Metadata that does nothing until something reads it, and what reading it costs.', 8, 1672,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1570,131 +4175,407 @@ VALUES
   ('e0000001-0000-4000-8000-00000000006b',
    'Performance and Memory',
    'markdown',
-   '# Performance and Memory
+   '# Making It Fast
 
-Most PHP performance work is not micro-optimisation. It is avoiding the three
-things that actually cost: loading everything into memory, doing work in a loop
-that belongs outside it, and asking the database N times instead of once.
+Most slow PHP is not slow because of PHP. It is slow because of a query inside a loop, work repeated that could have been done once, or an array built by copying. This lesson is about finding which, and the three fixes that cover almost all of it.
+
+## Measure first
 
 ```php
 <?php
-// Building a big array holds every element at once.
-$before = memory_get_usage();
-$all = range(1, 200000);
-$peak = memory_get_usage() - $before;
-printf("array of 200k ints: %s KB\\n", number_format($peak / 1024));
+declare(strict_types=1);
 
-unset($all);
-
-// A generator holds one element at a time.
-function counted(int $to): Generator
+function timed(string $label, callable $work): float
 {
-    for ($i = 1; $i <= $to; $i++) yield $i;
+    $start = hrtime(true);
+    $work();
+    $ms = (hrtime(true) - $start) / 1e6;
+    printf("%-22s %7.2fms%s", $label, $ms, PHP_EOL);
+    return $ms;
 }
 
-$before = memory_get_usage();
-$total = 0;
-foreach (counted(200000) as $n) { $total += $n; }
-printf("same sum via generator: %s KB (total %s)\\n",
-    number_format((memory_get_usage() - $before) / 1024), number_format($total));
+$rows = range(1, 50000);
+
+$concat = timed(''string concatenation'', function () use ($rows): void {
+    $out = '''';
+    foreach ($rows as $n) {
+        $out .= (string) $n . '','';
+    }
+});
+
+$implode = timed(''implode'', function () use ($rows): void {
+    $out = implode('','', $rows);
+});
+
+var_dump($implode < $concat);
 ```
+
+`hrtime(true)` gives nanoseconds from a monotonic clock, which is what you want - `microtime()` can move backwards when the system clock is adjusted.
+
+For anything more than one measurement, use a profiler rather than scattering timers. Xdebug''s profiler or an APM agent will tell you where the time went without you guessing where to look; a timer tells you only about the thing you already suspected.
+
+And remember the ordering: **measure, change one thing, measure again.** A change that was not measured is a belief.
 
 ## The N+1 problem
 
-The most expensive line in a slow application is usually a query inside a loop.
+This is the single most common performance bug in applications that talk to a database, and it dwarfs everything else in this lesson.
 
 ```php
 <?php
-// Pretend these are queries.
-$queries = 0;
-$fetchOne = function (int $id) use (&$queries) { $queries++; return ["id" => $id, "name" => "user{$id}"]; };
-$fetchMany = function (array $ids) use (&$queries) {
+declare(strict_types=1);
+
+$pdo = new PDO(''sqlite::memory:'', null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+]);
+$pdo->exec(''CREATE TABLE courses (id INTEGER PRIMARY KEY, title TEXT)'');
+$pdo->exec(''CREATE TABLE lessons (id INTEGER PRIMARY KEY, course_id INTEGER, title TEXT)'');
+
+for ($c = 1; $c <= 20; $c++) {
+    $pdo->prepare(''INSERT INTO courses (id, title) VALUES (?, ?)'')
+        ->execute([$c, ''Course '' . $c]);
+    for ($l = 1; $l <= 10; $l++) {
+        $pdo->prepare(''INSERT INTO lessons (course_id, title) VALUES (?, ?)'')
+            ->execute([$c, ''Lesson '' . $c . ''.'' . $l]);
+    }
+}
+
+$courses = $pdo->query(''SELECT id, title FROM courses'')->fetchAll();
+
+// N+1: one query for the courses, then one PER COURSE.
+$queries = 1;
+$start = hrtime(true);
+foreach ($courses as &$course) {
+    $statement = $pdo->prepare(''SELECT COUNT(*) AS n FROM lessons WHERE course_id = ?'');
+    $statement->execute([$course[''id'']]);
+    $course[''lessons''] = (int) $statement->fetch()[''n''];
     $queries++;
-    return array_map(fn($id) => ["id" => $id, "name" => "user{$id}"], $ids);
-};
+}
+unset($course);
+$naiveMs = (hrtime(true) - $start) / 1e6;
+printf("N+1:   %d queries, %.2fms%s", $queries, $naiveMs, PHP_EOL);
 
-$ids = range(1, 50);
+// Two queries, whatever the number of courses.
+$start = hrtime(true);
+$counts = [];
+foreach ($pdo->query(''SELECT course_id, COUNT(*) AS n FROM lessons GROUP BY course_id'') as $row) {
+    $counts[(int) $row[''course_id'']] = (int) $row[''n''];
+}
+$courses = $pdo->query(''SELECT id, title FROM courses'')->fetchAll();
+foreach ($courses as &$course) {
+    $course[''lessons''] = $counts[$course[''id'']] ?? 0;
+}
+unset($course);
+$batchedMs = (hrtime(true) - $start) / 1e6;
+printf("batch: 2 queries, %.2fms%s", $batchedMs, PHP_EOL);
 
-$queries = 0;
-foreach ($ids as $id) { $fetchOne($id); }
-echo "one at a time: {$queries} queries\\n";
+var_dump($batchedMs < $naiveMs);
+printf("total lessons: %d%s", array_sum(array_column($courses, ''lessons'')), PHP_EOL);
+```
 
-$queries = 0;
-$fetchMany($ids);
-echo "batched:       {$queries} query\\n";
+Against an in-memory SQLite database the difference is milliseconds. Against a database over a network, each query costs a round trip - a millisecond at best - so twenty courses is twenty milliseconds and two thousand is two seconds. The shape of the fix is always the same: **collect the ids, fetch in one query, index by id in PHP**.
 
-// The fix is never a faster loop. It is fewer round trips.
+```php
+<?php
+declare(strict_types=1);
+
+// The general shape, for a one-to-many relationship.
+$ids = [1, 2, 3];
+$placeholders = implode('','', array_fill(0, count($ids), ''?''));
+$sql = ''SELECT course_id, id, title FROM lessons WHERE course_id IN ('' . $placeholders . '')'';
+
+echo $sql, PHP_EOL;
+
+// Then group in PHP, which is cheap:
+$rows = [
+    [''course_id'' => 1, ''id'' => 10, ''title'' => ''a''],
+    [''course_id'' => 1, ''id'' => 11, ''title'' => ''b''],
+    [''course_id'' => 2, ''id'' => 12, ''title'' => ''c''],
+];
+$grouped = [];
+foreach ($rows as $row) {
+    $grouped[$row[''course_id'']][] = $row;
+}
+print_r(array_map(''count'', $grouped));
 ```
 
 ## Work that belongs outside the loop
 
 ```php
 <?php
-$words = array_map(fn($n) => "word{$n}", range(1, 20000));
+declare(strict_types=1);
 
-$t = microtime(true);
+$rows = range(1, 20000);
+
+$start = hrtime(true);
 $out = [];
-for ($i = 0; $i < count($words); $i++) {          // count() every iteration
-    $out[] = strtoupper($words[$i]);
+foreach ($rows as $row) {
+    $formatter = new NumberFormatter(''en_GB'', NumberFormatter::DECIMAL);  // built 20000 times
+    $out[] = $formatter->format($row);
 }
-$slow = microtime(true) - $t;
+$inside = (hrtime(true) - $start) / 1e6;
 
-$t = microtime(true);
+$start = hrtime(true);
+$formatter = new NumberFormatter(''en_GB'', NumberFormatter::DECIMAL);      // once
 $out = [];
-$total = count($words);                            // once
-for ($i = 0; $i < $total; $i++) {
-    $out[] = strtoupper($words[$i]);
+foreach ($rows as $row) {
+    $out[] = $formatter->format($row);
 }
-$fast = microtime(true) - $t;
+$outside = (hrtime(true) - $start) / 1e6;
 
-printf("count() in the condition: %.4fs\\n", $slow);
-printf("hoisted out:              %.4fs\\n", $fast);
-
-// And the version that says what it means, which is also fast:
-$t = microtime(true);
-$out = array_map("strtoupper", $words);
-printf("array_map:                %.4fs\\n", microtime(true) - $t);
+printf("built inside:  %7.2fms%s", $inside, PHP_EOL);
+printf("built outside: %7.2fms%s", $outside, PHP_EOL);
+var_dump($outside < $inside);
 ```
+
+The same applies to a prepared statement, a compiled pattern, a configuration lookup, and `count()` on an array that is not changing. The rule: **anything whose result does not depend on the loop variable belongs before the loop.**
+
+`count()` inside a `for` header is the classic:
+
+```php
+<?php
+declare(strict_types=1);
+
+$values = range(1, 100000);
+
+$start = hrtime(true);
+for ($i = 0; $i < count($values); $i++) { }        // count() every iteration
+$recounted = (hrtime(true) - $start) / 1e6;
+
+$start = hrtime(true);
+$total = count($values);
+for ($i = 0; $i < $total; $i++) { }
+$hoisted = (hrtime(true) - $start) / 1e6;
+
+printf("recounted: %6.2fms, hoisted: %6.2fms%s", $recounted, $hoisted, PHP_EOL);
+var_dump($hoisted <= $recounted);
+```
+
+PHP''s `count()` on an array is O(1), so this one is small - but it is free to fix, and the same pattern with `strlen` on a growing string, or a method call that walks a tree, is not small at all. Better still, use `foreach`, which has neither problem.
 
 ## Strings and arrays add up
 
 ```php
 <?php
-$parts = array_map(fn($n) => "chunk{$n}", range(1, 5000));
+declare(strict_types=1);
 
-$t = microtime(true);
-$joined = "";
-foreach ($parts as $part) { $joined .= $part; }
-printf("concatenation: %.4fs (%s bytes)\\n", microtime(true) - $t, number_format(strlen($joined)));
+$parts = array_fill(0, 30000, ''segment'');
 
-$t = microtime(true);
-$joined = implode("", $parts);
-printf("implode:       %.4fs\\n", microtime(true) - $t);
+$start = hrtime(true);
+$out = '''';
+foreach ($parts as $part) {
+    $out .= $part;
+}
+$concatenated = (hrtime(true) - $start) / 1e6;
 
-// Looking something up in an array is a scan; looking it up by key is not.
-$haystack = range(1, 20000);
-$lookup = array_flip($haystack);
+$start = hrtime(true);
+$out = implode('''', $parts);
+$imploded = (hrtime(true) - $start) / 1e6;
 
-$t = microtime(true);
-for ($i = 0; $i < 2000; $i++) { in_array($i, $haystack, true); }
-printf("in_array:      %.4fs\\n", microtime(true) - $t);
-
-$t = microtime(true);
-for ($i = 0; $i < 2000; $i++) { isset($lookup[$i]); }
-printf("isset by key:  %.4fs\\n", microtime(true) - $t);
+printf("concatenated: %6.2fms%s", $concatenated, PHP_EOL);
+printf("imploded:     %6.2fms%s", $imploded, PHP_EOL);
+var_dump($imploded < $concatenated);
 ```
 
-## What to take away
+PHP''s `.=` is better than it used to be - the engine reallocates in blocks rather than copying every time - but `implode` still wins and says what it means.
 
-- Stream with a generator instead of building the whole array.
-- N+1 queries are fixed by batching, not by a faster loop.
-- Hoist invariant work out of a loop; prefer `array_map` when it reads better.
-- `implode` beats repeated concatenation; key lookup beats `in_array`.
-- Measure before optimising - these numbers change with every PHP release.
+The array equivalent is building by merging, which **is** quadratic:
+
+```php
+<?php
+declare(strict_types=1);
+
+$chunks = array_fill(0, 2000, [1, 2, 3]);
+
+$start = hrtime(true);
+$out = [];
+foreach ($chunks as $chunk) {
+    $out = array_merge($out, $chunk);       // copies everything so far
+}
+$merged = (hrtime(true) - $start) / 1e6;
+
+$start = hrtime(true);
+$out = [];
+foreach ($chunks as $chunk) {
+    foreach ($chunk as $value) {
+        $out[] = $value;                    // appends in place
+    }
+}
+$appended = (hrtime(true) - $start) / 1e6;
+
+$start = hrtime(true);
+$out = array_merge(...$chunks);             // one call, one allocation
+$spread = (hrtime(true) - $start) / 1e6;
+
+printf("merge in loop: %7.2fms%s", $merged, PHP_EOL);
+printf("append:        %7.2fms%s", $appended, PHP_EOL);
+printf("merge spread:  %7.2fms%s", $spread, PHP_EOL);
+var_dump($appended < $merged, $spread < $merged);
+```
+
+`array_merge` inside a loop is the PHP version of the spread-into-reduce bug, and it has the same cost curve: fine for ten chunks, ruinous for ten thousand.
+
+## Memory, and when to stream
+
+```php
+<?php
+declare(strict_types=1);
+
+function eager(int $n): array
+{
+    $out = [];
+    for ($i = 0; $i < $n; $i++) {
+        $out[] = [''id'' => $i, ''label'' => ''row '' . $i];
+    }
+    return $out;
+}
+
+function lazy(int $n): Generator
+{
+    for ($i = 0; $i < $n; $i++) {
+        yield [''id'' => $i, ''label'' => ''row '' . $i];
+    }
+}
+
+$before = memory_get_usage();
+$rows = eager(100000);
+$arrayBytes = memory_get_usage() - $before;
+unset($rows);
+
+$before = memory_get_usage();
+$highWater = 0;
+foreach (lazy(100000) as $row) {
+    // Current usage DURING the loop, not the peak - the peak still
+    // remembers the array above, which is the measurement mistake
+    // this example is here to avoid.
+    $highWater = max($highWater, memory_get_usage() - $before);
+}
+
+printf("array:     %s bytes%s", number_format($arrayBytes), PHP_EOL);
+printf("generator: %s bytes at its worst%s", number_format($highWater), PHP_EOL);
+var_dump($arrayBytes > 1000000, $highWater < 10000);
+```
+
+A PDO statement is itself iterable, so `foreach ($statement as $row)` streams the result set rather than buffering it - which is the difference between exporting a million rows and running out of memory.
+
+## The settings that matter more than your code
+
+Three configuration choices outweigh most micro-optimisation:
+
+- **OPcache.** Without it, every request recompiles every file. With it, the compiled bytecode is reused. It is on by default in production builds and turning it off is the single most expensive mistake available.
+- **`opcache.preload`** compiles your framework''s hot classes once at start-up.
+- **The JIT** helps compute-heavy code and does very little for typical request handling, which is dominated by I/O. Measure before enabling it.
+
+```php
+<?php
+declare(strict_types=1);
+
+printf("opcache loaded: %s%s",
+    extension_loaded(''Zend OPcache'') ? ''yes'' : ''no'', PHP_EOL);
+printf("memory limit:   %s%s", ini_get(''memory_limit''), PHP_EOL);
+printf("peak usage:     %s bytes%s", number_format(memory_get_peak_usage(true)), PHP_EOL);
+```
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+$pdo = new PDO(''sqlite::memory:'', null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+]);
+$pdo->exec(''CREATE TABLE courses (id INTEGER PRIMARY KEY, title TEXT)'');
+$pdo->exec(''CREATE TABLE lessons (id INTEGER PRIMARY KEY, course_id INTEGER, title TEXT, minutes INTEGER)'');
+
+$pdo->beginTransaction();
+$insertCourse = $pdo->prepare(''INSERT INTO courses (id, title) VALUES (?, ?)'');
+$insertLesson = $pdo->prepare(''INSERT INTO lessons (course_id, title, minutes) VALUES (?, ?, ?)'');
+for ($c = 1; $c <= 50; $c++) {
+    $insertCourse->execute([$c, ''Course '' . $c]);
+    for ($l = 1; $l <= 12; $l++) {
+        $insertLesson->execute([$c, ''Lesson '' . $c . ''.'' . $l, 5 + ($l % 6)]);
+    }
+}
+$pdo->commit();
+
+/** The slow version: a query per course, a formatter per row. */
+function naive(PDO $pdo): array
+{
+    $out = [];
+    foreach ($pdo->query(''SELECT id, title FROM courses'') as $course) {
+        $statement = $pdo->prepare(
+            ''SELECT COUNT(*) AS n, SUM(minutes) AS m FROM lessons WHERE course_id = ?'');
+        $statement->execute([$course[''id'']]);
+        $totals = $statement->fetch();
+        $formatter = new NumberFormatter(''en_GB'', NumberFormatter::DECIMAL);
+        $out[] = $course[''title''] . '': '' . $formatter->format((int) $totals[''n''])
+            . '' lessons, '' . $formatter->format((int) $totals[''m'']) . '' minutes'';
+    }
+    return $out;
+}
+
+/** The fixed version: two queries, one formatter, append rather than merge. */
+function batched(PDO $pdo): array
+{
+    $totals = [];
+    foreach ($pdo->query(
+        ''SELECT course_id, COUNT(*) AS n, SUM(minutes) AS m FROM lessons GROUP BY course_id''
+    ) as $row) {
+        $totals[(int) $row[''course_id'']] = [''n'' => (int) $row[''n''], ''m'' => (int) $row[''m'']];
+    }
+
+    $formatter = new NumberFormatter(''en_GB'', NumberFormatter::DECIMAL);
+    $out = [];
+    foreach ($pdo->query(''SELECT id, title FROM courses'') as $course) {
+        $total = $totals[(int) $course[''id'']] ?? [''n'' => 0, ''m'' => 0];
+        $out[] = $course[''title''] . '': '' . $formatter->format($total[''n''])
+            . '' lessons, '' . $formatter->format($total[''m'']) . '' minutes'';
+    }
+    return $out;
+}
+
+$start = hrtime(true);
+$slow = naive($pdo);
+$naiveMs = (hrtime(true) - $start) / 1e6;
+
+$start = hrtime(true);
+$fast = batched($pdo);
+$batchedMs = (hrtime(true) - $start) / 1e6;
+
+printf("naive:   %7.2fms, 51 queries%s", $naiveMs, PHP_EOL);
+printf("batched: %7.2fms,  2 queries%s", $batchedMs, PHP_EOL);
+printf("same result: %s%s", $slow === $fast ? ''yes'' : ''no'', PHP_EOL);
+printf("speed-up: %.1fx%s", $naiveMs / max($batchedMs, 0.001), PHP_EOL);
+
+echo PHP_EOL, $fast[0], PHP_EOL, $fast[49], PHP_EOL;
+```
+
+The two functions return identical output. One makes fifty-one queries and constructs fifty formatters; the other makes two and constructs one. That is the whole lesson, and on a real database over a network the gap is a hundred times wider than it looks here.
+
+Note the transaction around the inserts: six hundred inserts committed individually would each be a separate durability fence. Wrapping a bulk load in one transaction is the other order-of-magnitude fix in this area.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A page is slow in proportion to the rows shown | N+1 queries; batch and index in PHP |
+| A bulk insert takes minutes | No transaction around it |
+| Memory exhausted on a large export | Buffering the whole result; stream with a generator |
+| A loop got slower as it ran | `array_merge` or string copying inside it |
+| An object is constructed thousands of times | Hoist it out of the loop |
+| Production is slower than development | OPcache disabled, or a different configuration |
+| An optimisation made no difference | It was not the bottleneck; profile first |
+| `SELECT *` is slow | Fetching columns nobody reads, including large text |
+
+## A check you can run
+
+Turn on query logging for one page of your application - PDO can be wrapped, or the database can log - and count the queries.
+
+If the number changes when you add a row to the page, you have an N+1. That single test finds more real latency than any amount of reading about micro-optimisation, and the fix is always the same: collect the ids, one query, index by id.
 ',
-   'Memory, the N+1 query, and the loop work that did not need to be in the loop.',
-   3, 529,
-   '55555555-5555-4555-8555-555555555555',
+   'Memory, the N+1 query, and the loop work that did not need to be in the loop.', 10, 2040,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1713,254 +4594,514 @@ VALUES
    'markdown',
    '# Structuring an Application
 
-The point of structure is that a change stays small. Everything below is in
-service of that: the thing you change most often should depend on the things
-that change least.
-
-```php
-<?php
-// --- The domain. No framework, no database, no HTTP. ---------------------
-final class Enrolment
-{
-    public function __construct(
-        public readonly string $learnerId,
-        public readonly string $courseId,
-        public readonly int $lessonsCompleted = 0,
-        public readonly int $lessonsTotal = 1,
-    ) {}
-
-    public function percentComplete(): int
-    {
-        return (int) round($this->lessonsCompleted / max($this->lessonsTotal, 1) * 100);
-    }
-
-    public function isComplete(): bool
-    {
-        return $this->lessonsCompleted >= $this->lessonsTotal;
-    }
-
-    public function withProgress(int $completed): static
-    {
-        if ($completed < 0 || $completed > $this->lessonsTotal) {
-            throw new InvalidArgumentException("progress out of range");
-        }
-        return new static($this->learnerId, $this->courseId, $completed, $this->lessonsTotal);
-    }
-}
-
-$enrolment = new Enrolment("l1", "c1", 3, 12);
-printf("%d%% complete, finished: %s\\n", $enrolment->percentComplete(),
-    var_export($enrolment->isComplete(), true));
-```
-
-This class can be tested with no setup at all. That is the test for whether the
-domain is really separate.
+The point of architecture is not elegance. It is that a change should touch one place, and that you can test the interesting part without a database, a network or a browser. Everything below follows from those two goals.
 
 ## The dependency points inwards
 
+Picture three rings. In the middle, the **domain**: the rules of your business, expressed as plain objects that know nothing about PHP frameworks or databases. Around it, the **application**: use cases that orchestrate the domain. Outside, the **infrastructure**: HTTP, SQL, the filesystem, the mail server.
+
+The rule is that dependencies only ever point inwards. The domain does not know about the database; the database knows about the domain.
+
 ```php
 <?php
-// Repeated so this block runs by itself, as each one does in the playground.
-final class Enrolment
+declare(strict_types=1);
+
+// ---- Domain: no framework, no SQL, no HTTP. -------------------------
+
+final readonly class LessonId
+{
+    public function __construct(public int $value)
+    {
+        if ($value < 1) {
+            throw new InvalidArgumentException(''a lesson id must be positive'');
+        }
+    }
+}
+
+final class Lesson
 {
     public function __construct(
-        public readonly string $learnerId,
-        public readonly string $courseId,
-        public readonly int $lessonsCompleted = 0,
-        public readonly int $lessonsTotal = 1,
+        public readonly LessonId $id,
+        public readonly string $title,
+        private int $minutes,
+        private bool $published = false,
     ) {}
 
-    public function percentComplete(): int
+    public function publish(): void
     {
-        return (int) round($this->lessonsCompleted / max($this->lessonsTotal, 1) * 100);
-    }
-
-    public function withProgress(int $completed): static
-    {
-        if ($completed < 0 || $completed > $this->lessonsTotal) {
-            throw new InvalidArgumentException("progress out of range");
+        if ($this->minutes < 1) {
+            throw new DomainException(''cannot publish a lesson with no content'');
         }
-        return new static($this->learnerId, $this->courseId, $completed, $this->lessonsTotal);
+        $this->published = true;
+    }
+
+    public function isPublished(): bool { return $this->published; }
+    public function minutes(): int { return $this->minutes; }
+}
+
+// The interface lives in the DOMAIN; the implementation lives outside.
+interface LessonRepository
+{
+    public function find(LessonId $id): ?Lesson;
+    public function save(Lesson $lesson): void;
+}
+
+$lesson = new Lesson(new LessonId(1), ''Selectors'', 7);
+$lesson->publish();
+var_dump($lesson->isPublished());
+
+$empty = new Lesson(new LessonId(2), ''Placeholder'', 0);
+try {
+    $empty->publish();
+} catch (DomainException $e) {
+    echo $e->getMessage(), PHP_EOL;
+}
+```
+
+Two things to notice. `LessonId` exists so that a function taking a lesson id cannot be passed a course id - a one-line class that removes a whole category of bug. And `LessonRepository` is declared next to the domain it serves, which is what makes the dependency point the right way: the database implementation depends on the domain, not the other way round.
+
+## The application layer orchestrates
+
+```php
+<?php
+declare(strict_types=1);
+
+final readonly class LessonId
+{
+    public function __construct(public int $value) {}
+}
+
+final class Lesson
+{
+    private bool $published = false;
+    public function __construct(
+        public readonly LessonId $id,
+        public readonly string $title,
+        private readonly int $minutes,
+    ) {}
+    public function publish(): void
+    {
+        if ($this->minutes < 1) {
+            throw new DomainException(''cannot publish a lesson with no content'');
+        }
+        $this->published = true;
+    }
+    public function isPublished(): bool { return $this->published; }
+}
+
+interface LessonRepository
+{
+    public function find(LessonId $id): ?Lesson;
+    public function save(Lesson $lesson): void;
+}
+
+interface Events
+{
+    public function record(string $name, array $payload): void;
+}
+
+/** One use case, one class, one public method. */
+final class PublishLesson
+{
+    public function __construct(
+        private readonly LessonRepository $lessons,
+        private readonly Events $events,
+    ) {}
+
+    public function __invoke(LessonId $id): Lesson
+    {
+        $lesson = $this->lessons->find($id)
+            ?? throw new RuntimeException(''no lesson '' . $id->value);
+
+        $lesson->publish();                 // the RULE is in the domain
+        $this->lessons->save($lesson);      // persistence is someone else''s job
+        $this->events->record(''lesson.published'', [''id'' => $id->value]);
+
+        return $lesson;
     }
 }
 
-// The interface belongs to the domain, because the domain is what needs it.
-interface Enrolments
-{
-    public function forLearner(string $learnerId): array;
-    public function save(Enrolment $enrolment): void;
-}
+// ---- Test doubles: no database, no framework. -----------------------
 
-// The implementation lives at the edge and depends on the domain, not the
-// other way round. Swapping MySQL for anything else touches only this class.
-final class InMemoryEnrolments implements Enrolments
+final class InMemoryLessons implements LessonRepository
 {
-    /** @var array<string, Enrolment> */
+    /** @var array<int, Lesson> */
     private array $rows = [];
 
-    public function forLearner(string $learnerId): array
-    {
-        return array_values(array_filter(
-            $this->rows,
-            fn(Enrolment $e) => $e->learnerId === $learnerId
-        ));
-    }
-
-    public function save(Enrolment $enrolment): void
-    {
-        $this->rows[$enrolment->learnerId . ":" . $enrolment->courseId] = $enrolment;
-    }
+    public function add(Lesson $lesson): void { $this->rows[$lesson->id->value] = $lesson; }
+    public function find(LessonId $id): ?Lesson { return $this->rows[$id->value] ?? null; }
+    public function save(Lesson $lesson): void { $this->rows[$lesson->id->value] = $lesson; }
 }
 
-// A use case: one job, stated in the name, depending only on interfaces.
-final class RecordProgress
+final class RecordedEvents implements Events
 {
-    public function __construct(private Enrolments $enrolments) {}
-
-    public function __invoke(string $learnerId, string $courseId, int $completed): Enrolment
-    {
-        foreach ($this->enrolments->forLearner($learnerId) as $enrolment) {
-            if ($enrolment->courseId === $courseId) {
-                $updated = $enrolment->withProgress($completed);
-                $this->enrolments->save($updated);
-                return $updated;
-            }
-        }
-        throw new RuntimeException("not enrolled");
-    }
+    /** @var list<string> */
+    public array $names = [];
+    public function record(string $name, array $payload): void { $this->names[] = $name; }
 }
 
-$repository = new InMemoryEnrolments();
-$repository->save(new Enrolment("l1", "c1", 0, 4));
+$lessons = new InMemoryLessons();
+$lessons->add(new Lesson(new LessonId(1), ''Selectors'', 7));
+$lessons->add(new Lesson(new LessonId(2), ''Empty'', 0));
 
-$updated = (new RecordProgress($repository))("l1", "c1", 3);
-printf("now %d%%\\n", $updated->percentComplete());
+$events = new RecordedEvents();
+$publish = new PublishLesson($lessons, $events);
+
+$published = $publish(new LessonId(1));
+var_dump($published->isPublished());
+print_r($events->names);
+
+try {
+    $publish(new LessonId(2));
+} catch (DomainException $e) {
+    echo ''refused: '', $e->getMessage(), PHP_EOL;
+}
+
+try {
+    $publish(new LessonId(99));
+} catch (RuntimeException $e) {
+    echo ''not found'', PHP_EOL;
+}
 ```
+
+That whole test ran in microseconds with no database. The use case is testable because every dependency arrived through the constructor as an interface - and the two fakes are twenty lines between them.
+
+The alternative, where `PublishLesson` constructs its own `PDO` or calls `Lesson::find()` statically, needs a database, a fixture, a truncate between tests, and gives you one failure mode you cannot easily provoke: what happens when the save fails.
 
 ## The edge stays thin
 
-Each of these blocks runs on its own in the playground, so this one repeats
-just enough of the pieces above to stand alone.
-
 ```php
 <?php
-// --- repeated from above, so this block runs by itself -------------------
-final class Enrolment
+declare(strict_types=1);
+
+final readonly class LessonId { public function __construct(public int $value) {} }
+
+final class PublishLesson
 {
-    public function __construct(
-        public readonly string $learnerId,
-        public readonly string $courseId,
-        public readonly int $lessonsCompleted = 0,
-        public readonly int $lessonsTotal = 1,
-    ) {}
-
-    public function percentComplete(): int
+    public function __invoke(LessonId $id): array
     {
-        return (int) round($this->lessonsCompleted / max($this->lessonsTotal, 1) * 100);
-    }
-
-    public function withProgress(int $completed): static
-    {
-        if ($completed < 0 || $completed > $this->lessonsTotal) {
-            throw new InvalidArgumentException("progress out of range");
+        if ($id->value === 99) {
+            throw new RuntimeException(''no lesson 99'');
         }
-        return new static($this->learnerId, $this->courseId, $completed, $this->lessonsTotal);
+        return [''id'' => $id->value, ''published'' => true];
     }
 }
 
-interface Enrolments
+/**
+ * An HTTP controller does four things and nothing else: read input,
+ * validate it into domain types, call one use case, format the result.
+ */
+final class PublishLessonController
 {
-    public function forLearner(string $learnerId): array;
-    public function save(Enrolment $enrolment): void;
-}
+    public function __construct(private readonly PublishLesson $publish) {}
 
-final class InMemoryEnrolments implements Enrolments
-{
-    private array $rows = [];
-
-    public function forLearner(string $learnerId): array
+    /** @param array<string, string> $request */
+    public function __invoke(array $request): array
     {
-        return array_values(array_filter($this->rows, fn(Enrolment $e) => $e->learnerId === $learnerId));
-    }
+        $raw = filter_var($request[''id''] ?? '''', FILTER_VALIDATE_INT,
+            [''options'' => [''min_range'' => 1]]);
 
-    public function save(Enrolment $enrolment): void
-    {
-        $this->rows[$enrolment->learnerId . ":" . $enrolment->courseId] = $enrolment;
-    }
-}
-
-final class RecordProgress
-{
-    public function __construct(private Enrolments $enrolments) {}
-
-    public function __invoke(string $learnerId, string $courseId, int $completed): Enrolment
-    {
-        foreach ($this->enrolments->forLearner($learnerId) as $enrolment) {
-            if ($enrolment->courseId === $courseId) {
-                $updated = $enrolment->withProgress($completed);
-                $this->enrolments->save($updated);
-                return $updated;
-            }
-        }
-        throw new RuntimeException("not enrolled");
-    }
-}
-// --- the part this lesson is actually about ------------------------------
-
-// A controller translates: request in, use case, response out. It holds no
-// rules of its own, which is why it needs almost no tests.
-final class ProgressController
-{
-    public function __construct(private RecordProgress $recordProgress) {}
-
-    public function update(array $request): array
-    {
-        $completed = filter_var($request["completed"] ?? null, FILTER_VALIDATE_INT);
-
-        if ($completed === false) {
-            return ["status" => 422, "body" => ["error" => "completed must be a whole number"]];
+        if ($raw === false) {
+            return [''status'' => 422, ''body'' => [''error'' => ''id must be a positive integer'']];
         }
 
         try {
-            $enrolment = ($this->recordProgress)(
-                (string) $request["learner"], (string) $request["course"], $completed
-            );
-        } catch (InvalidArgumentException $e) {
-            return ["status" => 422, "body" => ["error" => $e->getMessage()]];
-        } catch (RuntimeException $e) {
-            return ["status" => 404, "body" => ["error" => $e->getMessage()]];
+            $lesson = ($this->publish)(new LessonId($raw));
+        } catch (DomainException $e) {
+            return [''status'' => 409, ''body'' => [''error'' => $e->getMessage()]];
+        } catch (RuntimeException) {
+            return [''status'' => 404, ''body'' => [''error'' => ''not found'']];
         }
 
-        return ["status" => 200, "body" => ["percent" => $enrolment->percentComplete()]];
+        return [''status'' => 200, ''body'' => $lesson];
     }
 }
 
-$repository = new InMemoryEnrolments();
-$repository->save(new Enrolment("l1", "c1", 0, 4));
-$controller = new ProgressController(new RecordProgress($repository));
+$controller = new PublishLessonController(new PublishLesson());
 
-foreach ([
-    ["learner" => "l1", "course" => "c1", "completed" => 2],
-    ["learner" => "l1", "course" => "c1", "completed" => "many"],
-    ["learner" => "l1", "course" => "c1", "completed" => 99],
-    ["learner" => "l1", "course" => "nope", "completed" => 1],
-] as $request) {
-    $response = $controller->update($request);
-    echo $response["status"], " ", json_encode($response["body"]), "\\n";
+foreach ([[''id'' => ''1''], [''id'' => ''x''], [''id'' => ''99''], []] as $request) {
+    $response = $controller($request);
+    printf("%d %s%s", $response[''status''], json_encode($response[''body'']), PHP_EOL);
 }
 ```
 
-## What to take away
+Notice what is **not** in the controller: no SQL, no business rule, no formatting of money or dates. If the controller is longer than about twenty lines, something that belongs in a use case has leaked into it.
 
-- Put the rules in plain objects that need no setup to test.
-- Interfaces belong to the code that uses them, not to the implementation.
-- A use case does one thing and depends only on interfaces.
-- Controllers translate and delegate; they hold no rules.
-- The measure of good structure is how small a change stays.
+The payoff is that the same use case can be called from an HTTP controller, a CLI command, a queue worker and a test, with four thin adapters rather than four copies of the logic.
+
+## Where things go
+
+A layout that survives growth, and the one question each directory answers:
+
+```php
+<?php
+declare(strict_types=1);
+
+$layout = [
+    ''src/Domain''          => ''Entities, value objects, domain services, repository INTERFACES'',
+    ''src/Application''     => ''Use cases - one class per thing the system can do'',
+    ''src/Infrastructure''  => ''PDO repositories, HTTP clients, mailers, the filesystem'',
+    ''src/Http''            => ''Controllers, middleware, request and response mapping'',
+    ''config''              => ''Wiring: which implementation satisfies which interface'',
+    ''tests/Unit''          => ''Domain and application, with fakes, no I/O'',
+    ''tests/Integration''   => ''Infrastructure, against a real database'',
+];
+
+foreach ($layout as $path => $purpose) {
+    printf("%-22s %s%s", $path, $purpose, PHP_EOL);
+}
+```
+
+Two rules keep it honest. **Nothing in `Domain` may reference anything in `Infrastructure` or `Http`** - a static analysis rule can enforce that, and it is the single most valuable architectural test you can write. And **`config` is the only place that names concrete classes**, which is what makes swapping an implementation a one-line change.
+
+## The composition root
+
+```php
+<?php
+declare(strict_types=1);
+
+interface Clock { public function now(): DateTimeImmutable; }
+interface Mailer { public function send(string $to, string $subject): string; }
+
+final class SystemClock implements Clock
+{
+    public function now(): DateTimeImmutable { return new DateTimeImmutable(''now''); }
+}
+
+final class FrozenClock implements Clock
+{
+    public function __construct(private readonly DateTimeImmutable $at) {}
+    public function now(): DateTimeImmutable { return $this->at; }
+}
+
+final class LoggingMailer implements Mailer
+{
+    /** @var list<string> */
+    public array $sent = [];
+    public function send(string $to, string $subject): string
+    {
+        $this->sent[] = $to;
+        return ''queued: '' . $subject;
+    }
+}
+
+final class SendReminder
+{
+    public function __construct(
+        private readonly Clock $clock,
+        private readonly Mailer $mailer,
+    ) {}
+
+    public function __invoke(string $to): string
+    {
+        $when = $this->clock->now()->format(''D j M'');
+        return $this->mailer->send($to, ''Your lesson on '' . $when);
+    }
+}
+
+/**
+ * The composition root: the ONE place that knows which concrete class
+ * satisfies which interface. Everything else receives interfaces.
+ */
+function container(bool $testing): array
+{
+    $clock = $testing
+        ? new FrozenClock(new DateTimeImmutable(''2026-10-07 09:00:00''))
+        : new SystemClock();
+    $mailer = new LoggingMailer();
+
+    return [
+        Clock::class => $clock,
+        Mailer::class => $mailer,
+        SendReminder::class => new SendReminder($clock, $mailer),
+    ];
+}
+
+$test = container(testing: true);
+echo $test[SendReminder::class](''aisha@example.com''), PHP_EOL;
+// queued: Your lesson on Wed 7 Oct
+
+$live = container(testing: false);
+$message = $live[SendReminder::class](''noshad@example.com'');
+var_dump(str_starts_with($message, ''queued: Your lesson on''));
+
+print_r($test[Mailer::class]->sent);
+```
+
+A real container resolves this automatically from constructor type hints using reflection, caching the result. The principle is unchanged: **objects are wired in one place and receive what they need everywhere else.**
+
+## A worked example
+
+```php
+<?php
+declare(strict_types=1);
+
+// ---- Domain ---------------------------------------------------------
+
+final readonly class Pence
+{
+    public function __construct(public int $amount)
+    {
+        if ($amount < 0) {
+            throw new InvalidArgumentException(''an amount cannot be negative'');
+        }
+    }
+    public function plus(self $other): self { return new self($this->amount + $other->amount); }
+    public function __toString(): string { return number_format($this->amount / 100, 2); }
+}
+
+final class Basket
+{
+    /** @var array<string, int> */
+    private array $lines = [];
+
+    public function add(string $sku, int $quantity): void
+    {
+        if ($quantity < 1) {
+            throw new DomainException(''quantity must be at least one'');
+        }
+        $this->lines[$sku] = ($this->lines[$sku] ?? 0) + $quantity;
+    }
+
+    /** @return array<string, int> */
+    public function lines(): array { return $this->lines; }
+
+    public function isEmpty(): bool { return $this->lines === []; }
+}
+
+interface Prices
+{
+    public function priceOf(string $sku): ?Pence;
+}
+
+// ---- Application ----------------------------------------------------
+
+final readonly class Quote
+{
+    /** @param list<array{sku:string,quantity:int,total:Pence}> $lines */
+    public function __construct(public array $lines, public Pence $total) {}
+}
+
+final class QuoteBasket
+{
+    public function __construct(private readonly Prices $prices) {}
+
+    public function __invoke(Basket $basket): Quote
+    {
+        if ($basket->isEmpty()) {
+            throw new DomainException(''the basket is empty'');
+        }
+
+        $lines = [];
+        $total = new Pence(0);
+
+        foreach ($basket->lines() as $sku => $quantity) {
+            $price = $this->prices->priceOf($sku)
+                ?? throw new RuntimeException(''no price for '' . $sku);
+            $lineTotal = new Pence($price->amount * $quantity);
+            $lines[] = [''sku'' => $sku, ''quantity'' => $quantity, ''total'' => $lineTotal];
+            $total = $total->plus($lineTotal);
+        }
+
+        return new Quote($lines, $total);
+    }
+}
+
+// ---- Infrastructure (a fake here; a PDO query in production) --------
+
+final class FixedPrices implements Prices
+{
+    /** @param array<string, int> $pence */
+    public function __construct(private readonly array $pence) {}
+
+    public function priceOf(string $sku): ?Pence
+    {
+        return isset($this->pence[$sku]) ? new Pence($this->pence[$sku]) : null;
+    }
+}
+
+// ---- Edge ------------------------------------------------------------
+
+final class QuoteController
+{
+    public function __construct(private readonly QuoteBasket $quote) {}
+
+    /** @param array<string, int> $request */
+    public function __invoke(array $request): array
+    {
+        $basket = new Basket();
+        try {
+            foreach ($request as $sku => $quantity) {
+                $basket->add((string) $sku, (int) $quantity);
+            }
+            $quote = ($this->quote)($basket);
+        } catch (DomainException $e) {
+            return [''status'' => 422, ''body'' => [''error'' => $e->getMessage()]];
+        } catch (RuntimeException $e) {
+            return [''status'' => 404, ''body'' => [''error'' => $e->getMessage()]];
+        }
+
+        return [''status'' => 200, ''body'' => [
+            ''lines'' => array_map(
+                fn (array $l): array => [
+                    ''sku'' => $l[''sku''],
+                    ''quantity'' => $l[''quantity''],
+                    ''total'' => (string) $l[''total''],
+                ],
+                $quote->lines,
+            ),
+            ''total'' => (string) $quote->total,
+        ]];
+    }
+}
+
+// ---- Composition root -----------------------------------------------
+
+$controller = new QuoteController(new QuoteBasket(new FixedPrices([
+    ''CSS-01'' => 1999,
+    ''JS-01'' => 2499,
+    ''PY-01'' => 1299,
+])));
+
+$requests = [
+    [''CSS-01'' => 2, ''JS-01'' => 1],
+    [''CSS-01'' => 0],
+    [''UNKNOWN'' => 1],
+    [],
+];
+
+foreach ($requests as $request) {
+    $response = $controller($request);
+    printf("%d %s%s", $response[''status''], json_encode($response[''body'']), PHP_EOL);
+}
+```
+
+Read what each layer knows. `Pence` and `Basket` know the rules and nothing else - no JSON, no HTTP status codes, no SQL. `QuoteBasket` orchestrates and depends on an interface. `FixedPrices` is a fake that a PDO implementation would replace without a line changing anywhere else. And `QuoteController` maps exceptions to status codes, which is the only thing it does.
+
+The test for all of that is the four requests at the bottom. No database, no web server, no fixtures - and it covers the happy path, a validation failure, a missing price and an empty basket.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A unit test needs a database | A dependency is constructed rather than injected |
+| One change touched eleven files | A rule is duplicated instead of living in the domain |
+| Controllers are hundreds of lines | Business logic leaked into the edge |
+| The domain imports the ORM | The dependency points outwards; invert it |
+| Tests pass alone, fail together | Static or global state |
+| You cannot swap the mailer | Concrete class named outside the composition root |
+| A value object is a bare `int` | A lesson id and a course id are interchangeable |
+| Everything is an interface | Only abstract what you actually substitute |
+
+## A check you can run
+
+Take one class in your application and try to construct it in a test with no database, no network and no framework bootstrap.
+
+If you cannot, write down what stopped you. It will be one of three things: a static call, a `new` on an infrastructure class inside a method, or a framework base class. Each has the same fix - move the dependency into the constructor behind an interface - and each one you fix makes the next test easier to write.
+
+That exercise, repeated on five classes, teaches more about architecture than any diagram.
 ',
-   'Rules in plain objects, dependencies pointing inwards, and a thin edge.',
-   5, 917,
-   '55555555-5555-4555-8555-555555555555',
+   'Rules in plain objects, dependencies pointing inwards, and a thin edge.', 11, 2194,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),

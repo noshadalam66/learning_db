@@ -180,39 +180,175 @@ VALUES
   ('e0000001-0000-4000-8000-0000000000d1',
    'The Scientific Stack and Where to Run It',
    'markdown',
-   'Python on its own is not especially good at numbers. A list of a million floats is a million separate objects, each with its own type information, scattered across memory. Adding two such lists means a million interpreter steps.
-
-The scientific stack exists to fix exactly that, and it is worth knowing which library does what before you start using them interchangeably.
+   'The scientific Python stack is four libraries and a decision about where to run them. Nearly everything else you will meet - scikit-learn, statsmodels, PyTorch, Polars - sits on top of the same two ideas: a typed array in contiguous memory, and a labelled table built on top of it.
 
 ## The four you will actually use
 
-- **NumPy** is the foundation. One array is one typed block of memory, and an operation on it runs in compiled C over the whole block. Everything below is built on this.
-- **pandas** adds labels. A DataFrame is a set of NumPy arrays with column names, an index, and the operations you want for tabular data: join, group, pivot, resample.
-- **Matplotlib** draws. It is old and its API shows it, but it is what everything else wraps, so it is the one worth knowing.
-- **scikit-learn** is the machine learning course further down this track, and it takes NumPy arrays and DataFrames as its input. That is the main reason to learn these two properly first.
+**NumPy** is the foundation. One `ndarray` type, fixed dtype, contiguous memory, and operations that run in compiled C over the whole array at once. Every other library in this list either uses it or imitates it.
+
+**pandas** adds labels. A `Series` is a NumPy array with an index; a `DataFrame` is a dictionary of Series sharing one. That gives you named columns, alignment on the index, grouping, joining and a great deal of convenience, at the cost of some memory and some speed.
+
+**Matplotlib** draws. It is old, its API has two layers, and it is the thing almost every other plotting library wraps. Learn enough of it to adjust a figure someone else''s library produced.
+
+**scikit-learn** is the modelling layer: one interface - `fit`, `predict`, `transform` - over a hundred algorithms, plus the pipeline and cross-validation machinery that stops you fooling yourself.
+
+```python
+import numpy as np
+import pandas as pd
+
+# NumPy: one dtype, one block of memory, no labels.
+units = np.array([120, 95, 143, 60])
+price = np.array([12.5, 12.5, 11.0, 14.0])
+print(units.dtype, units.shape, units.nbytes)
+print(units * price)
+
+# pandas: the same numbers, with labels and mixed types.
+sales = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''North'', ''East''],
+    ''units'': units,
+    ''price'': price,
+})
+sales[''revenue''] = sales[''units''] * sales[''price'']
+print(sales)
+print(sales.dtypes)
+```
+
+Notice the division. NumPy knows `units * price` is four multiplications of float64. pandas knows that `region` is text and `units` is a number, and that the fifth row would be the fifth of both.
+
+The rule for choosing: **NumPy when the data is a rectangle of one type**, pandas when the columns mean different things and you want to refer to them by name.
 
 ## Environments, before anything else
 
-Install everything into one global Python and two projects will eventually need different versions of the same library. The fix costs thirty seconds:
+The single most common way a data project becomes unreproducible is that nobody wrote down which versions it was built with.
 
 ```python
-# In a terminal, once per project:
+# Create and activate - these are shell commands, shown here as text.
+#
 #   python -m venv .venv
-#   source .venv/bin/activate      (Windows: .venv/Scripts/activate)
+#   source .venv/bin/activate         # on Windows: .venv/Scripts/activate
 #   pip install numpy pandas matplotlib scikit-learn
 #   pip freeze > requirements.txt
+#
+# Then anyone can reproduce it:
+#
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
 
 import sys
-print(sys.executable)      # which Python is actually running
+import platform
+
+print(platform.python_version())
+print(sys.executable.endswith(''python'') or sys.executable.endswith(''python3''))
 ```
 
-That last line is worth running whenever something is "not installed" despite having been installed. Nine times out of ten the answer is that pip and the interpreter are not the same environment.
+`pip freeze` pins everything, including transitive dependencies, which is what you want for an analysis you may need to re-run in a year. `uv` and `conda` solve the same problem with better ergonomics; the principle does not change.
+
+Record the versions **in the output**, not only in a file:
+
+```python
+import numpy as np
+import pandas as pd
+import sys
+
+versions = {
+    ''python'': sys.version.split()[0],
+    ''numpy'': np.__version__,
+    ''pandas'': pd.__version__,
+}
+for name, version in versions.items():
+    print(f''{name:8} {version}'')
+```
+
+Three lines at the top of every notebook, and a result that disagrees with yours six months later has an immediately visible first suspect.
 
 ## Notebooks, honestly
 
-A notebook is a good place to look at data and a bad place to keep code. Cells run in whatever order you pressed shift-enter, which means a notebook that works on your screen may not work from a clean start - and that is not a hypothetical, it is the single most common reason an analysis cannot be reproduced.
+A notebook is excellent for exploring and bad for anything that must run the same way twice. The reason is one feature: **cells can be run in any order, and the output you are looking at may not come from the code you are looking at.**
 
-Use one, and use it with a rule: before you share anything, restart the kernel and run every cell from the top. If that fails, the notebook was lying to you. Level 4 comes back to this.
+```python
+# In a notebook, this sequence is possible and leaves no trace:
+#
+#   In [1]:  df = load()                 # 10,000 rows
+#   In [2]:  df = df[df.region == ''North'']   # now 2,000 rows
+#   In [1]:  df = load()                 # re-run cell 1: back to 10,000
+#   In [3]:  print(len(df))              # 10,000 - but cell 2 is still
+#                                        # on screen, showing 2,000
+#
+# The numbers in the brackets are the only clue, and nobody reads them.
+
+counts = {''after load'': 10000, ''after filter'': 2000, ''what you see'': 2000}
+print(counts)
+```
+
+Three habits make notebooks safe:
+
+- **Restart and run all** before you believe any result, and always before you share one.
+- **Keep the cells in execution order**, so restart-and-run-all is the same as what you did.
+- **Move anything reusable into a module** and import it, so the notebook is a thin script over tested functions.
+
+The division that works: notebooks for looking at things, `.py` files for anything that runs more than once.
+
+## A worked example
+
+```python
+import sys
+import numpy as np
+import pandas as pd
+
+print(f''python {sys.version.split()[0]}  numpy {np.__version__}  pandas {pd.__version__}'')
+print()
+
+# A deterministic generator, so this file produces the same numbers
+# every time anyone runs it. Without the seed it would not.
+rng = np.random.default_rng(seed=42)
+
+n = 500
+regions = np.array([''North'', ''South'', ''East'', ''West''])
+
+sales = pd.DataFrame({
+    ''region'': rng.choice(regions, size=n, p=[0.4, 0.3, 0.2, 0.1]),
+    ''units'': rng.integers(10, 200, size=n),
+    ''price'': np.round(rng.normal(12.5, 2.0, size=n), 2),
+})
+sales[''revenue''] = (sales[''units''] * sales[''price'']).round(2)
+
+# The three lines to run on any new table, before anything else.
+print(sales.shape)
+print(sales.dtypes.to_dict())
+print(sales.head(3))
+print()
+
+# NumPy underneath: the column IS an array, and you can drop down to it.
+revenue = sales[''revenue''].to_numpy()
+print(type(revenue).__name__, revenue.dtype, revenue.shape)
+print(f''total {revenue.sum():,.2f}  mean {revenue.mean():,.2f}  ''
+      f''median {np.median(revenue):,.2f}'')
+print()
+
+# pandas on top: the same work, by label.
+summary = (
+    sales.groupby(''region'', as_index=False)
+    .agg(orders=(''units'', ''size''),
+         units=(''units'', ''sum''),
+         revenue=(''revenue'', ''sum''))
+    .sort_values(''revenue'', ascending=False)
+    .reset_index(drop=True)
+)
+print(summary)
+print()
+
+# The same aggregate in NumPy alone, to show what pandas is saving you.
+mask = sales[''region''].to_numpy() == ''North''
+print(f''north revenue, numpy:  {revenue[mask].sum():,.2f}'')
+print(f''north revenue, pandas: {summary.loc[summary.region == "North", "revenue"].iloc[0]:,.2f}'')
+
+# And the reproducibility claim, tested rather than asserted.
+again = np.random.default_rng(seed=42).integers(10, 200, size=5)
+first = np.random.default_rng(seed=42).integers(10, 200, size=5)
+print(''same seed, same numbers:'', bool(np.array_equal(again, first)))
+```
+
+Four habits are visible there and they are the ones to copy. The versions are printed, so the output is self-describing. The randomness is seeded through a `Generator` rather than the legacy `np.random.seed`, so it is local rather than global. The shape and dtypes are printed before any analysis. And the final two lines check a claim the code makes about itself.
 
 ## The versions this course uses
 
@@ -220,90 +356,385 @@ Use one, and use it with a rule: before you share anything, restart the kernel a
 import numpy as np
 import pandas as pd
 
-print(np.__version__)
-print(pd.__version__)
+# The APIs in this course are those of:
+#   numpy  2.x
+#   pandas 2.2 or later
+#
+# Two things changed recently enough to catch you out in older code:
+#   - np.random.default_rng() replaced np.random.seed()
+#   - pandas copy-on-write became the default, which removes most
+#     SettingWithCopyWarning cases - and changes the behaviour of
+#     code that relied on a view.
+
+print(''numpy'', np.__version__.split(''.'')[0], ''x'')
+print(''pandas'', ''.''.join(pd.__version__.split(''.'')[:2]))
 ```
 
-`np` and `pd` are not arbitrary. They are near-universal, every example you find online uses them, and deviating costs your reader a translation on every line.',
-   'What NumPy, pandas, Matplotlib and scikit-learn each do, how they fit together, and why an isolated environment is the first thing to set up rather than the last.',
-   8, 432, '55555555-5555-4555-8555-555555555555', 'published',
+When you read a Stack Overflow answer from 2016, check which of those two it predates. Most "why does pandas warn about this" questions were answered before copy-on-write existed.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The same notebook gives different numbers | No seed, or cells run out of order |
+| `ImportError` for a library you installed | Installed into a different environment |
+| A colleague cannot reproduce your result | No pinned requirements |
+| A column of numbers has dtype `object` | pandas read them as strings; see the cleaning lesson |
+| A loop over rows takes minutes | Use a column operation, not `iterrows` |
+| Memory exhausted on a file that fits on disk | Default dtypes; see the performance lesson |
+| An answer from the internet does not work | It predates a major-version change |
+| `np.random.seed` had no effect | A `Generator` was used; seed that instead |
+
+## A check you can run
+
+Open any notebook you have, choose "Restart kernel and run all cells", and compare the output to what was on screen before.
+
+If anything differs - a number, a plot, an error - you have found hidden state, and every conclusion below that cell is suspect. It takes thirty seconds and it is the single most valuable habit in this course.
+',
+   'What NumPy, pandas, Matplotlib and scikit-learn each do, how they fit together, and why an isolated environment is the first thing to set up rather than the last.', 7, 1336,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000d2',
    'NumPy: Arrays and Vectorised Thinking',
    'markdown',
-   'A NumPy array is a block of memory with one type and a shape. That single sentence explains both its speed and its restrictions.
+   'NumPy gives you one data structure: a rectangular array of a single dtype, stored in one contiguous block of memory. Everything else - the speed, the broadcasting rules, the shape errors - follows from that sentence.
+
+## Vectorised, not looped
+
+```python
+import numpy as np
+import time
+
+values = list(range(200_000))
+array = np.arange(200_000)
+
+start = time.perf_counter()
+squares_list = [v * v for v in values]
+python_seconds = time.perf_counter() - start
+
+start = time.perf_counter()
+squares_array = array * array
+numpy_seconds = time.perf_counter() - start
+
+print(f''python: {python_seconds * 1000:7.1f}ms'')
+print(f''numpy:  {numpy_seconds * 1000:7.1f}ms'')
+print(''numpy is faster:'', numpy_seconds < python_seconds)
+print(''same answer:'', squares_list[:5] == list(squares_array[:5]))
+```
+
+The difference is not that NumPy''s loop is better written. It is that there is no Python loop at all: `array * array` is one call into compiled code that walks a contiguous block, with no per-element type check, no object allocation and no interpreter overhead.
+
+That is also why **a Python loop over a NumPy array is the worst of both worlds** - you pay NumPy''s indexing cost per element and get none of the vectorised benefit.
 
 ```python
 import numpy as np
 
-prices = np.array([12.5, 19.0, 7.25, 31.0])
-print(prices.dtype)     # float64
-print(prices.shape)     # (4,)
+a = np.arange(10)
+
+# All of these are one C-level pass.
+print(a + 1)
+print(a * 2)
+print(a ** 2)
+print(np.sqrt(a))
+print(a > 5)
+print(a[a > 5])              # boolean mask: select where True
+print(np.where(a > 5, a, 0)) # element-wise if/else
 ```
 
-Every element is a float64, laid out one after another. There is no per-item type tag and no pointer chasing, so an operation over the array is a tight loop in compiled code.
+The pattern to internalise: **say what you want for the whole array**, not what you want for each element.
 
-## Vectorised, not looped
-
-The habit to build is describing the operation on the whole array:
+## Creating arrays
 
 ```python
-# Not this:
-with_tax = []
-for p in prices:
-    with_tax.append(p * 1.2)
+import numpy as np
 
-# This:
-with_tax = prices * 1.2
+print(np.zeros(3))
+print(np.ones((2, 3)))
+print(np.full((2, 2), 7))
+print(np.arange(0, 10, 2))               # start, stop, step
+print(np.linspace(0, 1, 5))              # start, stop, COUNT
+print(np.eye(3))
+print(np.array([[1, 2], [3, 4]]))
+
+rng = np.random.default_rng(seed=0)
+print(rng.normal(0, 1, size=4).round(3))
+print(rng.integers(1, 7, size=5))
 ```
 
-The second version is shorter, harder to get wrong, and on a million elements it is roughly fifty times faster - the arithmetic happens in C, with no interpreter in the loop.
+`arange` takes a step and `linspace` takes a count. `arange` with a float step accumulates error and may produce one element too many or too few; `linspace` cannot, which is why it is the right choice for a grid.
 
-The same applies to comparisons, which produce an array of booleans you can use to select:
+## dtype is a decision
 
 ```python
-expensive = prices > 15          # array([False,  True, False,  True])
-print(prices[expensive])         # array([19., 31.])
-print(prices[prices > 15].sum()) # 50.0
+import numpy as np
+
+a = np.array([1, 2, 3])
+b = np.array([1.0, 2.0, 3.0])
+c = np.array([1, 2, 3], dtype=np.int8)
+
+print(a.dtype, b.dtype, c.dtype)
+print(a.nbytes, b.nbytes, c.nbytes)
+
+# int8 holds -128 to 127. Going past it wraps, with a warning in
+# recent NumPy and silently in older versions.
+d = np.array([127], dtype=np.int8)
+print(d.dtype, d[0])
+
+# Mixing types promotes to the wider one.
+print((a + b).dtype)
+
+# And anything non-numeric makes the whole array `object`, which
+# loses every speed advantage NumPy has.
+mixed = np.array([1, ''two'', 3.0])
+print(mixed.dtype)
 ```
 
-That pattern - build a boolean mask, index with it - is the one you will use most often, and it carries over to pandas unchanged.
+An `object` array is a Python list wearing a NumPy costume: each element is a pointer to a Python object, operations fall back to the interpreter, and the memory is scattered. If you see `dtype(''O'')` where you expected numbers, something upstream is wrong.
 
 ## Shape is the thing that bites
 
 ```python
-grid = np.arange(12).reshape(3, 4)
-print(grid.sum())          # 66   - everything
-print(grid.sum(axis=0))    # [12 15 18 21]  - down the columns
-print(grid.sum(axis=1))    # [ 6 22 38]     - across the rows
+import numpy as np
+
+a = np.arange(12)
+print(a.shape)                  # (12,)   one dimension
+print(a.reshape(3, 4).shape)    # (3, 4)
+print(a.reshape(3, -1).shape)   # (3, 4) - -1 means "work it out"
+print(a.reshape(2, 2, 3).shape)
+
+m = a.reshape(3, 4)
+print(m[0])          # the first ROW
+print(m[:, 0])       # the first COLUMN
+print(m[1, 2])       # row 1, column 2
+print(m[:2, 1:3])    # a block
+
+print(m.T.shape)             # transpose: (4, 3)
+print(m.sum(), m.sum(axis=0), m.sum(axis=1))
 ```
 
-`axis` is the axis that disappears. `axis=0` collapses the rows and leaves one value per column. People remember it as "0 is columns", which works until it does not; "the axis that goes away" always works.
+The `axis` argument is where most confusion lives, and there is one sentence that resolves it: **`axis` names the dimension that disappears.**
+
+```python
+import numpy as np
+
+m = np.arange(12).reshape(3, 4)
+print(m.shape)                      # (3, 4)
+print(m.sum(axis=0).shape)          # (4,) - the 3 is gone, summed down columns
+print(m.sum(axis=1).shape)          # (3,) - the 4 is gone, summed across rows
+print(m.sum(axis=1, keepdims=True).shape)   # (3, 1) - kept, for broadcasting
+```
+
+A `(3,)` array and a `(3, 1)` array are not the same thing, and the difference is what produces the famous confusing shape errors. `keepdims=True` is how you keep a result broadcastable against the thing it came from.
 
 ## Broadcasting
 
-An operation between arrays of different shapes stretches the smaller one, if it can:
+Two arrays are compatible when, comparing their shapes from the **right**, each pair of dimensions is equal or one of them is 1.
 
 ```python
-grid = np.arange(12).reshape(3, 4)
-offsets = np.array([10, 20, 30, 40])
-print(grid + offsets)      # offsets applied to every row
+import numpy as np
+
+m = np.arange(12).reshape(3, 4)
+row = np.array([10, 20, 30, 40])            # shape (4,)
+column = np.array([[100], [200], [300]])    # shape (3, 1)
+
+print(m + row)          # (3,4) + (4,)   -> the row is added to every row
+print()
+print(m + column)       # (3,4) + (3,1)  -> the column to every column
+print()
+print(m * 2)            # (3,4) + scalar -> the simplest broadcast of all
+
+# Incompatible: 4 against 3, neither is 1.
+try:
+    m + np.array([1, 2, 3])
+except ValueError as error:
+    print(type(error).__name__)
 ```
 
-It works when the shapes match from the right, with 1 or absent counting as a match. It is extremely convenient and it is also how a bug hides: two arrays you expected to be the same length can broadcast into something plausible rather than raising. Print the shape when the numbers look wrong.
+The canonical use is centring and scaling, which is the first step of nearly every model:
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=1)
+data = rng.normal(loc=[10, 100, 1000], scale=[1, 10, 100], size=(1000, 3))
+
+means = data.mean(axis=0)               # (3,)
+stds = data.std(axis=0)                 # (3,)
+standardised = (data - means) / stds    # (1000,3) - (3,) broadcasts
+
+print(data.shape, means.shape, standardised.shape)
+print(means.round(1))
+print(standardised.mean(axis=0).round(10))      # ~0
+print(standardised.std(axis=0).round(10))       # 1
+```
+
+Three lines, no loop, and it works for three columns or three hundred.
+
+## Views and copies
+
+Slicing a NumPy array gives a **view** - a window onto the same memory - not a copy. This is the opposite of slicing a Python list.
+
+```python
+import numpy as np
+
+original = np.arange(10)
+view = original[2:5]
+view[0] = 999
+print(original)              # the original changed
+
+copy = original[2:5].copy()
+copy[0] = -1
+print(original)              # unchanged
+
+print(view.base is original)         # True - it is a view
+print(copy.base is None)             # True - it owns its memory
+
+# Fancy indexing always copies.
+fancy = original[[2, 3, 4]]
+fancy[0] = 0
+print(original[2])                   # unchanged
+```
+
+Views are why NumPy can slice a gigabyte array for free, and they are why a function that "just looks at a slice" can change its caller''s data. When a function takes an array and modifies it, say so in the name, or `.copy()` first.
+
+## A worked example
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=7)
+
+# 365 days of readings from 4 sensors: one rectangle, one dtype.
+days, sensors = 365, 4
+baseline = np.array([18.0, 21.5, 15.0, 19.2])
+seasonal = 6 * np.sin(np.linspace(0, 2 * np.pi, days))[:, None]   # (365, 1)
+noise = rng.normal(0, 1.2, size=(days, sensors))
+
+readings = baseline + seasonal + noise      # (4,) + (365,1) + (365,4)
+
+# A handful of stuck-sensor spikes, so the outlier section below has
+# something real to find rather than reporting zero.
+spike_days = rng.choice(days, size=6, replace=False)
+spike_sensors = rng.integers(0, sensors, size=6)
+readings[spike_days, spike_sensors] += rng.choice([-25.0, 25.0], size=6)
+
+print(''shape'', readings.shape, ''dtype'', readings.dtype,
+      ''memory'', f''{readings.nbytes / 1024:.0f} KiB'')
+print()
+
+# Per-sensor statistics: axis=0 makes the 365 disappear.
+print(''sensor means  '', readings.mean(axis=0).round(2))
+print(''sensor stds   '', readings.std(axis=0).round(2))
+print(''sensor maxima '', readings.max(axis=0).round(2))
+print()
+
+# Per-day statistics: axis=1 makes the 4 disappear.
+daily_mean = readings.mean(axis=1)
+print(''daily mean shape'', daily_mean.shape)
+print(''warmest day     '', int(daily_mean.argmax()),
+      round(float(daily_mean.max()), 2))
+print()
+
+# Standardise every column, using keepdims so the shapes line up.
+means = readings.mean(axis=0, keepdims=True)        # (1, 4)
+stds = readings.std(axis=0, keepdims=True)          # (1, 4)
+z = (readings - means) / stds
+print(''standardised means'', z.mean(axis=0).round(10))
+
+# Outliers, as a boolean mask - no loop, no index arithmetic.
+outliers = np.abs(z) > 3
+print(''outlier readings '', int(outliers.sum()))
+print(''days with any    '', int(outliers.any(axis=1).sum()))
+print(''per sensor       '', outliers.sum(axis=0))
+print()
+
+# Replace them with the column mean, element-wise.
+cleaned = np.where(outliers, means, readings)
+print(''max |z| before'', round(float(np.abs(z).max()), 2))
+after = (cleaned - cleaned.mean(axis=0, keepdims=True)) / cleaned.std(axis=0, keepdims=True)
+print(''max |z| after '', round(float(np.abs(after).max()), 2))
+print()
+
+# A rolling 7-day mean, without a Python loop: stride the array into
+# overlapping windows and average along the new axis.
+windows = np.lib.stride_tricks.sliding_window_view(daily_mean, 7)
+rolling = windows.mean(axis=1)
+print(''windows'', windows.shape, ''-> rolling'', rolling.shape)
+print(''first three'', rolling[:3].round(2))
+
+# And the view warning, demonstrated on the real data.
+first_week = readings[:7]
+print(''is a view:'', first_week.base is not None)
+```
+
+Four techniques carry that example. Broadcasting builds a `(365, 4)` array from a `(4,)` baseline and a `(365, 1)` seasonal curve with no loop. `axis` with `keepdims` standardises every column against its own mean. A boolean mask finds and replaces outliers in two lines. And `sliding_window_view` turns a rolling calculation into a shape change plus one `mean`.
 
 ## Where NumPy stops
 
-An array has one type. The moment you want a column of names next to a column of prices, with labels and a meaningful index, you want pandas - which is the next lesson, and which is NumPy underneath.',
-   'One typed block of memory instead of a million Python objects, and the habit of describing an operation on a whole array rather than looping over it. This is the idea the entire stack is built on.',
-   11, 416, '55555555-5555-4555-8555-555555555555', 'published',
+NumPy is the wrong tool when:
+
+- **The columns mean different things.** A table with a text column, a date and two numbers is a pandas `DataFrame`, not an array.
+- **You need labels.** Selecting "the North rows" by name is pandas; by position is NumPy, and position is fragile.
+- **The data does not fit in memory.** NumPy wants one contiguous block. Dask, Polars or chunked reading is the answer.
+- **The operation is genuinely sequential.** Some recursions cannot be vectorised; use Numba or Cython rather than contorting the array code.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `dtype(''O'')` where numbers were expected | A non-numeric value forced an object array |
+| `operands could not be broadcast together` | Shapes disagree from the right; print both |
+| A function changed the caller''s array | Slices are views; `.copy()` first |
+| `(3,)` and `(3, 1)` behaved differently | They are different shapes; use `keepdims` |
+| An `int8` column wrapped around | Too small a dtype for the range |
+| `arange` produced an unexpected count | Float steps accumulate error; use `linspace` |
+| A loop over an array is slow | Vectorise, or drop to a compiled extension |
+| Memory doubled unexpectedly | An operation copied; use in-place `+=` where safe |
+
+## A check you can run
+
+```python
+import numpy as np
+
+a = np.arange(6).reshape(2, 3)
+print(a.sum(axis=0).shape)
+print(a.sum(axis=1).shape)
+
+try:
+    print((a - a.mean(axis=1)).shape)
+except ValueError as error:
+    print(error)
+
+print((a - a.mean(axis=1, keepdims=True)).shape)
+```
+
+The third line raises a broadcast error: `a` is `(2, 3)` and `a.mean(axis=1)` is `(2,)`, which aligns the 2 against the 3 from the right.
+
+Add `keepdims=True` and it works, because `(2, 1)` broadcasts against `(2, 3)`. That one keyword is the fix for most shape errors you will meet, and knowing why is more useful than knowing that.
+',
+   'One typed block of memory instead of a million Python objects, and the habit of describing an operation on a whole array rather than looping over it. This is the idea the entire stack is built on.', 8, 1672,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000d3',
    'Pandas: Series and DataFrames',
    'markdown',
-   'A Series is a labelled array. A DataFrame is a dictionary of Series that share an index. Everything in pandas follows from those two sentences.
+   'A Series is a labelled array. A DataFrame is a dictionary of Series that share an index. Everything in pandas follows from those two sentences, including the parts that surprise people.
+
+## The two structures
+
+```python
+import pandas as pd
+
+# A Series: values plus an index.
+units = pd.Series([120, 95, 143, 60], name=''units'')
+print(units)
+print(units.index, units.dtype, units.shape)
+
+# An index you chose, rather than 0..n.
+by_region = pd.Series([120, 95, 143], index=[''North'', ''South'', ''East''], name=''units'')
+print(by_region[''South''])
+print(by_region[[''North'', ''East'']])
+```
 
 ```python
 import pandas as pd
@@ -315,708 +746,3521 @@ sales = pd.DataFrame({
 })
 print(sales)
 print(sales.dtypes)
+print(sales.shape, len(sales), sales.columns.tolist())
 ```
 
 Each column is one dtype. The index - here 0 to 3, because nobody chose one - is how rows are addressed, and it is worth setting deliberately when you have a natural key.
 
+**The index is not a column.** It is the row labels, it participates in alignment, and a great deal of pandas behaviour that looks magical is the index quietly doing its job:
+
+```python
+import pandas as pd
+
+a = pd.Series([1, 2, 3], index=[''x'', ''y'', ''z''])
+b = pd.Series([10, 20, 30], index=[''z'', ''y'', ''x''])
+
+print(a + b)            # aligned by LABEL, not by position
+print((a + b)[''x''])     # 31 - a[''x''] + b[''x'']
+```
+
+That alignment is the single most useful property of pandas and the single most confusing when you did not expect it. Two Series with different indexes add to a union of both indexes, with `NaN` where one is missing.
+
 ## Selecting: the part to get right early
 
 ```python
-sales[''units'']            # one column, as a Series
-sales[[''region'', ''units'']] # two columns, as a DataFrame
-sales[sales[''units''] > 100]  # rows where the mask is True
+import pandas as pd
+
+sales = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''North'', ''East''],
+    ''units'':  [120, 95, 143, 60],
+    ''price'':  [12.5, 12.5, 11.0, 14.0],
+})
+
+print(sales[''units''].tolist())              # one column, as a Series
+print(sales[[''region'', ''units'']].shape)     # two columns, as a DataFrame
+print(sales[sales[''units''] > 100])          # rows where the mask is True
 ```
 
 Then the pair that confuses everybody:
 
 ```python
-sales.loc[0]        # by LABEL - the row whose index value is 0
-sales.iloc[0]       # by POSITION - the first row
+import pandas as pd
+
+sales = pd.DataFrame(
+    {''units'': [120, 95, 143, 60]},
+    index=[''a'', ''b'', ''c'', ''d''],
+)
+
+print(sales.loc[''a'', ''units''])      # by LABEL
+print(sales.iloc[0][''units''])       # by POSITION
+print(sales.loc[''b'':''c''])           # label slicing INCLUDES the end
+print(sales.iloc[1:3])              # position slicing excludes it
 ```
 
-With a default index those two agree, which is why the difference goes unnoticed until the day you sort or filter and the labels stop matching the positions. Use `loc` when you mean a label and `iloc` when you mean a position, and say which you meant.
+With a default index `loc[0]` and `iloc[0]` agree, which is why the difference goes unnoticed until the day you sort or filter and the labels stop matching the positions. Use `loc` when you mean a label and `iloc` when you mean a position, and say which you meant.
 
-## Adding and transforming columns
+Note the slicing asymmetry: `loc[''b'':''c'']` includes `''c''`; `iloc[1:3]` excludes index 3. That is deliberate - a label slice has no "one past the end" to name.
 
-```python
-sales[''revenue''] = sales[''units''] * sales[''price'']
-sales[''big''] = sales[''units''] > 100
-```
-
-Vectorised, exactly as in NumPy. If you find yourself writing `for i in range(len(df))`, stop: there is nearly always a column operation that does it, and it will be both faster and clearer.
-
-## Looking at it
-
-```python
-sales.head()        # first five rows
-sales.info()        # dtypes, non-null counts, memory
-sales.describe()    # count, mean, std, quartiles for numeric columns
-```
-
-`info()` is the first thing to run on any new data. It tells you in one screen how many rows you have, which columns have missing values and - crucially - whether a column you expect to be a number has arrived as an object, which is pandas saying "these are strings".
-
-## The copy warning
-
-```python
-subset = sales[sales[''units''] > 100]
-subset[''units''] = 0      # SettingWithCopyWarning
-```
-
-pandas is warning that `subset` may be a view onto `sales` rather than a copy, so it cannot tell you whether the assignment will reach the original. Be explicit:
-
-```python
-subset = sales[sales[''units''] > 100].copy()
-subset[''units''] = 0                        # unambiguous
-
-sales.loc[sales[''units''] > 100, ''units''] = 0   # or change the original on purpose
-```
-
-Treat that warning as an error. It is the pandas equivalent of an uninitialised variable: the code appears to work until the day it does not.',
-   'The DataFrame is the object you will spend the rest of your career in: named, typed columns sharing an index. This lesson covers how to make one, how to select from it, and the one distinction - loc against iloc - that causes most early confusion.',
-   11, 420, '55555555-5555-4555-8555-555555555555', 'published',
-   DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
-
-  ('e0000001-0000-4000-8000-0000000000d5',
-   'Reading Real Data: CSV, JSON, SQL and Excel',
-   'markdown',
-   'Getting data in is where an analysis actually starts, and it is rarely one line.
-
-## CSV, and the arguments worth knowing
+Combining masks needs parentheses and the bitwise operators:
 
 ```python
 import pandas as pd
-from io import StringIO
 
-raw = StringIO("""date,region,units,note
-2026-01-04,North,120,ok
-2026-01-05,South,,missing count
-2026-01-06,North,143,ok
-""")
+sales = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''North'', ''East''],
+    ''units'':  [120, 95, 143, 60],
+})
 
-df = pd.read_csv(
-    raw,
-    parse_dates=[''date''],       # dates as datetimes, not strings
-    dtype={''region'': ''category''},  # a repeated string is a category
-)
-print(df.dtypes)
+print(sales[(sales[''units''] > 100) & (sales[''region''] == ''North'')])
+print(sales[sales[''region''].isin([''South'', ''East''])])
+print(sales[~sales[''region''].str.startswith(''N'')])
+print(sales.query(''units > 100 and region == "North"''))
 ```
 
-Six parameters cover most of what goes wrong:
+`and`, `or` and `not` do not work on Series - they ask for a single truth value and a Series of four booleans has none. Use `&`, `|` and `~`, and wrap each comparison in parentheses because `&` binds tighter than `>`.
 
-- **`sep`** when it is not a comma. European exports are often semicolon separated because the comma is the decimal point.
-- **`encoding`** when the file came from Windows. `utf-8` fails, `latin-1` or `cp1252` usually works, and the giveaway is a UnicodeDecodeError naming a byte position.
-- **`parse_dates`** so a date is a date. Without it every comparison is string comparison, which sorts 2026-10-01 before 2026-9-01.
-- **`skiprows` / `header`** for files with a title and a blank line above the actual header - which is every file exported from a reporting tool.
-- **`na_values`** for the placeholders a system used instead of leaving the field empty: `[''NA'', ''N/A'', ''-'', ''missing'', ''9999'']`.
-- **`usecols`** when the file has eighty columns and you need four. It is also the simplest way to make a large file fit in memory.
-
-## JSON
-
-```python
-import json
-payload = json.loads(''{"results": [{"id": 1, "score": 9}, {"id": 2, "score": 7}]}'')
-df = pd.json_normalize(payload[''results''])
-```
-
-`json_normalize` is the one to know: it flattens nested objects into columns like `user.name`, which is what you want from an API response. `pd.read_json` is for a file that is already a flat table.
-
-## SQL
-
-```python
-# with a DB-API connection or a SQLAlchemy engine
-# df = pd.read_sql("SELECT region, units FROM sales WHERE date >= %s", conn, params=[''2026-01-01''])
-```
-
-Two rules. Filter in SQL, not in pandas - a WHERE clause the database can serve with an index beats loading ten million rows and dropping nine. And parameterise; `params` exists for the same reason it does everywhere else.
-
-## Excel
-
-```python
-# df = pd.read_excel(''report.xlsx'', sheet_name=''Q1'', skiprows=3)
-```
-
-Expect merged cells, a title row, numbers stored as text, and a footer with a total in it. `skiprows` and `usecols` handle most of it; the total row usually has to be dropped by hand, and it is worth asserting the row count afterwards so it fails loudly if the layout changes.
-
-## Check what you got
-
-```python
-print(df.shape)
-print(df.dtypes)
-print(df.isna().sum())
-```
-
-Three lines, every time, before any analysis. Most bad results trace back to a column that silently loaded as `object` and was never looked at.',
-   'read_csv has about fifty parameters and you will need six of them regularly. This lesson covers those six, the equivalents for JSON, SQL and Excel, and what to do when a file will not parse at all.',
-   11, 425, '55555555-5555-4555-8555-555555555555', 'published',
-   DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
-
-  ('e0000001-0000-4000-8000-0000000000d6',
-   'Missing Values, Types and Duplicates',
-   'markdown',
-   'Cleaning is most of the work. It is also where the decisions that change your answer get made, usually without being written down.
-
-## Missing is not one thing
+## Adding and transforming columns
 
 ```python
 import pandas as pd
 import numpy as np
 
-df = pd.DataFrame({
-    ''region'': [''North'', ''South'', ''North'', None],
-    ''units'':  [120, np.nan, 143, 60],
-    ''note'':   [''ok'', ''N/A'', '''', ''ok''],
+sales = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''North'', ''East''],
+    ''units'':  [120, 95, 143, 60],
+    ''price'':  [12.5, 12.5, 11.0, 14.0],
 })
+
+sales[''revenue''] = sales[''units''] * sales[''price'']
+sales[''big''] = sales[''units''] > 100
+sales[''band''] = np.where(sales[''units''] > 100, ''high'', ''low'')
+
+# assign returns a NEW frame, which makes it chainable.
+enriched = sales.assign(
+    per_unit=lambda d: d[''revenue''] / d[''units''],
+    rank=lambda d: d[''revenue''].rank(ascending=False).astype(int),
+)
+print(enriched[[''region'', ''revenue'', ''per_unit'', ''rank'']].round(2))
+```
+
+Vectorised, exactly as in NumPy. If you find yourself writing `for i in range(len(df))`, stop: there is nearly always a column operation that does it, and it will be both faster and clearer.
+
+For a mapping with several branches, `np.select` beats a chain of `np.where`:
+
+```python
+import pandas as pd
+import numpy as np
+
+sales = pd.DataFrame({''units'': [120, 95, 143, 60, 30]})
+
+conditions = [sales[''units''] > 130, sales[''units''] > 90, sales[''units''] > 50]
+choices = [''high'', ''medium'', ''low'']
+sales[''band''] = np.select(conditions, choices, default=''tiny'')
+print(sales)
+```
+
+## Looking at it
+
+```python
+import pandas as pd
+import numpy as np
+
+rng = np.random.default_rng(0)
+df = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South''], 100),
+    ''units'': rng.integers(1, 200, 100),
+    ''price'': rng.normal(12, 2, 100).round(2),
+})
+df.loc[rng.choice(100, 7, replace=False), ''price''] = np.nan
+
+print(df.head(3))
+print()
+df.info()
+print()
+print(df.describe().round(2))
+print()
+print(df[''region''].value_counts())
+print()
 print(df.isna().sum())
 ```
 
-Before deciding what to do, decide what the gap means:
+`info()` is the first thing to run on any new data. It tells you in one screen how many rows you have, which columns have missing values and - crucially - whether a column you expect to be a number has arrived as an object, which is pandas saying "these are strings".
 
-- **Unknown.** The value exists and was not recorded. Dropping the row loses information; filling it invents some.
-- **Not applicable.** A discount column on a non-discounted order. Zero may well be the honest value.
-- **Recorded badly.** `''N/A''`, `''''`, `-1`, `9999`. These are not missing to pandas until you say so, which is what `na_values` is for at read time, or:
+`describe()` on an object column gives count, unique, top and frequency instead, which is often what you want for a categorical.
+
+## The copy warning
 
 ```python
-df = df.replace({''N/A'': np.nan, '''': np.nan})
+import pandas as pd
+
+sales = pd.DataFrame({''units'': [120, 95, 143, 60]})
+
+subset = sales[sales[''units''] > 100]
+# In older pandas: SettingWithCopyWarning, and it was ambiguous
+# whether the write reached `sales`.
+# Under copy-on-write (the default from pandas 3.0), `subset` is
+# always a copy and the original is never touched.
+subset[''units''] = 0
+print(sales[''units''].tolist())          # unchanged
+print(subset[''units''].tolist())
 ```
 
-That third category is dangerous precisely because it does not show up in `isna()`. A `9999` left in a numeric column does not look missing; it looks like a very large order, and it moves your mean.
+Copy-on-write removed the ambiguity: a slice behaves as a copy, and if you want to change the original you say so.
+
+```python
+import pandas as pd
+
+sales = pd.DataFrame({''units'': [120, 95, 143, 60]})
+
+# Change the original, on purpose, in one statement.
+sales.loc[sales[''units''] > 100, ''units''] = 0
+print(sales[''units''].tolist())          # [0, 95, 0, 60]
+```
+
+Write it as one `loc` assignment rather than a filter followed by a write. It is unambiguous under every version of pandas, and it says what you meant.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=11)
+
+n = 400
+orders = pd.DataFrame({
+    ''order_id'': np.arange(1000, 1000 + n),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n, p=[.4, .3, .2, .1]),
+    ''channel'': rng.choice([''web'', ''phone'', ''store''], n, p=[.6, .2, .2]),
+    ''units'': rng.integers(1, 40, n),
+    ''unit_price'': rng.normal(12.5, 3.0, n).round(2),
+    ''placed_at'': pd.to_datetime(''2026-01-01'') + pd.to_timedelta(rng.integers(0, 120, n), ''D''),
+})
+
+# A natural key beats a positional index.
+orders = orders.set_index(''order_id'')
+print(orders.index.name, orders.shape)
+print()
+
+# Derived columns, chained so each step is visible.
+orders = orders.assign(
+    revenue=lambda d: (d[''units''] * d[''unit_price'']).round(2),
+    month=lambda d: d[''placed_at''].dt.to_period(''M'').astype(str),
+    size=lambda d: pd.cut(d[''units''], [0, 5, 20, 100], labels=[''small'', ''medium'', ''large'']),
+)
+print(orders.head(3)[[''region'', ''channel'', ''units'', ''revenue'', ''month'', ''size'']])
+print()
+
+# Selection by label and by position, side by side.
+first_id = orders.index[0]
+print(''by label   '', orders.loc[first_id, ''revenue''])
+print(''by position'', orders.iloc[0][''revenue''])
+print()
+
+# A compound mask - note the parentheses and the bitwise operators.
+big_web = orders[(orders[''channel''] == ''web'') & (orders[''units''] >= 20)]
+print(f''{len(big_web)} large web orders, {big_web["revenue"].sum():,.2f} revenue'')
+print()
+
+# The same question three ways, all giving the same answer.
+by_region = orders.groupby(''region'')[''revenue''].sum().sort_values(ascending=False)
+print(by_region.round(2))
+print()
+print(''North, via groupby:'', round(float(by_region[''North'']), 2))
+print(''North, via mask:   '', round(float(orders.loc[orders.region == ''North'', ''revenue''].sum()), 2))
+print(''North, via query:  '', round(float(orders.query(''region == "North"'')[''revenue''].sum()), 2))
+print()
+
+# Alignment, which is the thing to understand about the index.
+units_by_region = orders.groupby(''region'')[''units''].sum()
+revenue_by_region = orders.groupby(''region'')[''revenue''].sum()
+per_unit = (revenue_by_region / units_by_region).round(2)
+print(''revenue per unit, aligned by region label:'')
+print(per_unit)
+print()
+
+# What alignment does when the indexes differ.
+partial = revenue_by_region.drop(''West'')
+print((partial / units_by_region).round(2))     # West becomes NaN
+print()
+
+# Changing the original on purpose, in one unambiguous statement.
+before = float(orders.loc[orders[''region''] == ''West'', ''revenue''].sum())
+orders.loc[orders[''region''] == ''West'', ''revenue''] = 0.0
+after = float(orders.loc[orders[''region''] == ''West'', ''revenue''].sum())
+print(f''West revenue {before:,.2f} -> {after:,.2f}'')
+```
+
+Three habits are on display. The index is a real key, so `loc` means something. Derived columns are built with `assign` and lambdas, so the frame is never half-built. And the one place the original is modified uses a single `loc` assignment rather than a filter-then-write, which is unambiguous under any version.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `truth value of a Series is ambiguous` | `and` or `or` on a Series; use the bitwise operators with parentheses |
+| A write to a filtered frame did nothing | It is a copy; use a single `.loc` assignment |
+| Two Series added to mostly `NaN` | Indexes do not match; align or `reset_index` |
+| `loc[0]` and `iloc[0]` disagreed | The frame was sorted or filtered |
+| `KeyError` on a column that exists | Whitespace in the name; check `df.columns.tolist()` |
+| A numeric column has dtype `object` | A stray string; see the cleaning lesson |
+| A loop over rows is slow | `iterrows` is the slowest option; vectorise |
+| `describe()` ignored a column | It is not numeric; pass `include=''all''` |
+
+## A check you can run
+
+```python
+import pandas as pd
+
+a = pd.Series([1, 2, 3], index=[0, 1, 2])
+b = pd.Series([10, 20, 30], index=[1, 2, 3])
+print(a + b)
+```
+
+The result has four rows and three of them are `NaN`. Nothing is broken: pandas aligned on the index, found one label in common, and told you about the rest.
+
+Once you expect that, half of pandas stops being surprising - and the fix, when you wanted positional addition, is `a.to_numpy() + b.to_numpy()` or `a.reset_index(drop=True) + b.reset_index(drop=True)`, chosen deliberately.
+',
+   'The DataFrame is the object you will spend the rest of your career in: named, typed columns sharing an index. This lesson covers how to make one, how to select from it, and the one distinction - loc against iloc - that causes most early confusion.', 8, 1520,'55555555-5555-4555-8555-555555555555', 'published',
+   DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
+
+  ('e0000001-0000-4000-8000-0000000000d5',
+   'Reading Real Data: CSV, JSON, SQL and Excel',
+   'markdown',
+   'Loading is where most analysis bugs are born, because a reader that silently guesses wrong gives you a table that looks right and is not. Every loader in this lesson has arguments whose job is to stop the guessing.
+
+## CSV, and the arguments worth knowing
+
+```python
+import io
+import pandas as pd
+
+CSV = """order_id,placed_on,region,units,price,notes
+1001,2026-01-15,North,120,12.50,
+1002,2026-01-16,South,95,12.50,"discount, agreed"
+1003,2026-01-16,North,143,11.00,
+1004,2026-02-01,East,60,14.00,n/a
+"""
+
+df = pd.read_csv(io.StringIO(CSV))
+print(df.dtypes.to_dict())
+print(df.head(2))
+```
+
+That works, and it guessed four things: the separator, the header row, the dtype of every column, and which strings mean "missing". Three of those guesses are usually right and one of them will eventually cost you an afternoon.
+
+The arguments that remove the guessing:
+
+```python
+import io
+import pandas as pd
+
+CSV = """order_id,placed_on,region,units,price,notes
+1001,2026-01-15,North,120,12.50,
+1002,2026-01-16,South,95,12.50,"discount, agreed"
+1003,2026-01-16,North,143,11.00,
+1004,2026-02-01,East,60,14.00,n/a
+"""
+
+df = pd.read_csv(
+    io.StringIO(CSV),
+    dtype={''order_id'': ''int64'', ''region'': ''category'', ''units'': ''int32''},
+    parse_dates=[''placed_on''],
+    na_values=[''n/a'', ''N/A'', ''none'', ''-''],
+    keep_default_na=True,
+)
+print(df.dtypes.to_dict())
+print(df[''notes''].isna().tolist())
+print(df[''placed_on''].dt.month.tolist())
+```
+
+- **`dtype=`** stops the guess. A column of account numbers with leading zeros becomes an integer and loses them unless you say `str`.
+- **`parse_dates=`** turns strings into timestamps at load time, which is cheaper than converting later and catches an unparseable value immediately.
+- **`na_values=`** names the strings your source uses for missing. `n/a`, `-`, `NULL` and `unknown` are all common and none is recognised by default.
+- **`usecols=`** reads only the columns you need, which is the cheapest optimisation available on a wide file.
+
+Three more that matter on real files:
+
+```python
+import io
+import pandas as pd
+
+MESSY = """# exported 2026-02-01
+# source: orders system
+id;name;amount
+1;Ann;1.234,56
+2;Bo;2.000,00
+"""
+
+df = pd.read_csv(
+    io.StringIO(MESSY),
+    sep='';'',
+    skiprows=2,
+    decimal='','',
+    thousands=''.'',
+)
+print(df)
+print(df.dtypes.to_dict())
+```
+
+European CSV files use `;` as the separator, `,` as the decimal point and `.` as the thousands separator. Without those three arguments the amounts arrive as strings and every later calculation quietly fails.
+
+## JSON
+
+```python
+import io
+import json
+import pandas as pd
+
+RECORDS = """[
+  {"id": 1, "region": "North", "customer": {"name": "Ann", "tier": "gold"},
+   "items": [{"sku": "A", "qty": 2}, {"sku": "B", "qty": 1}]},
+  {"id": 2, "region": "South", "customer": {"name": "Bo", "tier": "silver"},
+   "items": [{"sku": "A", "qty": 5}]}
+]"""
+
+flat = pd.read_json(io.StringIO(RECORDS))
+print(flat.columns.tolist())
+print(type(flat.loc[0, ''customer'']).__name__)       # dict - still nested
+print()
+
+# json_normalize flattens the nesting into columns.
+data = json.loads(RECORDS)
+wide = pd.json_normalize(data, sep=''_'')
+print(wide.columns.tolist())
+print(wide[[''id'', ''customer_name'', ''customer_tier'']])
+print()
+
+# And a list field becomes one row per element.
+items = pd.json_normalize(
+    data,
+    record_path=''items'',
+    meta=[''id'', ''region'', [''customer'', ''name'']],
+)
+print(items)
+```
+
+`read_json` gives you a frame whose cells are still dictionaries. `json_normalize` is the one that flattens, and `record_path` plus `meta` is how you explode a nested list while keeping the parent''s fields.
+
+For newline-delimited JSON - one object per line, which is what most logs and exports produce - pass `lines=True`:
+
+```python
+import io
+import pandas as pd
+
+NDJSON = chr(10).join([''{"id": 1, "ok": true}'', ''{"id": 2, "ok": false}''])
+print(pd.read_json(io.StringIO(NDJSON), lines=True))
+```
+
+## SQL
+
+```python
+import sqlite3
+import pandas as pd
+
+connection = sqlite3.connect('':memory:'')
+connection.executescript("""
+    CREATE TABLE orders (
+        id INTEGER PRIMARY KEY, region TEXT, units INTEGER, price REAL, placed_on TEXT);
+    INSERT INTO orders VALUES
+        (1, ''North'', 120, 12.5, ''2026-01-15''),
+        (2, ''South'',  95, 12.5, ''2026-01-16''),
+        (3, ''North'', 143, 11.0, ''2026-01-16''),
+        (4, ''East'',   60, 14.0, ''2026-02-01'');
+""")
+
+# Parameters, not string formatting - the same rule as anywhere else.
+df = pd.read_sql_query(
+    ''SELECT id, region, units, price, placed_on FROM orders WHERE units > ?'',
+    connection,
+    params=(90,),
+    parse_dates=[''placed_on''],
+)
+print(df)
+print(df.dtypes.to_dict())
+```
+
+Two rules for `read_sql_query`:
+
+**Aggregate in SQL when you can.** The database is better at summing ten million rows than pandas is at loading them. `SELECT region, SUM(units) ... GROUP BY region` transfers four rows where `SELECT *` transfers ten million.
+
+**Never format user input into the query.** `params=` exists, it is the same mechanism as every other database library, and string formatting here is a SQL injection in an analysis script.
+
+For a result too large to hold, read it in pieces:
+
+```python
+import sqlite3
+import pandas as pd
+
+connection = sqlite3.connect('':memory:'')
+connection.executescript("CREATE TABLE t (n INTEGER);")
+connection.executemany(''INSERT INTO t VALUES (?)'', [(i,) for i in range(1000)])
+
+total = 0
+chunks = 0
+for chunk in pd.read_sql_query(''SELECT n FROM t'', connection, chunksize=250):
+    total += int(chunk[''n''].sum())
+    chunks += 1
+print(chunks, total)
+```
+
+## Excel
+
+```python
+import pandas as pd
+
+# read_excel needs openpyxl for .xlsx. The arguments that matter:
+#
+#   pd.read_excel(path,
+#                 sheet_name=''Orders'',    # name, index, None for all
+#                 header=0,               # which row holds the names
+#                 skiprows=3,             # the title block above it
+#                 usecols=''A:F'',          # or a list of names
+#                 dtype={''account'': str}) # keep the leading zeros
+#
+# sheet_name=None returns a dict of {name: DataFrame}, which is how
+# you loop over every sheet in a workbook.
+
+print(''read_excel arguments: sheet_name, header, skiprows, usecols, dtype'')
+```
+
+Excel files bring two problems that CSV does not. Dates may arrive as serial numbers if the cell was formatted as text, and a column of mixed types becomes `object` without warning. Always check `dtypes` after reading a spreadsheet, every time.
+
+## Check what you got
+
+The five lines to run after every load, before any analysis:
+
+```python
+import io
+import pandas as pd
+
+CSV = """order_id,placed_on,region,units,price
+1001,2026-01-15,North,120,12.50
+1002,2026-01-16,South,95,12.50
+1003,2026-01-16,North,143,11.00
+1003,2026-01-16,North,143,11.00
+1004,2026-02-01,East,60,
+"""
+
+df = pd.read_csv(io.StringIO(CSV), parse_dates=[''placed_on''])
+
+print(''shape      '', df.shape)
+print(''dtypes     '', df.dtypes.to_dict())
+print(''missing    '', df.isna().sum().to_dict())
+print(''duplicates '', int(df.duplicated().sum()))
+print(''range      '', df[''placed_on''].min().date(), ''to'', df[''placed_on''].max().date())
+```
+
+Each line catches a different class of problem: the wrong number of rows, a column read as text, missing values nobody mentioned, duplicated rows from a double export, and dates outside the period you were promised.
+
+## A worked example
+
+```python
+import io
+import json
+import sqlite3
+import pandas as pd
+
+# Three sources, three loaders, one table at the end.
+
+ORDERS_CSV = """order_id;placed_on;region;units;unit_price;note
+1001;15/01/2026;North;120;12,50;
+1002;16/01/2026;South;95;12,50;discount agreed
+1003;16/01/2026;North;143;11,00;n/a
+1004;01/02/2026;East;60;14,00;
+1005;03/02/2026;West;;13,25;missing units
+"""
+
+CUSTOMERS_JSON = """[
+  {"region": "North", "owner": {"name": "Ann", "email": "ann@example.com"}},
+  {"region": "South", "owner": {"name": "Bo", "email": "bo@example.com"}},
+  {"region": "East",  "owner": {"name": "Cy", "email": "cy@example.com"}},
+  {"region": "West",  "owner": {"name": "Di", "email": "di@example.com"}}
+]"""
+
+# 1. A European CSV: semicolons, comma decimals, day-first dates.
+orders = pd.read_csv(
+    io.StringIO(ORDERS_CSV),
+    sep='';'',
+    decimal='','',
+    parse_dates=[''placed_on''],
+    dayfirst=True,
+    na_values=[''n/a'', ''''],
+    dtype={''order_id'': ''int64'', ''region'': ''category''},
+)
+print(''orders'')
+print(orders.dtypes.to_dict())
+print(orders)
+print()
+
+# 2. Nested JSON, flattened.
+customers = pd.json_normalize(json.loads(CUSTOMERS_JSON), sep=''_'')
+customers[''region''] = customers[''region''].astype(''category'')
+print(''customers'')
+print(customers)
+print()
+
+# 3. A database, aggregated in SQL rather than in pandas.
+connection = sqlite3.connect('':memory:'')
+connection.executescript("""
+    CREATE TABLE targets (region TEXT PRIMARY KEY, monthly_target REAL);
+    INSERT INTO targets VALUES
+        (''North'', 2000), (''South'', 1500), (''East'', 900), (''West'', 600);
+""")
+targets = pd.read_sql_query(''SELECT region, monthly_target FROM targets'', connection)
+targets[''region''] = targets[''region''].astype(''category'')
+print(''targets'')
+print(targets)
+print()
+
+# The five checks, on the loaded orders.
+print(''shape      '', orders.shape)
+print(''missing    '', orders.isna().sum().to_dict())
+print(''duplicates '', int(orders.duplicated().sum()))
+print(''date range '', orders[''placed_on''].min().date(), ''to'', orders[''placed_on''].max().date())
+print(''units dtype'', orders[''units''].dtype)
+print()
+
+# `units` is float, not int, because one row is missing. That is
+# pandas telling you something true, not a defect.
+complete = orders.dropna(subset=[''units'']).copy()
+complete[''units''] = complete[''units''].astype(''int64'')
+complete[''revenue''] = (complete[''units''] * complete[''unit_price'']).round(2)
+print(f''{len(complete)} of {len(orders)} rows usable'')
+print()
+
+# Join the three sources on the one key they share.
+combined = (
+    complete
+    .merge(customers, on=''region'', how=''left'', validate=''many_to_one'')
+    .merge(targets, on=''region'', how=''left'', validate=''many_to_one'')
+)
+print(combined[[''order_id'', ''region'', ''revenue'', ''owner_name'', ''monthly_target'']])
+print()
+print(''any missing after the joins:'', bool(combined[[''owner_name'', ''monthly_target'']].isna().any().any()))
+```
+
+Three things in that example are the lesson. The CSV needed four arguments before it loaded correctly, and without them every amount would have been a string. `units` arrived as a float because one value is missing, which is pandas being honest rather than wrong. And `validate=''many_to_one''` on the merges asserts the relationship, so a duplicated region in the lookup tables would raise rather than silently multiply the rows.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Leading zeros vanished from an id | Guessed as an integer; pass `dtype=str` |
+| Amounts are strings | European decimal separator; pass `decimal='',''` |
+| Dates are in the wrong order | US vs UK order; pass `dayfirst=True` |
+| A whole-number column is a float | A missing value forces float; that is correct |
+| `n/a` counted as a real value | Pass it in `na_values` |
+| JSON cells contain dictionaries | Use `json_normalize`, not `read_json` |
+| The row count doubled after a merge | Duplicate keys; use `validate=` |
+| Loading takes minutes | Pass `usecols=`, or aggregate in SQL |
+
+## A check you can run
+
+Load any CSV you work with twice: once with no arguments, and once with `dtype=str` for every column.
+
+Compare the two. Every column where they differ is a column pandas made a decision about, and each of those decisions is one you should have made deliberately. On a typical business export there will be three or four, and at least one will be wrong.
+',
+   'read_csv has about fifty parameters and you will need six of them regularly. This lesson covers those six, the equivalents for JSON, SQL and Excel, and what to do when a file will not parse at all.', 7, 1445,'55555555-5555-4555-8555-555555555555', 'published',
+   DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
+
+  ('e0000001-0000-4000-8000-0000000000d6',
+   'Missing Values, Types and Duplicates',
+   'markdown',
+   'Real data arrives with missing values, wrong types and duplicates. The job is not to make them disappear but to decide, explicitly, what each one means - and to leave a record of the decision.
+
+## Missing is not one thing
+
+```python
+import numpy as np
+import pandas as pd
+
+df = pd.DataFrame({
+    ''id'': [1, 2, 3, 4, 5],
+    ''units'': [120, np.nan, 143, 60, np.nan],
+    ''discount'': [0.0, 0.1, np.nan, 0.0, 0.0],
+    ''note'': [''ok'', None, '''', ''n/a'', ''ok''],
+})
+
+print(df.isna().sum().to_dict())
+print(df.isna().mean().round(2).to_dict())      # as a proportion
+```
+
+Before filling anything, ask what the blank means. There are at least three answers, and they want different treatment:
+
+- **Not applicable.** No discount exists for this row. `0` is correct, and so is leaving it missing - but say which.
+- **Not recorded.** The value exists and nobody captured it. Filling it with a mean invents data; dropping the row loses the rest of it.
+- **Not yet.** A delivery date for an order that has not shipped. Filling it is wrong at any value.
+
+Notice also that `''''` and `''n/a''` above are **not** missing as far as pandas is concerned. They are strings, and `isna()` says `False`:
+
+```python
+import pandas as pd
+import numpy as np
+
+s = pd.Series([''ok'', None, '''', ''n/a'', np.nan])
+print(s.isna().tolist())                                 # the blanks pandas knows
+print(s.replace(['''', ''n/a''], np.nan).isna().tolist())    # after you say so
+```
 
 ## Then choose, and say so
 
 ```python
-df.dropna(subset=[''units''])              # rows without the thing being measured
-df[''units''].fillna(0)                     # when absent genuinely means none
-df[''units''].fillna(df[''units''].median())  # a defensible placeholder
-df[''units''].ffill()                        # time series: carry the last reading
+import numpy as np
+import pandas as pd
+
+df = pd.DataFrame({
+    ''id'': [1, 2, 3, 4, 5],
+    ''units'': [120.0, np.nan, 143.0, 60.0, np.nan],
+    ''region'': [''North'', ''South'', None, ''East'', ''North''],
+})
+
+# Drop rows missing something essential.
+essential = df.dropna(subset=[''units''])
+print(''dropna on units:'', len(essential), ''of'', len(df))
+
+# Fill, with a value that says "none", not a value that looks real.
+filled = df.assign(region=df[''region''].fillna(''unknown''))
+print(filled[''region''].tolist())
+
+# Fill forward, which is right for a time series and wrong otherwise.
+readings = pd.Series([1.0, np.nan, np.nan, 4.0])
+print(readings.ffill().tolist())
+print(readings.interpolate().tolist())
+
+# Keep a flag, so a model and a reader both know it was imputed.
+marked = df.assign(
+    units_missing=df[''units''].isna(),
+    units=df[''units''].fillna(df[''units''].median()),
+)
+print(marked[[''units'', ''units_missing'']])
 ```
 
-There is no default right answer. The one unacceptable choice is making it silently - write the reason in a comment next to the line, because the person asking why the total changed will be you, in March.
+The flag column is the habit worth adopting. Filling with the median is often reasonable; **filling silently** is not, because every downstream chart and model then treats an invention as a measurement.
+
+Dropping needs the same care:
+
+```python
+import numpy as np
+import pandas as pd
+
+df = pd.DataFrame({
+    ''a'': [1, np.nan, 3],
+    ''b'': [np.nan, np.nan, 3],
+    ''c'': [1, 2, 3],
+})
+
+print(len(df.dropna()))                  # 1 - any missing anywhere
+print(len(df.dropna(how=''all'')))         # 3 - only rows that are entirely blank
+print(len(df.dropna(subset=[''a''])))      # 2 - only the column that matters
+print(df.dropna(axis=1, thresh=3).columns.tolist())   # columns with 3 non-null
+```
+
+`df.dropna()` with no arguments drops a row if **any** column is missing, which on a wide table throws away nearly everything. Name the columns you actually need.
 
 ## Dtypes that arrived wrong
 
 ```python
-df[''units''] = pd.to_numeric(df[''units''], errors=''coerce'')
-df[''date''] = pd.to_datetime(df[''date''], errors=''coerce'')
-df[''region''] = df[''region''].astype(''category'')
+import pandas as pd
+
+df = pd.DataFrame({
+    ''amount'': [''1200'', ''950'', ''1,430'', ''n/a'', ''600''],
+    ''started'': [''2026-01-15'', ''2026-01-16'', ''not a date'', ''2026-02-01'', ''2026-02-03''],
+    ''active'': [''yes'', ''no'', ''yes'', ''YES'', ''no''],
+})
+print(df.dtypes.to_dict())
+
+# to_numeric with errors=''coerce'' turns what cannot convert into NaN,
+# which is the honest outcome - you then decide what to do with them.
+df[''amount''] = pd.to_numeric(df[''amount''].str.replace('','', '''', regex=False), errors=''coerce'')
+df[''started''] = pd.to_datetime(df[''started''], errors=''coerce'')
+df[''active''] = df[''active''].str.lower().map({''yes'': True, ''no'': False})
+
+print(df.dtypes.to_dict())
+print(df)
+print(''unconvertible amounts:'', int(df[''amount''].isna().sum()))
+print(''unparseable dates:    '', int(df[''started''].isna().sum()))
 ```
 
-`errors=''coerce''` turns anything unparseable into NaT or NaN instead of raising - which is what you want, followed immediately by counting how many it produced:
+`errors=''coerce''` is the right default at a boundary: it converts what it can and marks the rest, so you find out how many rows were bad instead of the whole call raising on the first one.
+
+`map` with a dictionary is better than `replace` for a known set of values, because anything not in the dictionary becomes `NaN` - so an unexpected value shows up rather than passing through.
+
+Two dtypes worth choosing on purpose:
 
 ```python
-print(df[''units''].isna().sum(), ''values would not parse'')
-```
+import pandas as pd
+import numpy as np
 
-A column that is `object` when it should be numeric is the single most common cause of a wrong answer, because `sum()` on strings concatenates rather than failing.
+n = 100_000
+repeated = pd.Series(np.random.default_rng(0).choice([''North'', ''South'', ''East''], n))
+
+as_object = repeated.memory_usage(deep=True)
+as_category = repeated.astype(''category'').memory_usage(deep=True)
+print(f''object:   {as_object:>9,} bytes'')
+print(f''category: {as_category:>9,} bytes'')
+print(''smaller:'', as_category < as_object / 10)
+
+# A nullable integer, so a column with blanks stays an integer.
+counts = pd.Series([1, 2, None, 4])
+print(counts.dtype)                          # float64 - the blank forced it
+print(counts.astype(''Int64'').dtype)          # Int64 - capital I, nullable
+print(counts.astype(''Int64'').tolist())
+```
 
 ## Duplicates
 
 ```python
-df.duplicated().sum()                         # identical rows
-df.duplicated(subset=[''order_id'']).sum()      # rows that claim to be the same thing
-df = df.drop_duplicates(subset=[''order_id''], keep=''last'')
+import pandas as pd
+
+df = pd.DataFrame({
+    ''order_id'': [1, 2, 2, 3, 3],
+    ''region'': [''North'', ''South'', ''South'', ''East'', ''East''],
+    ''units'': [120, 95, 95, 60, 61],
+    ''loaded_at'': [''a'', ''a'', ''b'', ''a'', ''b''],
+})
+
+print(''fully identical rows:'', int(df.duplicated().sum()))
+print(''repeated order ids:  '', int(df.duplicated(subset=[''order_id'']).sum()))
+print()
+
+# Which ones, so you can look at them.
+print(df[df.duplicated(subset=[''order_id''], keep=False)].sort_values(''order_id''))
+print()
+
+# Keeping the last is a choice; say why.
+deduped = df.sort_values(''loaded_at'').drop_duplicates(subset=[''order_id''], keep=''last'')
+print(deduped)
 ```
 
-Whole-row duplicates are usually a loading mistake - the same file appended twice. Key duplicates are a data problem, and `keep=''last''` versus `keep=''first''` is a real decision: the latest record is usually the corrected one, but not if your export is sorted alphabetically.
+Row 3 and row 4 share an `order_id` and **disagree on units**. That is not a duplicate export; it is a conflict, and dropping one silently picks a winner at random unless you sort first. Always look at `keep=False` before you drop anything.
 
 ## Strings
 
 ```python
-df[''region''] = df[''region''].str.strip().str.title()
+import pandas as pd
+
+names = pd.Series(['' Ann '', ''BO'', ''cy  '', ''Ann'', ''Dee-Ann''])
+
+print(names.str.strip().str.title().tolist())
+print(names.str.strip().str.lower().value_counts().to_dict())
+print(names.str.contains(''ann'', case=False).tolist())
+print(names.str.len().tolist())
+
+# Splitting into columns.
+full = pd.Series([''North/web'', ''South/phone'', ''East/store''])
+print(full.str.split(''/'', expand=True).rename(columns={0: ''region'', 1: ''channel''}))
+
+# Extracting with a pattern, which returns NaN where it does not match.
+codes = pd.Series([''ORD-1001'', ''ORD-1002'', ''invalid'', ''ORD-1004''])
+print(codes.str.extract(r''ORD-(?P<number>[0-9]+)''))
 ```
 
-Trailing whitespace is invisible and breaks every join and group-by you will do later. Normalise case and whitespace on anything you intend to group by, as soon as it is loaded.',
-   'Missing is not one thing: a gap can mean unknown, not applicable, or zero recorded badly, and the right fix differs for each. This lesson also covers dtypes that arrived wrong and duplicates that are only duplicates on the columns that identify a row.',
-   12, 431, '55555555-5555-4555-8555-555555555555', 'published',
+The `.str` accessor applies a string method to every element and returns `NaN` for missing values rather than raising. Two habits: `.str.strip()` on anything from a spreadsheet, and `.str.lower()` before any comparison or grouping, because `''North''` and `''north''` are two groups otherwise.
+
+## A worked example
+
+```python
+import io
+import numpy as np
+import pandas as pd
+
+RAW = """order_id,placed_on,region,units,amount,status
+1001,2026-01-15,North,120,"1,500.00",complete
+1002,16/01/2026,south,95,1187.50,COMPLETE
+1003,2026-01-16,North,,n/a,pending
+1004,2026-02-01,East ,60,840.00,complete
+1004,2026-02-01,East,60,840.00,complete
+1005,not a date,West,-5,"2,100.00",cancelled
+1006,2026-02-03,north,143,1573.00,Complete
+"""
+
+df = pd.read_csv(io.StringIO(RAW), dtype=str)
+print(''as loaded: every column is text,'', df.shape)
+print()
+
+report = {}
+
+# 1. Whitespace and case FIRST. Deduplicating before this step misses
+#    the pair that differ only by a trailing space - which is exactly
+#    the pair in this file.
+df[''region''] = df[''region''].str.strip().str.title()
+df[''status''] = df[''status''].str.strip().str.lower()
+report[''regions''] = sorted(df[''region''].unique().tolist())
+
+# 2. Now the exact duplicates are findable.
+before = len(df)
+df = df.drop_duplicates()
+report[''exact duplicates dropped''] = before - len(df)
+
+# 3. Numbers that arrived as text, with thousands separators.
+df[''units''] = pd.to_numeric(df[''units''], errors=''coerce'')
+df[''amount''] = pd.to_numeric(
+    df[''amount''].str.replace('','', '''', regex=False), errors=''coerce'')
+report[''unconvertible amounts''] = int(df[''amount''].isna().sum())
+
+# 4. Mixed date formats. Two passes: ISO first, then day-first for
+#    whatever is left, so neither format is misread as the other.
+iso = pd.to_datetime(df[''placed_on''], format=''%Y-%m-%d'', errors=''coerce'')
+dayfirst = pd.to_datetime(df[''placed_on''], format=''%d/%m/%Y'', errors=''coerce'')
+df[''placed_on''] = iso.fillna(dayfirst)
+report[''unparseable dates''] = int(df[''placed_on''].isna().sum())
+
+# 5. Values that are present and impossible.
+negative = df[''units''] < 0
+report[''negative units''] = int(negative.sum())
+df.loc[negative, ''units''] = np.nan
+
+# 6. A flag before filling, so nothing invented is mistaken for
+#    something measured.
+df[''units_imputed''] = df[''units''].isna()
+# round() because units are whole things; a median of 107.5 cannot be
+# cast to an integer dtype, and silently keeping it a float would hide
+# that the column is supposed to be countable.
+df[''units''] = df[''units''].fillna(round(df[''units''].median())).astype(''Int64'')
+
+# 7. Categories for the columns with few values, and a real integer
+#    for the id now that it is known to be clean.
+df[''order_id''] = df[''order_id''].astype(''int64'')
+df[''region''] = df[''region''].astype(''category'')
+df[''status''] = df[''status''].astype(''category'')
+
+print(df)
+print()
+print(df.dtypes.to_dict())
+print()
+for key, value in report.items():
+    print(f''{key:26} {value}'')
+print()
+
+# What is still unusable, named rather than silently dropped.
+unusable = df[df[''amount''].isna() | df[''placed_on''].isna()]
+print(f''{len(unusable)} row(s) still unusable:'')
+print(unusable[[''order_id'', ''placed_on'', ''amount'', ''status'']])
+print()
+
+usable = df.dropna(subset=[''amount'', ''placed_on''])
+print(f''{len(usable)} of {len(df)} rows usable, ''
+      f''{usable["units_imputed"].sum()} with imputed units'')
+print(f''total amount {usable["amount"].sum():,.2f}'')
+```
+
+Six decisions are made there and every one is recorded. The duplicate drop is counted. The imputed values carry a flag. The negative units are turned into missing rather than kept or quietly zeroed. The unusable rows are printed rather than dropped in silence. A reader of the output can see exactly what happened to the seven input rows.
+
+The two-pass date parsing is the piece worth stealing: a single `to_datetime` with `dayfirst=True` would read `2026-01-15` correctly by luck and `01/02/2026` as 1 February, which may be right or may be a month out. Parsing each format explicitly and combining with `fillna` removes the guess.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `dropna()` removed almost every row | It drops on any column; pass `subset=` |
+| An integer column became a float | A missing value; use the nullable `Int64` |
+| `''North''` and `''north''` are two groups | No `.str.lower()` before grouping |
+| `''''` was not counted as missing | It is a string; replace it first |
+| A date is a month out | Ambiguous format; parse each explicitly |
+| `to_numeric` raised on the first bad row | Pass `errors=''coerce''` |
+| Dropping duplicates lost real data | The rows differed; inspect with `keep=False` |
+| A model treats imputed values as real | Keep an `_imputed` flag column |
+
+## A check you can run
+
+Take any cleaning script you have and add one line after every step:
+
+```python
+import numpy as np
+import pandas as pd
+
+df = pd.DataFrame({''a'': [1, np.nan, 3, 3], ''b'': [''x'', ''y'', None, None]})
+
+
+def audit(label, frame):
+    print(f''{label:<22} rows={len(frame):<4} missing={int(frame.isna().sum().sum())}'')
+
+
+audit(''loaded'', df)
+df = df.drop_duplicates()
+audit(''deduplicated'', df)
+df = df.dropna(subset=[''a''])
+audit(''dropped missing a'', df)
+df[''b''] = df[''b''].fillna(''unknown'')
+audit(''filled b'', df)
+```
+
+Run it. The row count and the missing-value count after each step is the audit trail, and the step where one of them moves unexpectedly is the bug. Most cleaning scripts lose rows somewhere nobody intended, and this is the cheapest way to find out where.
+',
+   'Missing is not one thing: a gap can mean unknown, not applicable, or zero recorded badly, and the right fix differs for each. This lesson also covers dtypes that arrived wrong and duplicates that are only duplicates on the columns that identify a row.', 8, 1590,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000d7',
    'Filtering, Grouping and Joining',
    'markdown',
-   'Most questions are answered by narrowing rows, collapsing them into groups, or bringing in a column from another table. The rest is presentation.
+   'Filtering, grouping, joining and reshaping are the four verbs of table manipulation. Learn them properly once and most analysis becomes a short pipeline of them rather than a loop.
 
 ## Filtering
 
 ```python
+import numpy as np
 import pandas as pd
 
-sales = pd.DataFrame({
-    ''region'': [''North'', ''South'', ''North'', ''East'', ''South''],
-    ''rep'':    [''ana'', ''bo'', ''ana'', ''cai'', ''bo''],
-    ''units'':  [120, 95, 143, 60, 210],
+rng = np.random.default_rng(3)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South'', ''East''], 12),
+    ''channel'': rng.choice([''web'', ''phone''], 12),
+    ''units'': rng.integers(1, 100, 12),
+    ''revenue'': rng.normal(500, 150, 12).round(2),
 })
 
-north = sales[sales[''region''] == ''North'']
-busy = sales[(sales[''units''] > 100) & (sales[''region''] != ''East'')]
+print(orders[orders[''units''] > 50].shape)
+print(orders[(orders[''units''] > 50) & (orders[''channel''] == ''web'')].shape)
+print(orders[orders[''region''].isin([''North'', ''East''])].shape)
+print(orders[~orders[''region''].eq(''South'')].shape)
+print(orders[orders[''revenue''].between(400, 600)].shape)
+print(orders.query(''units > 50 and channel == "web"'').shape)
 ```
 
-Two things catch people. Conditions need brackets, because `&` binds tighter than `>`. And it is `&` and `|`, not `and` and `or` - the Python keywords want a single true or false, and a Series of booleans is neither.
+Three rules that save time:
 
-```python
-sales.query(''units > 100 and region != "East"'')
-```
+- **Parentheses around each comparison.** `&` binds tighter than `>`, so `a > 1 & b < 2` parses as `a > (1 & b) < 2`.
+- **`&`, `|`, `~`, never `and`, `or`, `not`.** The Python keywords want a single truth value and a Series has many.
+- **`isin` rather than a chain of `|`.** It is shorter and it scales to a list from a variable.
 
-`query` is often easier to read, and it avoids both traps.
+`query` reads well for interactive work and is slower; the mask form is what belongs in a pipeline.
 
 ## Grouping
 
 ```python
-sales.groupby(''region'')[''units''].sum()
+import numpy as np
+import pandas as pd
 
-sales.groupby(''region'').agg(
-    total=(''units'', ''sum''),
+rng = np.random.default_rng(3)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South'', ''East''], 200),
+    ''channel'': rng.choice([''web'', ''phone'', ''store''], 200),
+    ''units'': rng.integers(1, 100, 200),
+    ''revenue'': rng.normal(500, 150, 200).round(2),
+})
+
+# One column, one function.
+print(orders.groupby(''region'')[''revenue''].sum().round(2))
+print()
+
+# Named aggregations: the readable form, and the one that names its
+# own output columns.
+summary = orders.groupby(''region'', as_index=False).agg(
     orders=(''units'', ''size''),
-    best=(''units'', ''max''),
+    units=(''units'', ''sum''),
+    revenue=(''revenue'', ''sum''),
+    mean_order=(''revenue'', ''mean''),
+    best=(''revenue'', ''max''),
 )
+print(summary.round(2))
+print()
+
+# Two keys gives a MultiIndex, which is often not what you want.
+by_both = orders.groupby([''region'', ''channel''])[''revenue''].sum()
+print(by_both.head(4))
+print(type(by_both.index).__name__)
+print()
+print(by_both.reset_index().head(4))
 ```
 
-Split, apply, combine: the rows are split by the key, a function is applied to each group, and the results are stitched back together. The named form of `agg` is worth defaulting to - it produces columns called `total` and `orders` rather than a multi-level index you then have to flatten.
+`as_index=False` or a `.reset_index()` keeps the grouping keys as ordinary columns, which is almost always what the next step wants.
 
-To keep the grouping key as a column rather than an index:
+Three group operations that are not aggregation:
 
 ```python
-sales.groupby(''region'', as_index=False)[''units''].sum()
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South''], 10),
+    ''revenue'': rng.integers(100, 900, 10),
+})
+
+# transform: one value per ROW, broadcast back from the group.
+orders[''region_total''] = orders.groupby(''region'')[''revenue''].transform(''sum'')
+orders[''share''] = (orders[''revenue''] / orders[''region_total'']).round(3)
+print(orders.head(4))
+print()
+
+# filter: keep or drop whole GROUPS.
+big = orders.groupby(''region'').filter(lambda g: g[''revenue''].sum() > 2000)
+print(''regions kept:'', sorted(big[''region''].unique().tolist()))
+print()
+
+# rank within a group.
+orders[''rank_in_region''] = (
+    orders.groupby(''region'')[''revenue''].rank(ascending=False, method=''dense'').astype(int))
+print(orders.sort_values([''region'', ''rank_in_region'']).head(4))
 ```
+
+`transform` is the one people reach for last and should reach for first. It answers "what fraction of its region''s revenue is this order" without a join.
 
 ## Joining
 
 ```python
-targets = pd.DataFrame({''region'': [''North'', ''South'', ''West''], ''target'': [200, 300, 150]})
+import pandas as pd
 
-sales.merge(targets, on=''region'', how=''left'')
+orders = pd.DataFrame({
+    ''order_id'': [1, 2, 3, 4],
+    ''region'': [''North'', ''South'', ''East'', ''Nowhere''],
+    ''revenue'': [500, 300, 700, 100],
+})
+owners = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''East'', ''West''],
+    ''owner'': [''Ann'', ''Bo'', ''Cy'', ''Di''],
+})
+
+print(orders.merge(owners, on=''region'', how=''inner''))      # matches only
+print()
+print(orders.merge(owners, on=''region'', how=''left''))       # all orders
+print()
+print(orders.merge(owners, on=''region'', how=''outer'', indicator=True)
+      [[''region'', ''order_id'', ''owner'', ''_merge'']])
 ```
 
-`how` is the whole decision:
+`how=''left''` keeps every row on the left and fills the right with `NaN` where there is no match - which is what you want when you are enriching a fact table from a lookup. `indicator=True` adds a `_merge` column saying where each row came from, and it is the fastest way to find keys that did not match.
 
-- **`left`** keeps every sales row, filling `target` with NaN where there is no match. Usually what you want.
-- **`inner`** keeps only matching rows, and silently drops the rest.
-- **`outer`** keeps everything from both.
+Different column names, and an index join:
+
+```python
+import pandas as pd
+
+orders = pd.DataFrame({''region_code'': [''N'', ''S''], ''revenue'': [500, 300]})
+regions = pd.DataFrame({''code'': [''N'', ''S''], ''name'': [''North'', ''South'']})
+
+print(orders.merge(regions, left_on=''region_code'', right_on=''code'', how=''left''))
+print()
+
+left = pd.DataFrame({''a'': [1, 2]}, index=[''x'', ''y''])
+right = pd.DataFrame({''b'': [10, 20]}, index=[''y'', ''z''])
+print(left.join(right, how=''left''))        # joins on the INDEX
+print()
+print(pd.concat([left, right], axis=1))    # also aligns on the index
+```
 
 ## The merge that multiplies
 
-If the right-hand side has two rows per key, every left row matching that key becomes two rows. Nobody notices until a total is exactly double.
-
 ```python
-before = len(sales)
-joined = sales.merge(targets, on=''region'', how=''left'', validate=''many_to_one'')
-assert len(joined) == before
+import pandas as pd
+
+orders = pd.DataFrame({''region'': [''North'', ''South''], ''revenue'': [500, 300]})
+owners = pd.DataFrame({
+    ''region'': [''North'', ''North'', ''South''],       # North appears TWICE
+    ''owner'': [''Ann'', ''Annabel'', ''Bo''],
+})
+
+joined = orders.merge(owners, on=''region'', how=''left'')
+print(joined)
+print(f''{len(orders)} rows in, {len(joined)} rows out'')
+print(f''revenue before {orders["revenue"].sum()}, after {joined["revenue"].sum()}'')
 ```
 
-`validate` raises if the relationship is not what you said, and the assertion catches the rest. Both cost one line and have each saved an afternoon.
+Two rows became three and the total revenue went up by 500, because the North order matched two owners. Nothing warned you.
+
+This is the single most common silent error in analysis, and there is a one-word fix:
+
+```python
+import pandas as pd
+
+orders = pd.DataFrame({''region'': [''North'', ''South''], ''revenue'': [500, 300]})
+owners = pd.DataFrame({''region'': [''North'', ''North'', ''South''], ''owner'': [''Ann'', ''Annabel'', ''Bo'']})
+
+try:
+    orders.merge(owners, on=''region'', how=''left'', validate=''many_to_one'')
+except Exception as error:
+    print(type(error).__name__)
+    print(str(error)[:70])
+```
+
+`validate=` takes `''one_to_one''`, `''one_to_many''`, `''many_to_one''` or `''many_to_many''` and raises when the data disagrees. **Put it on every merge.** It costs nothing and it turns a silent wrong total into an exception with a line number.
+
+The other defence is to check the row count:
+
+```python
+import pandas as pd
+
+left = pd.DataFrame({''k'': [1, 2], ''v'': [10, 20]})
+right = pd.DataFrame({''k'': [1, 2], ''w'': [''a'', ''b'']})
+
+before = len(left)
+joined = left.merge(right, on=''k'', how=''left'', validate=''one_to_one'')
+assert len(joined) == before, f''{before} rows became {len(joined)}''
+print(''row count held at'', len(joined))
+```
 
 ## Reshaping between wide and long
 
 ```python
-wide = sales.pivot_table(index=''rep'', columns=''region'', values=''units'', aggfunc=''sum'')
-long = wide.reset_index().melt(id_vars=''rep'', value_name=''units'')
+import pandas as pd
+
+wide = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''East''],
+    ''jan'': [500, 300, 700],
+    ''feb'': [550, 280, 760],
+    ''mar'': [600, 310, 720],
+})
+print(wide)
+print()
+
+long = wide.melt(id_vars=''region'', var_name=''month'', value_name=''revenue'')
+print(long.head(4))
+print(long.shape)
+print()
+
+back = long.pivot(index=''region'', columns=''month'', values=''revenue'')
+print(back)
 ```
 
-Long is better for computing and for most plotting libraries; wide is better for reading. Knowing which one a tool expects saves a lot of fighting with it.',
-   'Three operations answer most questions: narrow the rows, collapse them into groups, and bring in a column from somewhere else. This lesson covers all three, and the merge that silently multiplies your row count.',
-   12, 383, '55555555-5555-4555-8555-555555555555', 'published',
+**Long is for computing, wide is for reading.** Grouping, plotting and modelling all want one row per observation; a report wants months across the top. `melt` goes one way and `pivot` the other.
+
+`pivot_table` aggregates as it pivots, which is what you need when the index and columns do not uniquely identify a row:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(5)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South''], 40),
+    ''channel'': rng.choice([''web'', ''phone''], 40),
+    ''revenue'': rng.integers(100, 900, 40),
+})
+
+table = orders.pivot_table(
+    index=''region'', columns=''channel'', values=''revenue'',
+    aggfunc=''sum'', margins=True, margins_name=''total'',
+)
+print(table)
+print()
+print(orders.pivot_table(index=''region'', columns=''channel'',
+                         values=''revenue'', aggfunc=[''mean'', ''count'']).round(1))
+```
+
+`crosstab` is the counting shorthand:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(5)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South''], 40),
+    ''channel'': rng.choice([''web'', ''phone''], 40),
+})
+print(pd.crosstab(orders[''region''], orders[''channel''], margins=True))
+print()
+print(pd.crosstab(orders[''region''], orders[''channel''], normalize=''index'').round(2))
+```
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=21)
+
+n = 600
+orders = pd.DataFrame({
+    ''order_id'': np.arange(1, n + 1),
+    ''region_code'': rng.choice([''N'', ''S'', ''E'', ''W''], n, p=[.4, .3, .2, .1]),
+    ''channel'': rng.choice([''web'', ''phone'', ''store''], n, p=[.6, .25, .15]),
+    ''month'': rng.choice([''2026-01'', ''2026-02'', ''2026-03''], n),
+    ''units'': rng.integers(1, 50, n),
+    ''revenue'': rng.normal(480, 160, n).round(2).clip(10),
+})
+
+regions = pd.DataFrame({
+    ''region_code'': [''N'', ''S'', ''E'', ''W''],
+    ''region'': [''North'', ''South'', ''East'', ''West''],
+    ''owner'': [''Ann'', ''Bo'', ''Cy'', ''Di''],
+})
+
+targets = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''East'', ''West''],
+    ''month'': [''2026-01''] * 4,
+    ''target'': [90000, 70000, 45000, 25000],
+})
+
+# 1. Join the lookup, asserting the relationship.
+enriched = orders.merge(regions, on=''region_code'', how=''left'', validate=''many_to_one'')
+assert len(enriched) == len(orders), ''the merge multiplied rows''
+assert enriched[''region''].notna().all(), ''a region code had no name''
+print(f''{len(enriched)} rows, {enriched["region"].nunique()} regions'')
+print()
+
+# 2. Filter: web and phone only, and orders worth having.
+considered = enriched[
+    enriched[''channel''].isin([''web'', ''phone'']) & (enriched[''revenue''] >= 100)
+].copy()
+print(f''{len(considered)} of {len(enriched)} rows considered'')
+print()
+
+# 3. Group, with named aggregations.
+by_region_month = (
+    considered.groupby([''region'', ''month''], as_index=False)
+    .agg(orders=(''order_id'', ''size''),
+         units=(''units'', ''sum''),
+         revenue=(''revenue'', ''sum''),
+         mean_order=(''revenue'', ''mean''))
+    .round(2)
+)
+print(by_region_month.head(4))
+print()
+
+# 4. transform: each order''s share of its region-month, no join needed.
+considered[''region_month_total''] = (
+    considered.groupby([''region'', ''month''])[''revenue''].transform(''sum''))
+# Stored unrounded; rounded only for display, so the shares still
+# sum to exactly one within each group.
+considered[''share''] = considered[''revenue''] / considered[''region_month_total'']
+print(considered[[''order_id'', ''region'', ''month'', ''revenue'', ''share'']]
+      .head(3).round({''share'': 4}))
+print(f''shares sum to 1 per group: ''
+      f''{bool(np.allclose(considered.groupby(["region", "month"])["share"].sum(), 1.0))}'')
+print()
+
+# 5. Rank within group, and take the top 2 per region.
+considered[''rank''] = (considered.groupby(''region'')[''revenue'']
+                      .rank(ascending=False, method=''first'').astype(int))
+top = considered[considered[''rank''] <= 2].sort_values([''region'', ''rank''])
+print(top[[''region'', ''rank'', ''order_id'', ''revenue'']])
+print()
+
+# 6. Wide for the report.
+wide = by_region_month.pivot(index=''region'', columns=''month'', values=''revenue'').round(0)
+print(wide)
+print()
+
+# 7. Join the targets, keeping every region-month even where no target
+#    exists - and showing which those are.
+with_targets = by_region_month.merge(
+    targets, on=[''region'', ''month''], how=''left'', validate=''one_to_one'', indicator=True)
+with_targets[''hit''] = with_targets[''revenue''] >= with_targets[''target'']
+print(with_targets[[''region'', ''month'', ''revenue'', ''target'', ''hit'', ''_merge'']].head(6))
+print()
+print(''rows with no target:'', int((with_targets[''_merge''] == ''left_only'').sum()))
+```
+
+Four habits carry that pipeline. Every merge has a `validate=`. Every merge is followed by an assertion on the row count. `transform` answers a per-row question without a second join. And the wide pivot happens once, at the end, for presentation only.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The total went up after a join | Duplicate keys on the right; use `validate=` |
+| `truth value of a Series is ambiguous` | `and`/`or` instead of the bitwise operators |
+| The mask matched nothing | Missing parentheses around comparisons |
+| The group keys became an index | Pass `as_index=False` or `reset_index()` |
+| A per-row group value needs a join | Use `transform` instead |
+| `pivot` raised on duplicate entries | Use `pivot_table` with an `aggfunc` |
+| A left join lost rows | It cannot; the row count only grows or holds |
+| Key types do not match | `int` against `str`; cast one before merging |
+
+## A check you can run
+
+Add this line after every `merge` in your current analysis:
+
+```python
+assert len(result) == len(left), f''{len(left)} rows became {len(result)}''
+```
+
+Run the whole pipeline. If any assertion fires you have found a silent duplication, and the total you reported last month was wrong. In my experience roughly one analysis in three has one, and it is always in the join nobody thought about.
+',
+   'Three operations answer most questions: narrow the rows, collapse them into groups, and bring in a column from somewhere else. This lesson covers all three, and the merge that silently multiplies your row count.', 8, 1558,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000d9',
    'Group-By in Depth and Window Calculations',
    'markdown',
-   '`groupby().sum()` collapses each group to one row. Often what you want is a group statistic attached to every row - each sale next to its region total, each score next to its cohort mean. That is `transform`, and it is the tool most people are missing.
+   'Grouping is where most of the value in a table is extracted. The basic form is one line; the five patterns below are what turn it from a sum into an analysis.
+
+## The three shapes of a group operation
+
+Every `groupby` does one of three things, and knowing which you want decides the method:
 
 ```python
+import numpy as np
 import pandas as pd
 
-sales = pd.DataFrame({
-    ''region'': [''North'', ''South'', ''North'', ''East'', ''South'', ''North''],
-    ''rep'':    [''ana'', ''bo'', ''ana'', ''cai'', ''bo'', ''dee''],
-    ''units'':  [120, 95, 143, 60, 210, 80],
+rng = np.random.default_rng(4)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South'', ''East''], 30),
+    ''channel'': rng.choice([''web'', ''phone''], 30),
+    ''revenue'': rng.integers(100, 900, 30),
 })
 
-sales[''region_total''] = sales.groupby(''region'')[''units''].transform(''sum'')
-sales[''share''] = sales[''units''] / sales[''region_total'']
+# aggregate: one row OUT per group.
+print(orders.groupby(''region'')[''revenue''].sum())
+print()
+
+# transform: one value out per INPUT ROW, broadcast from the group.
+print(orders.groupby(''region'')[''revenue''].transform(''sum'').head(4).tolist())
+print()
+
+# filter: whole GROUPS kept or dropped, rows unchanged.
+big = orders.groupby(''region'').filter(lambda g: len(g) > 8)
+print(len(orders), ''->'', len(big), sorted(big[''region''].unique()))
 ```
 
-`transform` returns a Series the same length as the input, aligned to the original index. `agg` returns one row per group. That single difference is most of what there is to learn.
+Aggregate shrinks, transform preserves the shape, filter removes whole groups. Almost every "how do I do X by group" question is one of those three.
+
+## Named aggregations
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(4)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South'', ''East''], 200),
+    ''channel'': rng.choice([''web'', ''phone'', ''store''], 200),
+    ''units'': rng.integers(1, 60, 200),
+    ''revenue'': rng.normal(500, 180, 200).round(2).clip(20),
+})
+
+summary = orders.groupby(''region'', as_index=False).agg(
+    orders=(''revenue'', ''size''),
+    revenue=(''revenue'', ''sum''),
+    mean_order=(''revenue'', ''mean''),
+    median_order=(''revenue'', ''median''),
+    biggest=(''revenue'', ''max''),
+    units=(''units'', ''sum''),
+    channels=(''channel'', ''nunique''),
+)
+print(summary.round(2))
+```
+
+The `name=(column, function)` form is the one to use. It names the output columns, it lets one column be aggregated several ways, and it avoids the MultiIndex that the older `agg([''sum'', ''mean''])` form produces.
+
+A custom function works wherever a name does:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(4)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South''], 100),
+    ''revenue'': rng.normal(500, 180, 100).round(2),
+})
+
+def iqr(values: pd.Series) -> float:
+    return float(values.quantile(0.75) - values.quantile(0.25))
+
+print(orders.groupby(''region'', as_index=False).agg(
+    spread=(''revenue'', iqr),
+    p90=(''revenue'', lambda s: s.quantile(0.9)),
+).round(2))
+```
+
+A named function beats a lambda here, because the lambda''s name in an error message is `<lambda>`.
 
 ## Ranking inside a group
 
 ```python
-sales[''rank_in_region''] = (
-    sales.groupby(''region'')[''units''].rank(method=''dense'', ascending=False)
-)
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(9)
+orders = pd.DataFrame({
+    ''order_id'': np.arange(1, 13),
+    ''region'': [''North''] * 4 + [''South''] * 4 + [''East''] * 4,
+    ''revenue'': rng.integers(100, 900, 12),
+})
+
+orders[''rank''] = orders.groupby(''region'')[''revenue''].rank(
+    ascending=False, method=''dense'').astype(int)
+orders[''percentile''] = orders.groupby(''region'')[''revenue''].rank(pct=True).round(2)
+
+print(orders.sort_values([''region'', ''rank'']))
 ```
 
-`method` matters when there are ties: `dense` gives 1, 2, 2, 3; `min` gives 1, 2, 2, 4. Pick on purpose, because a report that ranks differently from last quarter for no visible reason is a long conversation.
+The `method` argument decides what happens to ties: `''min''` gives 1, 1, 3; `''dense''` gives 1, 1, 2; `''first''` breaks ties by position, which is what you want when you need exactly n rows per group.
 
 ## Top n per group
 
 ```python
-top = (sales.sort_values(''units'', ascending=False)
-            .groupby(''region'')
-            .head(1))
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(9)
+orders = pd.DataFrame({
+    ''order_id'': np.arange(1, 25),
+    ''region'': rng.choice([''North'', ''South'', ''East''], 24),
+    ''revenue'': rng.integers(100, 900, 24),
+})
+
+# The readable way, and the fast way for a small n.
+top2 = (orders.sort_values(''revenue'', ascending=False)
+        .groupby(''region'', as_index=False)
+        .head(2)
+        .sort_values([''region'', ''revenue''], ascending=[True, False]))
+print(top2)
+print()
+
+# nlargest per group, which says what it means.
+print(orders.groupby(''region'')[''revenue''].nlargest(2))
+print()
+
+# And with a rank, when you also want the rank column.
+orders[''rank''] = orders.groupby(''region'')[''revenue''].rank(
+    ascending=False, method=''first'').astype(int)
+print(orders[orders[''rank''] <= 2].sort_values([''region'', ''rank''])
+      [[''region'', ''rank'', ''order_id'', ''revenue'']])
 ```
 
-Sort, then take the head of each group. It reads oddly the first time and it is the idiomatic answer.
+`sort_values` then `groupby().head(n)` is the idiom to remember. `groupby().apply(lambda g: g.nlargest(n))` does the same thing far more slowly.
 
 ## Cumulative and rolling
 
 ```python
-daily = pd.DataFrame({
-    ''day'':   pd.date_range(''2026-01-01'', periods=7, freq=''D''),
-    ''units'': [10, 14, 9, 21, 17, 25, 13],
-})
+import numpy as np
+import pandas as pd
 
-daily[''running''] = daily[''units''].cumsum()
-daily[''avg_3d''] = daily[''units''].rolling(window=3).mean()
-daily[''vs_yesterday''] = daily[''units''].diff()
+rng = np.random.default_rng(13)
+daily = pd.DataFrame({
+    ''date'': pd.date_range(''2026-01-01'', periods=20, freq=''D'').repeat(2),
+    ''region'': [''North'', ''South''] * 20,
+    ''revenue'': rng.integers(100, 400, 40),
+}).sort_values([''region'', ''date''])
+
+# Running total within each region.
+daily[''cumulative''] = daily.groupby(''region'')[''revenue''].cumsum()
+
+# A 7-day rolling mean within each region. The index juggling is the
+# usual annoyance; transform avoids it entirely.
+daily[''rolling7''] = (daily.groupby(''region'')[''revenue'']
+                     .transform(lambda s: s.rolling(7, min_periods=1).mean())
+                     .round(1))
+
+# Change from the previous row, within the group.
+daily[''change''] = daily.groupby(''region'')[''revenue''].diff()
+daily[''pct_change''] = (daily.groupby(''region'')[''revenue'']
+                       .pct_change().round(3))
+
+print(daily[daily[''region''] == ''North''].head(8)
+      [[''date'', ''revenue'', ''cumulative'', ''rolling7'', ''change'']])
 ```
 
-The first two values of `avg_3d` are NaN, which is correct rather than broken: a three-day average needs three days. `min_periods=1` will fill them if you would rather have a partial answer, and that is a judgement about what the number is for.
+`min_periods=1` makes the first few rolling values the mean of however many rows exist, rather than `NaN`. Which you want depends on the chart; decide, rather than letting the default decide.
+
+The grouping matters enormously here. `daily[''revenue''].cumsum()` without the `groupby` runs the running total straight through the region boundary, which is a wrong number that looks plausible.
 
 ## Filtering whole groups
 
 ```python
-busy = sales.groupby(''region'').filter(lambda g: g[''units''].sum() > 150)
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(17)
+orders = pd.DataFrame({
+    ''customer'': rng.choice(list(''ABCDEFGH''), 60),
+    ''revenue'': rng.integers(50, 500, 60),
+})
+
+# Customers with at least 8 orders AND more than 2000 total.
+loyal = orders.groupby(''customer'').filter(
+    lambda g: len(g) >= 8 and g[''revenue''].sum() > 2000)
+
+print(f''{orders["customer"].nunique()} customers -> ''
+      f''{loyal["customer"].nunique()} loyal'')
+print(sorted(loyal[''customer''].unique().tolist()))
+print()
+
+# The same thing without apply, which is faster on a large frame.
+counts = orders.groupby(''customer'')[''revenue''].agg([''size'', ''sum''])
+keep = counts[(counts[''size''] >= 8) & (counts[''sum''] > 2000)].index
+print(sorted(orders[orders[''customer''].isin(keep)][''customer''].unique().tolist()))
 ```
 
-Keeps every row of the groups that pass. Different from filtering rows, and the right tool for "show me everything from the regions that hit target".
+Both give the same answer. The second avoids calling a Python function once per group, which matters when there are fifty thousand groups rather than eight.
 
 ## Apply, and why it is last
 
-`apply` with a Python function works for anything and runs at Python speed - a loop with extra steps. Reach for `agg`, `transform` and the built-in methods first; use `apply` when the operation genuinely has no vectorised form, and expect it to be the slow line in your notebook.',
-   'Beyond one number per group: transforms that put a group statistic back on every row, ranking inside a group, and cumulative calculations. This is the pandas equivalent of SQL window functions, and it removes most remaining loops.',
-   12, 370, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(21)
+orders = pd.DataFrame({
+    ''region'': rng.choice([''North'', ''South''], 2000),
+    ''revenue'': rng.integers(100, 900, 2000),
+})
+
+import time
+
+start = time.perf_counter()
+by_apply = orders.groupby(''region'').apply(
+    lambda g: pd.Series({''total'': g[''revenue''].sum(), ''n'': len(g)}),
+    include_groups=False)
+apply_seconds = time.perf_counter() - start
+
+start = time.perf_counter()
+by_agg = orders.groupby(''region'').agg(total=(''revenue'', ''sum''), n=(''revenue'', ''size''))
+agg_seconds = time.perf_counter() - start
+
+print(by_agg)
+print(f''apply {apply_seconds * 1000:.2f}ms, agg {agg_seconds * 1000:.2f}ms'')
+print(''agg is faster:'', agg_seconds < apply_seconds)
+```
+
+`apply` calls a Python function once per group, which defeats the vectorisation that makes pandas fast. It is the right tool when the operation genuinely needs the whole sub-frame and has no vectorised equivalent - fitting a model per group, say. For anything expressible as `agg` or `transform`, use those.
+
+The order to try things: `agg`, then `transform`, then a vectorised two-step, then `apply`.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=31)
+
+n = 2000
+orders = pd.DataFrame({
+    ''order_id'': np.arange(1, n + 1),
+    ''customer'': rng.choice([f''C{i:03d}'' for i in range(60)], n),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n, p=[.4, .3, .2, .1]),
+    ''date'': pd.Timestamp(''2026-01-01'') + pd.to_timedelta(rng.integers(0, 90, n), ''D''),
+    ''revenue'': rng.gamma(shape=4.0, scale=120.0, size=n).round(2),
+})
+
+# 1. Aggregate: the summary table.
+by_region = (
+    orders.groupby(''region'', as_index=False)
+    .agg(orders=(''order_id'', ''size''),
+         customers=(''customer'', ''nunique''),
+         revenue=(''revenue'', ''sum''),
+         mean_order=(''revenue'', ''mean''),
+         median_order=(''revenue'', ''median''),
+         p90=(''revenue'', lambda s: s.quantile(0.9)))
+    .sort_values(''revenue'', ascending=False)
+    .round(2)
+)
+print(by_region.to_string(index=False))
+print()
+
+# The mean is well above the median in every region, which is what a
+# long right tail looks like. Report the median.
+print(''mean above median everywhere:'',
+      bool((by_region[''mean_order''] > by_region[''median_order'']).all()))
+print()
+
+# 2. Transform: each order''s share of its region, no join.
+orders[''region_revenue''] = orders.groupby(''region'')[''revenue''].transform(''sum'')
+orders[''share_of_region''] = orders[''revenue''] / orders[''region_revenue'']
+print(''shares sum to 1 per region:'',
+      bool(np.allclose(orders.groupby(''region'')[''share_of_region''].sum(), 1.0)))
+print()
+
+# 3. Rank, and the top 2 per region.
+orders[''rank''] = (orders.groupby(''region'')[''revenue'']
+                  .rank(ascending=False, method=''first'').astype(int))
+top = orders[orders[''rank''] <= 2].sort_values([''region'', ''rank''])
+print(top[[''region'', ''rank'', ''order_id'', ''customer'', ''revenue'']].to_string(index=False))
+print()
+
+# 4. Filter whole groups: customers worth paying attention to.
+counts = orders.groupby(''customer'')[''revenue''].agg(orders=''size'', total=''sum'')
+loyal = counts[(counts[''orders''] >= 40) & (counts[''total''] > 18000)]
+print(f''{len(counts)} customers, {len(loyal)} meet both thresholds'')
+print(loyal.sort_values(''total'', ascending=False).head(3).round(2))
+print()
+
+# 5. Cumulative and rolling, per region, over time.
+daily = (orders.groupby([''region'', ''date''], as_index=False)[''revenue''].sum()
+         .sort_values([''region'', ''date'']))
+daily[''cumulative''] = daily.groupby(''region'')[''revenue''].cumsum().round(2)
+daily[''rolling7''] = (daily.groupby(''region'')[''revenue'']
+                     .transform(lambda s: s.rolling(7, min_periods=1).mean()).round(2))
+daily[''vs_last_week''] = (daily.groupby(''region'')[''revenue'']
+                         .transform(lambda s: s / s.shift(7) - 1).round(3))
+
+north = daily[daily[''region''] == ''North''].head(10)
+print(north[[''date'', ''revenue'', ''cumulative'', ''rolling7'', ''vs_last_week'']].to_string(index=False))
+print()
+
+# The running total must not cross a region boundary.
+last_per_region = daily.groupby(''region'')[''cumulative''].last()
+print(''cumulative ends at the region total:'',
+      bool(np.allclose(last_per_region.sort_index(),
+                       by_region.set_index(''region'')[''revenue''].sort_index())))
+print()
+
+# 6. Two keys, flattened back into columns for the report.
+pivot = (orders.pivot_table(index=''region'', columns=orders[''date''].dt.to_period(''M''),
+                            values=''revenue'', aggfunc=''sum'')
+         .round(0))
+pivot.columns = pivot.columns.astype(str)
+print(pivot)
+```
+
+The assertion in step five is the habit to copy. A per-group cumulative sum that ends at the group total is correct; one that does not has leaked across a boundary, and that is a wrong number no chart will reveal.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A running total crossed a group boundary | `cumsum` without the `groupby` |
+| The group keys became an index | Pass `as_index=False` |
+| `agg([''sum'',''mean''])` gave a MultiIndex | Use named aggregations |
+| `apply` is slow on many groups | One Python call per group; use `agg` |
+| A per-row group value needed a join | Use `transform` |
+| Ties produced the wrong number of rows | Choose `method=` on `rank` |
+| The first rolling values are `NaN` | Pass `min_periods=` |
+| Groups with missing keys vanished | `groupby` drops `NaN` keys; pass `dropna=False` |
+
+## A check you can run
+
+```python
+import numpy as np
+import pandas as pd
+
+df = pd.DataFrame({''g'': [''a'', ''a'', None, ''b''], ''v'': [1, 2, 3, 4]})
+print(df.groupby(''g'')[''v''].sum())
+print(df.groupby(''g'', dropna=False)[''v''].sum())
+print(df[''v''].sum())
+```
+
+The first drops the row with a missing key, so the group totals do not add up to the overall total. The second keeps it.
+
+Any time a set of group totals is less than the whole, that is the first thing to check - and it is the reason a dashboard''s categories can sum to less than its headline number without anyone noticing for a year.
+',
+   'Beyond one number per group: transforms that put a group statistic back on every row, ranking inside a group, and cumulative calculations. This is the pandas equivalent of SQL window functions, and it removes most remaining loops.', 7, 1474,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000da',
    'Dates, Time Zones and Resampling',
    'markdown',
-   'Dates look simple and are not. Most silent errors in reporting are a date doing something reasonable that nobody specified.
+   'Time series work has three stages: get the dates parsed, make the time index the index, and then resample. Almost every problem in this area is a failure at one of those three, usually the first.
 
 ## Get them parsed, then indexed
 
 ```python
 import pandas as pd
 
-df = pd.DataFrame({
-    ''ts'': [''2026-01-01 09:15'', ''2026-01-01 17:40'', ''2026-01-02 08:05''],
-    ''units'': [12, 30, 7],
+raw = pd.DataFrame({
+    ''when'': [''2026-01-15 09:30'', ''2026-01-15 14:05'', ''2026-01-16 08:00''],
+    ''reading'': [21.5, 23.1, 19.8],
 })
-df[''ts''] = pd.to_datetime(df[''ts''])
-df = df.set_index(''ts'').sort_index()
+print(raw.dtypes.to_dict())              # ''when'' is an object - a string
+
+raw[''when''] = pd.to_datetime(raw[''when''])
+print(raw.dtypes.to_dict())              # now datetime64
+
+series = raw.set_index(''when'')[''reading'']
+print(series)
+print(type(series.index).__name__)       # DatetimeIndex
 ```
 
-With a DatetimeIndex you get selection by partial string, which is the feature worth the setup:
+Nothing in this lesson works until the dtype is `datetime64` and the index is a `DatetimeIndex`. A string column that looks like a date supports none of it.
+
+Parsing ambiguous formats needs care rather than a guess:
 
 ```python
-df.loc[''2026-01'']        # the whole month
-df.loc[''2026-01-01'']     # one day
-df.loc[''2026-01-01 09'':''2026-01-01 12'']
+import pandas as pd
+
+dates = pd.Series([''01/02/2026'', ''15/03/2026'', ''2026-04-20''])
+
+# A format that matches them all does not exist, so parse in passes.
+uk = pd.to_datetime(dates, format=''%d/%m/%Y'', errors=''coerce'')
+iso = pd.to_datetime(dates, format=''%Y-%m-%d'', errors=''coerce'')
+combined = uk.fillna(iso)
+print(combined.dt.strftime(''%Y-%m-%d'').tolist())
+
+# format=''mixed'' exists and is slower and more forgiving - which means
+# it can forgive something you wanted to hear about.
+print(pd.to_datetime(dates, format=''mixed'', dayfirst=True)
+      .dt.strftime(''%Y-%m-%d'').tolist())
 ```
+
+`01/02/2026` is 1 February in Britain and 2 January in the United States. If both formats appear in one file, parse each explicitly and combine; a single call with `dayfirst=True` silently picks one reading for every row.
+
+The `.dt` accessor is where the components live:
+
+```python
+import pandas as pd
+
+s = pd.Series(pd.to_datetime([''2026-01-15 09:30'', ''2026-07-04 22:15'']))
+print(s.dt.year.tolist(), s.dt.month.tolist(), s.dt.day.tolist())
+print(s.dt.hour.tolist(), s.dt.dayofweek.tolist())       # Monday is 0
+print(s.dt.day_name().tolist())
+print(s.dt.to_period(''M'').astype(str).tolist())
+print(s.dt.strftime(''%d %b %Y'').tolist())
+print((s.dt.dayofweek >= 5).tolist())                    # weekend
+```
+
+## Selecting by time
+
+```python
+import numpy as np
+import pandas as pd
+
+index = pd.date_range(''2026-01-01'', periods=90, freq=''D'')
+series = pd.Series(np.random.default_rng(2).integers(100, 400, 90), index=index)
+
+print(series.loc[''2026-02''].shape)                   # a whole month, by string
+print(series.loc[''2026-02-01'':''2026-02-07''].shape)   # inclusive of both ends
+print(series.loc[series.index.dayofweek < 5].shape)  # weekdays only
+
+# The first and last week, by label arithmetic. (Series.first and
+# Series.last existed for this and were removed in pandas 3.0.)
+start, end = series.index.min(), series.index.max()
+print(series.loc[start:start + pd.Timedelta(''6D'')].shape)
+print(series.loc[end - pd.Timedelta(''6D''):end].shape)
+```
+
+String slicing on a `DatetimeIndex` is partial-match: `''2026-02''` means the whole of February. Note that it is **inclusive of the end**, unlike positional slicing - which is right for dates and surprising the first time.
 
 ## Resampling
 
+`resample` is `groupby` for time. It takes a frequency and an aggregation.
+
 ```python
-df.resample(''D'')[''units''].sum()      # daily totals
-df.resample(''W'')[''units''].mean()     # weekly average
-df.resample(''ME'')[''units''].sum()     # month end
+import numpy as np
+import pandas as pd
+
+index = pd.date_range(''2026-01-01'', periods=90, freq=''D'')
+daily = pd.Series(np.random.default_rng(2).integers(100, 400, 90), index=index, name=''revenue'')
+
+print(daily.resample(''W'').sum().head(4))             # weekly, ending Sunday
+print()
+print(daily.resample(''ME'').sum())                    # month end
+print()
+print(daily.resample(''ME'').agg([''sum'', ''mean'', ''max'']).round(1))
+print()
+print(daily.resample(''QE'').sum())
 ```
 
-`resample` is `groupby` for time, and it fills in the gaps: a day with no rows appears with 0 or NaN rather than vanishing. That is usually what you want in a chart, and always what you want in a total.
+The frequency strings worth knowing: `''D''` day, `''W''` week, `''ME''` month end, `''MS''` month start, `''QE''` quarter end, `''YE''` year end, `''h''` hour, `''min''` minute. Recent pandas renamed `''M''` to `''ME''` and `''Q''` to `''QE''`, which is the cause of most deprecation warnings in older notebooks.
+
+Going the other way - up-sampling - creates rows that did not exist, so you must say what fills them:
+
+```python
+import pandas as pd
+
+sparse = pd.Series([10, 40], index=pd.to_datetime([''2026-01-01'', ''2026-01-04'']))
+
+print(sparse.resample(''D'').asfreq().tolist())        # NaN for the new rows
+print(sparse.resample(''D'').ffill().tolist())         # carry the last value
+print(sparse.resample(''D'').interpolate().tolist())   # straight line between
+```
+
+Each is right for a different thing. A stock price carries forward; a temperature interpolates; a count of events should be zero, not carried:
+
+```python
+import pandas as pd
+
+events = pd.Series([3, 5], index=pd.to_datetime([''2026-01-01'', ''2026-01-04'']))
+print(events.resample(''D'').sum().tolist())           # 3 0 0 5 - correct for counts
+print(events.resample(''D'').ffill().tolist())         # 3 3 3 5 - wrong for counts
+```
+
+## Rolling windows
+
+```python
+import numpy as np
+import pandas as pd
+
+index = pd.date_range(''2026-01-01'', periods=60, freq=''D'')
+daily = pd.Series(np.random.default_rng(6).integers(100, 400, 60), index=index)
+
+print(daily.rolling(7).mean().head(8).round(1).tolist())
+print(daily.rolling(7, min_periods=1).mean().head(3).round(1).tolist())
+print(daily.rolling(''7D'').mean().head(3).round(1).tolist())      # time-based
+print(daily.expanding().mean().head(3).round(1).tolist())
+print(daily.ewm(span=7).mean().head(3).round(1).tolist())
+```
+
+`rolling(7)` means seven **rows**; `rolling(''7D'')` means seven **days**, which is different as soon as the series has gaps. For irregular data the time-based form is the correct one.
+
+A rolling window **ends** at the current row by default, so it uses no future information. That is what you want for anything that will run on live data. `center=True` puts the row in the middle, which is fine for a smoothed chart of history and wrong for a feature in a model.
 
 ## Time zones
 
-This is where money gets lost.
-
 ```python
-utc = df.tz_localize(''UTC'')               # these timestamps ARE UTC
-local = utc.tz_convert(''Europe/London'')   # same instants, London clock
+import pandas as pd
+
+naive = pd.to_datetime([''2026-06-15 12:00'', ''2026-01-15 12:00''])
+print(naive.tz)                                      # None - no zone at all
+
+utc = naive.tz_localize(''UTC'')                       # ATTACH a zone
+london = utc.tz_convert(''Europe/London'')             # CONVERT to another
+print(utc.strftime(''%Y-%m-%d %H:%M %Z'').tolist())
+print(london.strftime(''%Y-%m-%d %H:%M %Z'').tolist())
 ```
 
-`tz_localize` attaches a zone to naive timestamps - it asserts what they always meant. `tz_convert` moves an aware timestamp to another zone. Using the first when you meant the second shifts every value by the offset, and nothing raises.
+The two verbs are not interchangeable. `tz_localize` says "these numbers were always in this zone"; `tz_convert` says "show me this instant in another zone". Localising a series that is already aware raises, and converting a naive one raises too - which is pandas making you say which you meant.
 
-The practical rule: store and compute in UTC, convert once at the edge when a human will read it. A "daily total" is only meaningful once you have said whose day, and in a business with customers in two countries those two answers differ.
+Daylight saving is where naive timestamps become wrong:
 
-The clock changes make it concrete. On the last Sunday in March a London day has 23 hours; in October, 25. A daily sum over local time therefore has an hour missing or an hour counted twice, once a year, and it is usually blamed on the data.
+```python
+import pandas as pd
+
+# The hour that does not exist, in London, in 2026.
+try:
+    pd.to_datetime([''2026-03-29 01:30'']).tz_localize(''Europe/London'')
+except Exception as error:
+    print(type(error).__name__)
+
+# And the hour that happens twice, in October.
+try:
+    pd.to_datetime([''2026-10-25 01:30'']).tz_localize(''Europe/London'')
+except Exception as error:
+    print(type(error).__name__)
+
+# Both have an explicit answer, which you must choose.
+print(pd.to_datetime([''2026-03-29 01:30''])
+      .tz_localize(''Europe/London'', nonexistent=''shift_forward'')
+      .strftime(''%H:%M %Z'').tolist())
+print(pd.to_datetime([''2026-10-25 01:30''])
+      .tz_localize(''Europe/London'', ambiguous=False)
+      .strftime(''%H:%M %Z'').tolist())
+```
+
+The rule that avoids all of this: **store and compute in UTC, convert to a local zone only for display.** A pipeline that does arithmetic on local times will be wrong twice a year, and both times the error is an hour.
 
 ## Gaps and alignment
 
 ```python
-daily = df.resample(''D'')[''units''].sum()
-daily = daily.asfreq(''D'').fillna(0)
+import numpy as np
+import pandas as pd
+
+a = pd.Series([1, 2, 3], index=pd.to_datetime([''2026-01-01'', ''2026-01-02'', ''2026-01-03'']))
+b = pd.Series([10, 30], index=pd.to_datetime([''2026-01-01'', ''2026-01-03'']))
+
+print((a + b).tolist())                  # aligned by timestamp: NaN in the gap
+print(a.reindex(b.index).tolist())       # keep only b''s timestamps
+print(b.reindex(a.index).ffill().tolist())
+
+# Finding the gaps, rather than discovering them later.
+index = pd.to_datetime([''2026-01-01'', ''2026-01-02'', ''2026-01-05''])
+present = pd.Series([1, 2, 3], index=index)
+complete = pd.date_range(index.min(), index.max(), freq=''D'')
+missing = complete.difference(present.index)
+print(''missing days:'', missing.strftime(''%Y-%m-%d'').tolist())
 ```
 
-`asfreq` makes the index regular. Without it, a chart draws a straight line across a missing week and a reader sees a trend that is really an absence.
+Checking for gaps before resampling is the step people skip. A weekly sum over a series with three missing days is a smaller number with no indication that anything is wrong.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=41)
+
+# Half-hourly readings for 30 days, in UTC, from three sensors, with
+# a deliberate outage so there is a gap to find.
+stamps = pd.date_range(''2026-03-01'', periods=30 * 48, freq=''30min'', tz=''UTC'')
+frames = []
+for sensor, base in [(''kitchen'', 21.0), (''loft'', 16.5), (''garage'', 12.0)]:
+    daily_cycle = 3 * np.sin(np.linspace(0, 30 * 2 * np.pi, len(stamps)))
+    frames.append(pd.DataFrame({
+        ''at'': stamps,
+        ''sensor'': sensor,
+        ''celsius'': (base + daily_cycle + rng.normal(0, 0.6, len(stamps))).round(2),
+    }))
+readings = pd.concat(frames, ignore_index=True)
+
+outage = (
+    (readings[''sensor''] == ''loft'')
+    & readings[''at''].between(''2026-03-10'', ''2026-03-12 23:59'', inclusive=''both'')
+)
+readings = readings[~outage].reset_index(drop=True)
+
+print(f''{len(readings):,} readings, {readings["sensor"].nunique()} sensors'')
+print(''range'', readings[''at''].min(), ''to'', readings[''at''].max())
+print(''tz   '', readings[''at''].dt.tz)
+print()
+
+# 1. Find the gaps BEFORE resampling.
+expected = pd.date_range(readings[''at''].min(), readings[''at''].max(), freq=''30min'', tz=''UTC'')
+for sensor, group in readings.groupby(''sensor''):
+    missing = expected.difference(pd.DatetimeIndex(group[''at'']))
+    print(f''{sensor:<8} {len(group):>5} readings, {len(missing):>4} missing slots'')
+print()
+
+# 2. Index by time, then resample per sensor.
+wide = readings.pivot(index=''at'', columns=''sensor'', values=''celsius'')
+print(wide.head(3).round(2))
+print()
+
+daily = wide.resample(''D'').agg([''mean'', ''min'', ''max'']).round(2)
+print(daily.head(3)[(''kitchen'', ''mean'')].tolist(),
+      daily[(''loft'', ''mean'')].isna().sum(), ''missing loft days'')
+print()
+
+# 3. Rolling, time-based so the gap is handled honestly.
+rolling = wide.rolling(''24h'', min_periods=24).mean().round(2)
+print(''24h rolling mean, around the outage:'')
+print(rolling.loc[''2026-03-09 12:00'':''2026-03-13 12:00'':48].round(2))
+print()
+
+# 4. Convert to local time for display only.
+local = wide.tz_convert(''Europe/London'')
+print(''first UTC   '', wide.index[0])
+print(''first London'', local.index[0], ''- GMT, so the clock agrees'')
+print(''last UTC    '', wide.index[-1])
+print(''last London '', local.index[-1], ''- BST, an hour ahead'')
+print(''same instants:'', bool((wide.index == local.index).all()))
+print()
+
+# 5. Hour-of-day profile, computed on LOCAL time because that is what
+#    a person''s day is - this is the one place local time belongs.
+profile = (local[''kitchen''].groupby(local.index.hour).mean().round(2))
+print(''warmest local hour'', int(profile.idxmax()), profile.max())
+print(''coolest local hour'', int(profile.idxmin()), profile.min())
+print()
+
+# 6. Fill the outage explicitly, and keep a flag.
+filled = wide.copy()
+was_missing = filled[''loft''].isna()
+filled[''loft''] = filled[''loft''].interpolate(method=''time'', limit_direction=''both'')
+print(f''{int(was_missing.sum())} loft readings interpolated'')
+print(''any NaN left:'', bool(filled.isna().any().any()))
+print()
+
+# 7. Weekly summary, from the filled series.
+weekly = filled.resample(''W'').agg([''mean'', ''count'']).round(2)
+print(weekly[[(''kitchen'', ''mean''), (''loft'', ''mean''), (''garage'', ''mean'')]])
+```
+
+Five decisions make that correct. Everything is stored in UTC and converted only for the hour-of-day profile. The gaps are found and counted before any resampling, so a smaller weekly number is explained rather than mysterious. The rolling window is time-based, so the outage does not quietly shift a seven-row window across three missing days. The interpolation is explicit and counted. And the local-time profile is the one place a local timestamp is used, because "what time of day is it warmest in this house" is genuinely a local-time question.
 
 ## The two conversions worth memorising
 
 ```python
-pd.to_datetime(1767225600, unit=''s'')     # a Unix timestamp
-df[''ts''].dt.tz_convert(''UTC'').dt.date    # a date, in a stated zone
+import pandas as pd
+
+# Naive -> aware: say what zone the numbers were always in.
+naive = pd.to_datetime([''2026-06-15 12:00''])
+aware = naive.tz_localize(''Europe/London'')
+
+# Aware -> another zone: same instant, different clock.
+print(aware.tz_convert(''UTC'').strftime(''%H:%M %Z'').tolist())
+
+# Aware -> naive, for a system that cannot cope: convert FIRST.
+print(aware.tz_convert(''UTC'').tz_localize(None).strftime(''%H:%M'').tolist())
 ```
 
-Everything else can be looked up. These two come up constantly and are easy to get subtly wrong.',
-   'Dates are the part of data work most likely to be quietly wrong. A DatetimeIndex unlocks resampling and partial-string selection; time zones decide whether your daily totals are actually daily, and whether last March has 31 days or 30 and an hour.',
-   12, 378, '55555555-5555-4555-8555-555555555555', 'published',
+`tz_localize(None)` after a `tz_convert(''UTC'')` gives you UTC wall-clock numbers with no zone attached, which is what most databases and CSV exports actually want.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `.dt` raised an AttributeError | The column is still a string; `to_datetime` first |
+| `resample` raised | The index is not a `DatetimeIndex` |
+| A date is a month out | Ambiguous `01/02` format; parse explicitly |
+| Weekly totals are too small | Missing days; check for gaps first |
+| An hour is missing or doubled once a year | Daylight saving on naive timestamps; use UTC |
+| `tz_localize` raised on an aware series | Use `tz_convert` instead |
+| A rolling window spans a gap | Use the time-based form, `rolling(''7D'')` |
+| A deprecation warning about `''M''` | It is now `''ME''`; `''MS''` for month start |
+
+## A check you can run
+
+```python
+import pandas as pd
+
+index = pd.to_datetime([''2026-01-01'', ''2026-01-02'', ''2026-01-05'', ''2026-01-06''])
+series = pd.Series([10, 10, 10, 10], index=index)
+
+print(series.resample(''W'').sum().tolist())
+complete = pd.date_range(index.min(), index.max(), freq=''D'')
+print(''missing:'', complete.difference(index).strftime(''%Y-%m-%d'').tolist())
+```
+
+The weekly total is 40 across what looks like a six-day span, and the second line says exactly which two days are absent.
+
+Run those two lines before every resample. A total that is short because of missing data looks identical to a total that is short because business was quiet, and only the second line can tell them apart.
+',
+   'Dates are the part of data work most likely to be quietly wrong. A DatetimeIndex unlocks resampling and partial-string selection; time zones decide whether your daily totals are actually daily, and whether last March has 31 days or 30 and an hour.', 9, 1723,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000db',
    'Plotting to Find Things Out',
    'markdown',
-   'Plot early and plot roughly. A chart you draw in ten seconds to see the shape of a column is worth more than the polished one at the end, because it is the one that changes what you do next.
+   'A plot is a question, not a decoration. This lesson covers the four charts that answer most questions about a new dataset, enough Matplotlib to adjust them, and the one rule about axes that separates an honest chart from a misleading one.
 
 ## The four that answer most questions
 
 ```python
-import pandas as pd
+import matplotlib
+matplotlib.use(''Agg'')                    # no window; write to a file
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
-daily = pd.DataFrame({
-    ''day'': pd.date_range(''2026-01-01'', periods=14, freq=''D''),
-    ''units'': [10, 14, 9, 21, 17, 25, 13, 11, 19, 24, 8, 30, 22, 16],
+rng = np.random.default_rng(7)
+df = pd.DataFrame({
+    ''revenue'': rng.gamma(4, 120, 500).round(2),
+    ''units'': rng.integers(1, 80, 500),
+    ''region'': rng.choice([''North'', ''South'', ''East''], 500),
+    ''month'': rng.choice([''Jan'', ''Feb'', ''Mar''], 500),
 })
 
-# 1. A line, for something over time
-daily.plot(x=''day'', y=''units'', figsize=(8, 3))
+fig, axes = plt.subplots(2, 2, figsize=(11, 8))
 
-# 2. A histogram, for the shape of one column
-daily[''units''].plot(kind=''hist'', bins=7)
+# 1. Histogram: what does ONE variable look like?
+axes[0, 0].hist(df[''revenue''], bins=40, color=''#0f766e'')
+axes[0, 0].set_title(''Distribution of revenue'')
+axes[0, 0].set_xlabel(''revenue'')
 
-# 3. A bar, for a count or total per category
-daily.assign(week=daily[''day''].dt.isocalendar().week)      .groupby(''week'')[''units''].sum().plot(kind=''bar'')
+# 2. Scatter: how do TWO variables relate?
+axes[0, 1].scatter(df[''units''], df[''revenue''], s=8, alpha=0.4, color=''#0f766e'')
+axes[0, 1].set_title(''Revenue against units'')
+axes[0, 1].set_xlabel(''units'')
+axes[0, 1].set_ylabel(''revenue'')
 
-# 4. A scatter, for whether two numbers move together
-daily.plot(kind=''scatter'', x=''units'', y=daily[''units''].cumsum())
+# 3. Bar: how does a number compare ACROSS CATEGORIES?
+totals = df.groupby(''region'')[''revenue''].sum().sort_values()
+axes[1, 0].barh(totals.index, totals.to_numpy(), color=''#0f766e'')
+axes[1, 0].set_title(''Revenue by region'')
 
-plt.show()
+# 4. Line: how does a number change OVER AN ORDERED AXIS?
+by_month = df.groupby(''month'')[''revenue''].sum().reindex([''Jan'', ''Feb'', ''Mar''])
+axes[1, 1].plot(by_month.index, by_month.to_numpy(), marker=''o'', color=''#0f766e'')
+axes[1, 1].set_title(''Revenue by month'')
+axes[1, 1].set_ylim(0)
+
+fig.tight_layout()
+fig.savefig(''overview.png'', dpi=100)
+plt.close(fig)
+print(''wrote overview.png'')
 ```
 
-Line for time. Histogram for distribution. Bar for comparison between categories. Scatter for relationship. Picking the wrong one is why so many dashboards are unreadable: a bar chart of a time series throws away the one thing you wanted to see.
+Choosing between them is a question about the data, not about taste:
+
+- **One numeric variable** - histogram. How is it spread? Is it skewed? Are there two humps?
+- **Two numeric variables** - scatter. Is there a relationship, and is it straight?
+- **A number across categories** - bar. Which is biggest? Use `barh` when the labels are long.
+- **A number along an ordered axis**, usually time - line. Is it going up?
+
+A pie chart answers "what fraction of the whole", badly, because humans compare angles poorly. A stacked bar does the same job better.
 
 ## What a histogram tells you that describe() does not
 
 ```python
-print(daily[''units''].describe())
-daily[''units''].plot(kind=''hist'', bins=20)
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(11)
+
+# Two completely different distributions with the same summary.
+one = rng.normal(100, 15, 2000)
+two = np.concatenate([rng.normal(70, 5, 1000), rng.normal(130, 5, 1000)])
+
+print(pd.DataFrame({''one'': one, ''two'': two}).describe().round(1))
 ```
 
-A mean of 17 is consistent with every value being 17, with half being 4 and half being 30, and with a hundred values near 10 and three near 400. Those are completely different situations and they want completely different decisions. The histogram distinguishes them in one glance; the summary statistics do not.
+Both have a mean near 100 and a similar standard deviation. One is a single hump; the other is two separate populations with nothing in the middle. `describe()` cannot tell you that and a histogram tells you instantly.
+
+```python
+import matplotlib
+matplotlib.use(''Agg'')
+import matplotlib.pyplot as plt
+import numpy as np
+
+rng = np.random.default_rng(11)
+one = rng.normal(100, 15, 2000)
+two = np.concatenate([rng.normal(70, 5, 1000), rng.normal(130, 5, 1000)])
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.5), sharex=True, sharey=True)
+for ax, values, title in zip(axes, [one, two], [''one population'', ''two populations'']):
+    ax.hist(values, bins=50, color=''#0f766e'')
+    ax.axvline(values.mean(), color=''#b91c1c'', linestyle=''--'', label=''mean'')
+    ax.set_title(f''{title} (mean {values.mean():.0f})'')
+    ax.legend()
+fig.tight_layout()
+fig.savefig(''two-distributions.png'', dpi=100)
+plt.close(fig)
+print(''wrote two-distributions.png'')
+```
+
+The bin count matters. Too few hides structure; too many turns the chart into noise. Try 30, then 100, and look at both before deciding.
 
 ## Enough Matplotlib to be dangerous
 
+Matplotlib has two interfaces and the confusion between them is most of its reputation.
+
 ```python
-fig, ax = plt.subplots(figsize=(8, 4))
-ax.plot(daily[''day''], daily[''units''], marker=''o'')
-ax.set_title(''Daily units, January'')
-ax.set_ylabel(''units'')
+import matplotlib
+matplotlib.use(''Agg'')
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 10, 100)
+
+# The pyplot interface: implicit "current figure". Fine for one chart
+# in a notebook, awkward for anything else.
+plt.figure(figsize=(6, 3))
+plt.plot(x, np.sin(x))
+plt.title(''implicit'')
+plt.savefig(''implicit.png'', dpi=100)
+plt.close()
+
+# The object interface: explicit figure and axes. Use this.
+fig, ax = plt.subplots(figsize=(6, 3))
+ax.plot(x, np.sin(x), label=''sin'')
+ax.plot(x, np.cos(x), label=''cos'', linestyle=''--'')
+ax.set_title(''explicit'')
+ax.set_xlabel(''x'')
+ax.set_ylabel(''value'')
+ax.legend()
 ax.grid(alpha=0.3)
-fig.autofmt_xdate()
+fig.savefig(''explicit.png'', dpi=100)
+plt.close(fig)
+print(''wrote both'')
 ```
 
-`fig, ax = plt.subplots()` then methods on `ax` is the form worth learning. The alternative - `plt.plot` and friends drawing on a hidden current figure - works until you want two charts, at which point it stops working in a way that is hard to debug.
+Use `fig, ax = plt.subplots()` and call methods on `ax`. It works identically in a notebook, a script and a web request, and it is the only form that works when there is more than one chart.
+
+The methods you will use constantly:
+
+```python
+import matplotlib
+matplotlib.use(''Agg'')
+import matplotlib.pyplot as plt
+import numpy as np
+
+fig, ax = plt.subplots(figsize=(7, 3.5))
+x = np.arange(12)
+ax.bar(x, np.random.default_rng(3).integers(10, 100, 12), color=''#0f766e'')
+
+ax.set_title(''Monthly total'')
+ax.set_xlabel(''month'')
+ax.set_ylabel(''units'')
+ax.set_xticks(x)
+ax.set_xticklabels([''Jan'', ''Feb'', ''Mar'', ''Apr'', ''May'', ''Jun'',
+                    ''Jul'', ''Aug'', ''Sep'', ''Oct'', ''Nov'', ''Dec''], rotation=45)
+ax.set_ylim(0)
+ax.spines[[''top'', ''right'']].set_visible(False)
+ax.axhline(50, color=''#b91c1c'', linestyle=''--'', linewidth=1, label=''target'')
+ax.legend()
+fig.tight_layout()
+fig.savefig(''monthly.png'', dpi=100)
+plt.close(fig)
+print(''wrote monthly.png'')
+```
+
+pandas plots directly onto an axes, which is the fastest route from a DataFrame to a chart:
+
+```python
+import matplotlib
+matplotlib.use(''Agg'')
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(5)
+df = pd.DataFrame(
+    {''North'': rng.integers(100, 400, 12), ''South'': rng.integers(80, 300, 12)},
+    index=pd.date_range(''2026-01-01'', periods=12, freq=''MS''),
+)
+
+fig, ax = plt.subplots(figsize=(7, 3.5))
+df.plot(ax=ax, marker=''o'')               # pass the axes in
+ax.set_ylim(0)
+ax.set_ylabel(''revenue'')
+ax.set_title(''Revenue by region'')
+fig.tight_layout()
+fig.savefig(''pandas-plot.png'', dpi=100)
+plt.close(fig)
+print(''wrote pandas-plot.png'')
+```
+
+Always pass `ax=`. Without it, pandas creates its own figure and you lose control of size, titles and layout.
 
 ## One rule about axes
 
-A truncated y-axis makes a 2% change look like a collapse. Sometimes that is the honest choice, because the variation is genuinely what matters. It is never the accidental choice: if your axis does not start at zero, you should be able to say why in a sentence.',
-   'A chart is a tool for seeing what is in the data, not just the last step before a slide. Four plot types answer most questions, and knowing which one answers which saves you from the decorated bar chart that shows nothing.',
-   11, 361, '55555555-5555-4555-8555-555555555555', 'published',
+**A bar chart''s value axis starts at zero.** Always. The bar''s length is the quantity, and a truncated axis makes a 3% difference look like a 300% difference.
+
+```python
+import matplotlib
+matplotlib.use(''Agg'')
+import matplotlib.pyplot as plt
+
+labels = [''A'', ''B'', ''C'']
+values = [98, 100, 102]
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
+
+axes[0].bar(labels, values, color=''#b91c1c'')
+axes[0].set_ylim(96, 104)
+axes[0].set_title(''truncated: looks like a huge difference'')
+
+axes[1].bar(labels, values, color=''#0f766e'')
+axes[1].set_ylim(0)
+axes[1].set_title(''honest: a 4% range'')
+
+fig.tight_layout()
+fig.savefig(''axes.png'', dpi=100)
+plt.close(fig)
+print(''the same three numbers, two impressions'')
+```
+
+A **line** chart may start elsewhere, because the message is the shape of the change rather than the magnitude of each point - but say so on the axis, and do not do it to make a flat trend look dramatic.
+
+Three more rules worth the same status:
+
+- **Label the axes and name the units.** "Revenue" is not enough; "Revenue (GBP, thousands)" is.
+- **Do not use colour as the only signal.** About one man in twelve cannot distinguish red from green; add a marker, a line style or a label.
+- **Sort categorical bars by value**, not alphabetically, unless the order means something.
+
+## A worked example
+
+```python
+import matplotlib
+matplotlib.use(''Agg'')
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=55)
+
+n = 1500
+orders = pd.DataFrame({
+    ''date'': pd.Timestamp(''2026-01-01'') + pd.to_timedelta(rng.integers(0, 180, n), ''D''),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n, p=[.4, .3, .2, .1]),
+    ''channel'': rng.choice([''web'', ''phone'', ''store''], n, p=[.6, .25, .15]),
+    ''units'': rng.integers(1, 60, n),
+})
+# Revenue depends on units, plus noise - so the scatter has something
+# to show, and a small group of very large orders in the tail.
+orders[''revenue''] = (orders[''units''] * rng.normal(12, 2, n) + rng.normal(0, 20, n)).round(2)
+orders.loc[rng.choice(n, 25, replace=False), ''revenue''] *= 4
+
+fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+
+# 1. Distribution - and what it reveals that describe() does not.
+ax = axes[0, 0]
+ax.hist(orders[''revenue''], bins=60, color=''#0f766e'')
+ax.axvline(orders[''revenue''].mean(), color=''#b91c1c'', ls=''--'', label=''mean'')
+ax.axvline(orders[''revenue''].median(), color=''#1d4ed8'', ls=''-'', label=''median'')
+ax.set_title(''Order value is right-skewed'')
+ax.set_xlabel(''revenue (GBP)'')
+ax.set_ylabel(''orders'')
+ax.legend()
+
+# 2. Relationship, coloured by channel, with a fitted line.
+ax = axes[0, 1]
+for channel, marker in zip([''web'', ''phone'', ''store''], [''o'', ''s'', ''^'']):
+    subset = orders[orders[''channel''] == channel]
+    ax.scatter(subset[''units''], subset[''revenue''], s=10, alpha=0.4,
+               marker=marker, label=channel)
+slope, intercept = np.polyfit(orders[''units''], orders[''revenue''], 1)
+grid = np.linspace(orders[''units''].min(), orders[''units''].max(), 50)
+ax.plot(grid, slope * grid + intercept, color=''#111827'', lw=1.5,
+        label=f''fit: {slope:.1f} per unit'')
+ax.set_title(''Revenue against units'')
+ax.set_xlabel(''units'')
+ax.set_ylabel(''revenue (GBP)'')
+ax.legend(fontsize=8)
+
+# 3. Comparison across categories: sorted, horizontal, zero-based.
+ax = axes[1, 0]
+totals = orders.groupby(''region'')[''revenue''].sum().sort_values()
+ax.barh(totals.index, totals.to_numpy() / 1000, color=''#0f766e'')
+for i, value in enumerate(totals.to_numpy() / 1000):
+    ax.text(value, i, f'' {value:,.0f}'', va=''center'', fontsize=9)
+ax.set_title(''Revenue by region'')
+ax.set_xlabel(''revenue (GBP, thousands)'')
+ax.set_xlim(0)
+ax.spines[[''top'', ''right'']].set_visible(False)
+
+# 4. Change over time: weekly, smoothed, zero-based.
+ax = axes[1, 1]
+weekly = orders.set_index(''date'').resample(''W'')[''revenue''].sum() / 1000
+ax.plot(weekly.index, weekly.to_numpy(), color=''#94a3b8'', lw=1, label=''weekly'')
+ax.plot(weekly.index, weekly.rolling(4, min_periods=1).mean().to_numpy(),
+        color=''#0f766e'', lw=2, label=''4-week mean'')
+ax.set_title(''Revenue over time'')
+ax.set_ylabel(''revenue (GBP, thousands)'')
+ax.set_ylim(0)
+ax.legend()
+ax.spines[[''top'', ''right'']].set_visible(False)
+
+fig.suptitle(''Orders, first half of 2026'', fontsize=13)
+fig.tight_layout()
+fig.savefig(''report.png'', dpi=110)
+plt.close(fig)
+
+# The numbers the charts are claiming, printed so they can be checked.
+print(f''orders        {len(orders):,}'')
+print(f''mean          {orders["revenue"].mean():,.2f}'')
+print(f''median        {orders["revenue"].median():,.2f}'')
+print(f''mean > median {orders["revenue"].mean() > orders["revenue"].median()}'')
+print(f''revenue per unit, fitted: {slope:.2f}'')
+print()
+print(totals.round(0).to_string())
+print()
+print(''wrote report.png'')
+```
+
+Every rule in the lesson is applied there. The bar chart starts at zero and is sorted by value. The scatter uses marker shape as well as colour. Both axes are labelled with units. And the numbers the charts claim are printed underneath, so a reader can check the picture against the arithmetic - which is the habit that catches a chart built from the wrong column.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The chart is blank | A `plt.show()` before `savefig`, or no backend |
+| Charts pile up on one figure | Missing `plt.close(fig)` in a loop |
+| A pandas plot ignored your figure | No `ax=` argument |
+| A small difference looks enormous | A bar axis not starting at zero |
+| Overlapping points hide the density | Use `alpha=` and a smaller marker |
+| Labels are cut off | Missing `fig.tight_layout()` |
+| A trend is invisible in daily noise | Add a rolling mean |
+| A histogram looks like one block | Too few bins, or an outlier stretching the axis |
+
+## A check you can run
+
+Take your most recent chart and ask two questions out loud: "what question does this answer?" and "does the axis start at zero?".
+
+If the first has no one-sentence answer, the chart is decoration. If the second is "no" on a bar chart, redraw it - and then look at the two versions side by side. The difference in how big the difference feels is the whole reason the rule exists.
+',
+   'A chart is a tool for seeing what is in the data, not just the last step before a slide. Four plot types answer most questions, and knowing which one answers which saves you from the decorated bar chart that shows nothing.', 8, 1566,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000dd',
    'Memory, dtypes and When Pandas Is Wrong',
    'markdown',
-   'The first dataset that does not fit in memory arrives sooner than people expect, and the first response - buy a bigger machine - is usually unnecessary.
+   'Pandas is fast when you use it as a column engine and slow when you use it as a list of rows. Most performance work in an analysis is finding the place where the second thing is happening, and most memory problems are a dtype nobody chose.
 
 ## Measure before optimising
 
 ```python
+import time
+import numpy as np
 import pandas as pd
 
+rng = np.random.default_rng(1)
 df = pd.DataFrame({
-    ''region'': [''North'', ''South'', ''East'', ''West''] * 25_000,
-    ''units'': range(100_000),
-    ''flag'': [True, False] * 50_000,
+    ''units'': rng.integers(1, 100, 200_000),
+    ''price'': rng.normal(12.5, 2, 200_000).round(2),
 })
-print(df.memory_usage(deep=True).sum() / 1e6, ''MB'')
-print(df.dtypes)
+
+
+def timed(label, work):
+    start = time.perf_counter()
+    result = work()
+    seconds = time.perf_counter() - start
+    print(f''{label:<28} {seconds * 1000:8.1f}ms'')
+    return result, seconds
+
+
+_, loop_s = timed(''iterrows'', lambda: [r[''units''] * r[''price''] for _, r in df.head(20_000).iterrows()])
+_, apply_s = timed(''apply(axis=1)'', lambda: df.head(20_000).apply(lambda r: r[''units''] * r[''price''], axis=1))
+_, zip_s = timed(''zip over columns'', lambda: [u * p for u, p in zip(df[''units''].head(20_000), df[''price''].head(20_000))])
+_, vec_s = timed(''vectorised (all 200k)'', lambda: df[''units''] * df[''price''])
+
+print()
+print(''vectorised is fastest, on ten times the data:'',
+      vec_s < min(loop_s, apply_s, zip_s))
 ```
 
-`deep=True` matters: without it, object columns report the size of the pointers rather than of the strings they point at, which is the opposite of useful.
+Four ways to multiply two columns. The first three are between ten and several hundred times slower than the fourth, **and the fourth is doing ten times as much work**.
+
+The ordering is reliable:
+
+- **`iterrows` is the slowest thing in pandas.** It builds a `Series` object for every row.
+- **`apply(axis=1)` is barely better.** It also calls a Python function per row.
+- **`zip` over the raw columns is much faster** than either, and is the right fallback when the operation genuinely cannot be vectorised.
+- **A column operation is the fastest**, by a wide margin, and usually shorter to write.
+
+If you must iterate, iterate over NumPy arrays:
+
+```python
+import numpy as np
+import pandas as pd
+
+df = pd.DataFrame({''a'': np.arange(5), ''b'': np.arange(5) * 2})
+
+# itertuples is far faster than iterrows - namedtuples, not Series.
+print([t.a + t.b for t in df.itertuples(index=False)])
+
+# Faster still: drop to arrays.
+print(list(df[''a''].to_numpy() + df[''b''].to_numpy()))
+```
 
 ## The dtypes that cost you
 
-- **Repeated strings as `object`.** Four distinct regions over 100,000 rows is four strings and 100,000 pointers. As a `category` it is four strings and 100,000 small integers.
-- **int64 where int32 or int16 would do.** Ages do not need 64 bits.
-- **float64 for something that is really a flag.**
-
 ```python
-df[''region''] = df[''region''].astype(''category'')
-df[''units''] = pd.to_numeric(df[''units''], downcast=''integer'')
-print(df.memory_usage(deep=True).sum() / 1e6, ''MB'')
+import numpy as np
+import pandas as pd
+
+n = 500_000
+rng = np.random.default_rng(2)
+
+df = pd.DataFrame({
+    ''id'': rng.integers(1, 1_000_000, n),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n),
+    ''status'': rng.choice([''new'', ''open'', ''closed''], n),
+    ''units'': rng.integers(1, 100, n),
+    ''price'': rng.normal(12.5, 2, n),
+})
+
+before = df.memory_usage(deep=True).sum()
+
+slim = df.assign(
+    id=df[''id''].astype(''int32''),
+    region=df[''region''].astype(''category''),
+    status=df[''status''].astype(''category''),
+    units=df[''units''].astype(''int8''),
+    price=df[''price''].astype(''float32''),
+)
+after = slim.memory_usage(deep=True).sum()
+
+print(f''before {before / 1024**2:6.1f} MiB'')
+print(f''after  {after / 1024**2:6.1f} MiB'')
+print(f''ratio  {before / after:.1f}x'')
+print()
+print(df.memory_usage(deep=True).div(1024**2).round(2).to_dict())
 ```
 
-An order of magnitude is normal for a wide table with repeated strings. That is often the whole problem solved.
+Three dtype decisions do nearly all of it:
+
+- **`category` for repeated strings.** A column of four distinct regions stored as objects holds half a million Python string pointers; as a category it holds half a million small integers and four strings.
+- **The smallest integer that fits.** `int8` holds -128 to 127, `int16` about 32,000, `int32` about two billion. Check the range before choosing, and remember that a value outside it wraps.
+- **`float32` when `float64` is more precision than the data has.** A measurement to two decimal places does not need fifteen significant figures.
+
+`deep=True` matters. Without it, `memory_usage` reports the size of the pointers in an object column, not the strings they point at, and under-reports by a factor of ten.
+
+```python
+import numpy as np
+import pandas as pd
+
+n = 200_000
+s = pd.Series(np.random.default_rng(3).choice([''North'', ''South''], n))
+
+print(f''shallow {s.memory_usage(deep=False) / 1024**2:.2f} MiB'')
+print(f''deep    {s.memory_usage(deep=True) / 1024**2:.2f} MiB'')
+print(f''category{s.astype("category").memory_usage(deep=True) / 1024**2:8.2f} MiB'')
+```
+
+Choosing dtypes at read time avoids ever holding the wide version:
+
+```python
+import io
+import pandas as pd
+
+NEWLINE = chr(10)
+CSV = NEWLINE.join([''id,region,units''] + [f''{i},North,{i % 100}'' for i in range(5)])
+print(pd.read_csv(io.StringIO(CSV),
+                  dtype={''id'': ''int32'', ''region'': ''category'', ''units'': ''int8''}).dtypes.to_dict())
+```
+
+## Operations that copy
+
+```python
+import numpy as np
+import pandas as pd
+import time
+
+rng = np.random.default_rng(4)
+df = pd.DataFrame(rng.normal(size=(200_000, 10)))
+
+start = time.perf_counter()
+out = df
+for i in range(10):
+    out = pd.concat([out, df.head(100)])          # copies EVERYTHING each time
+concat_s = time.perf_counter() - start
+
+start = time.perf_counter()
+pieces = [df] + [df.head(100)] * 10
+out = pd.concat(pieces)                            # one allocation
+once_s = time.perf_counter() - start
+
+print(f''concat in a loop {concat_s * 1000:7.1f}ms'')
+print(f''concat once      {once_s * 1000:7.1f}ms'')
+print(''one call is faster:'', once_s < concat_s)
+```
+
+`pd.concat` in a loop is the pandas version of string concatenation in a loop: each call copies everything accumulated so far, which makes the whole thing quadratic. **Collect the pieces in a list and concatenate once.**
+
+The same applies to adding columns one at a time in a loop, and to `df.append`, which was removed for this reason.
 
 ## Reading more than fits
 
 ```python
-total = 0
-for chunk in pd.read_csv(''big.csv'', chunksize=100_000, usecols=[''units'']):
-    total += chunk[''units''].sum()
+import io
+import pandas as pd
+
+NEWLINE = chr(10)
+CSV = NEWLINE.join([''id,region,units''] + [
+    f''{i},{"North" if i % 2 else "South"},{i % 50}'' for i in range(10_000)])
+
+# Chunked: constant memory, whatever the file size.
+totals = {}
+rows = 0
+for chunk in pd.read_csv(io.StringIO(CSV), chunksize=2_000,
+                         dtype={''region'': ''category'', ''units'': ''int16''}):
+    rows += len(chunk)
+    for region, total in chunk.groupby(''region'', observed=True)[''units''].sum().items():
+        totals[region] = totals.get(region, 0) + int(total)
+
+print(rows, totals)
 ```
 
-Two ideas: `usecols` so you never load the columns you do not need, and `chunksize` so you hold one piece at a time. Any aggregation that can be computed incrementally - sums, counts, min, max - works this way. A median does not, which is a useful thing to know about medians.
+Three other levers, in the order to try them:
+
+- **`usecols=`** - read only the columns you need. On a wide export this is often a ten-fold saving for one argument.
+- **Parquet instead of CSV** - columnar, typed, compressed, and it stores the dtypes so you do not re-decide them every load.
+- **A query that aggregates** - if the data is in a database, `GROUP BY` there and transfer the summary.
+
+```python
+import pandas as pd
+
+# Parquet keeps dtypes and reads only the columns asked for.
+#
+#   df.to_parquet(''orders.parquet'')
+#   pd.read_parquet(''orders.parquet'', columns=[''region'', ''units''])
+#
+# A CSV re-parses every value as text and re-guesses every dtype.
+
+print(''parquet: typed, columnar, compressed'')
+```
 
 ## Where pandas stops
 
-Be honest about this rather than fighting it:
+Pandas holds everything in memory and uses one core for most operations. When that stops being enough, the honest options are:
 
-- **The data lives in a database and you are loading all of it to filter it.** Push the filter and the group-by into SQL. The database has indexes and was built for this.
-- **It does not fit on one machine.** Polars will take you a long way further on one machine; Dask and Spark distribute. Each costs learning and operational complexity, which is why they are the third answer, not the first.
-- **You are looping over rows.** That is not a scale problem, it is a vectorisation problem, and the fix is in Level 1.
+- **Polars** - the same table idea, multi-threaded, with a lazy query planner. Usually several times faster on the same machine, and a different API.
+- **DuckDB** - run SQL directly over Parquet files or over a DataFrame, out of core. Excellent when the operation is naturally a query.
+- **Dask** - pandas-like, across chunks or machines. Good when the code is already pandas and the data grew.
+- **A database** - if the data lives in one, the aggregation probably belongs there.
+
+The rule of thumb: pandas is comfortable to a few million rows on a laptop, uncomfortable at tens of millions, and the wrong tool at hundreds of millions. Moving earlier than you need to costs you a rewrite; moving later costs you an afternoon a week.
+
+## A worked example
+
+```python
+import io
+import time
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=61)
+n = 300_000
+
+wide = pd.DataFrame({
+    ''order_id'': rng.integers(1, 2_000_000, n),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n),
+    ''channel'': rng.choice([''web'', ''phone'', ''store''], n),
+    ''status'': rng.choice([''new'', ''open'', ''closed''], n),
+    ''units'': rng.integers(1, 80, n),
+    ''price'': rng.normal(12.5, 2.0, n).round(2),
+    ''note'': rng.choice(['''', ''checked'', ''flagged''], n),
+})
+
+before = wide.memory_usage(deep=True).sum()
+print(f''as loaded: {before / 1024**2:.1f} MiB'')
+print(wide.memory_usage(deep=True).div(1024**2).round(2).to_dict())
+print()
+
+# 1. Dtypes, chosen rather than guessed. Check the ranges first.
+print(''units range'', int(wide[''units''].min()), int(wide[''units''].max()))
+print(''id range   '', int(wide[''order_id''].min()), int(wide[''order_id''].max()))
+print()
+
+slim = wide.astype({
+    ''order_id'': ''int32'',       # fits comfortably in two billion
+    ''region'': ''category'',
+    ''channel'': ''category'',
+    ''status'': ''category'',
+    ''note'': ''category'',
+    ''units'': ''int8'',           # 1..80 fits in -128..127
+    ''price'': ''float32'',
+})
+after = slim.memory_usage(deep=True).sum()
+print(f''after dtypes: {after / 1024**2:.1f} MiB  ({before / after:.1f}x smaller)'')
+print()
+
+# 2. The same computation, three ways.
+def timed(label, work):
+    start = time.perf_counter()
+    result = work()
+    seconds = time.perf_counter() - start
+    print(f''{label:<34} {seconds * 1000:8.1f}ms'')
+    return result, seconds
+
+sample = slim.head(20_000)
+
+_, apply_s = timed(''apply(axis=1) on 20k rows'',
+                   lambda: sample.apply(lambda r: r[''units''] * r[''price''], axis=1).sum())
+_, tuple_s = timed(''itertuples on 20k rows'',
+                   lambda: sum(t.units * t.price for t in sample.itertuples(index=False)))
+revenue, vec_s = timed(''vectorised on all 300k rows'',
+                       lambda: slim[''units''] * slim[''price''])
+print()
+print(f''vectorised did 15x the rows in {vec_s / apply_s:.3f} of the time'')
+print()
+
+slim = slim.assign(revenue=revenue.astype(''float32''))
+
+# 3. Grouping. observed=True matters for categoricals - without it,
+#    pandas produces a row for every COMBINATION of categories.
+start = time.perf_counter()
+summary = (slim.groupby([''region'', ''channel''], observed=True, as_index=False)
+           .agg(orders=(''order_id'', ''size''), revenue=(''revenue'', ''sum'')))
+grouped_s = time.perf_counter() - start
+print(f''grouped {len(slim):,} rows in {grouped_s * 1000:.1f}ms -> {len(summary)} rows'')
+print(summary.head(4).round(2))
+print()
+
+# 4. Building a result: the wrong way and the right way.
+pieces = [group for _, group in slim.head(20_000).groupby(''region'', observed=True)]
+
+start = time.perf_counter()
+out = pieces[0]
+for piece in pieces[1:]:
+    out = pd.concat([out, piece])
+loop_s = time.perf_counter() - start
+
+start = time.perf_counter()
+out = pd.concat(pieces)
+once_s = time.perf_counter() - start
+print(f''concat in a loop {loop_s * 1000:7.1f}ms'')
+print(f''concat once      {once_s * 1000:7.1f}ms'')
+print()
+
+# 5. Chunked reading, for a file that does not fit.
+csv_text = slim.head(50_000)[[''region'', ''units'', ''price'']].to_csv(index=False)
+totals = {}
+rows = 0
+for chunk in pd.read_csv(io.StringIO(csv_text), chunksize=10_000,
+                         dtype={''region'': ''category'', ''units'': ''int8'', ''price'': ''float32''}):
+    rows += len(chunk)
+    chunk_totals = (chunk[''units''] * chunk[''price'']).groupby(chunk[''region''], observed=True).sum()
+    for region, total in chunk_totals.items():
+        totals[region] = totals.get(region, 0.0) + float(total)
+
+print(f''{rows:,} rows read in chunks'')
+direct = (slim.head(50_000)[''units''] * slim.head(50_000)[''price'']).groupby(
+    slim.head(50_000)[''region''], observed=True).sum()
+print(''chunked matches direct:'',
+      bool(np.allclose(sorted(totals.values()), sorted(direct.to_numpy()), rtol=1e-4)))
+```
+
+Four results come out of that. The dtype pass shrinks the frame several-fold with no loss that matters. The vectorised form does fifteen times the rows in a fraction of the time. `observed=True` keeps the group count honest for categoricals. And the chunked read produces the same totals as the direct one, which is the assertion that makes a streaming pipeline trustworthy.
 
 ## One habit
 
-Time the slow cell before changing it:
+Before optimising anything, print two numbers: `df.memory_usage(deep=True).sum()` and the wall time of the step you think is slow. Then change one thing and print them again.
+
+Most "pandas is slow" turns out to be one `apply(axis=1)` or one `object` column, and both are visible in those two numbers in under a minute.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A loop over rows takes minutes | `iterrows`; vectorise or use `itertuples` |
+| Memory is ten times the file size | Object dtypes; use `category` and smaller ints |
+| `memory_usage` under-reports | Pass `deep=True` |
+| Building a frame gets slower each pass | `concat` in a loop; collect and concat once |
+| A groupby produced empty rows | Categorical keys; pass `observed=True` |
+| An `int8` column has negative values | The range overflowed; check before casting |
+| Reading a CSV is slow every time | Convert to Parquet once |
+| The machine swaps | The data does not fit; chunk, or use DuckDB or Polars |
+
+## A check you can run
 
 ```python
-# In a notebook:
-#   %%timeit
-#   df.groupby(''region'')[''units''].sum()
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(0)
+df = pd.DataFrame({''region'': rng.choice([''North'', ''South''], 200_000)})
+
+print(f''{df.memory_usage(deep=True).sum() / 1024**2:.1f} MiB'')
+print(f''{df.astype({"region": "category"}).memory_usage(deep=True).sum() / 1024**2:.1f} MiB'')
 ```
 
-Most guesses about which line is slow are wrong, and an optimisation applied to the wrong line is pure cost.',
-   'A DataFrame can use ten times the memory it needs, and the fix is usually one line of dtypes. This lesson covers measuring it, chunked reading for files larger than RAM, and the honest point at which the answer is a database or a different library.',
-   12, 397, '55555555-5555-4555-8555-555555555555', 'published',
+One column, one cast, and the memory falls by more than an order of magnitude. Run it on a real table of yours with every string column cast to `category`, and the number is usually the difference between a frame that fits and one that does not.
+',
+   'A DataFrame can use ten times the memory it needs, and the fix is usually one line of dtypes. This lesson covers measuring it, chunked reading for files larger than RAM, and the honest point at which the answer is a database or a different library.', 9, 1814,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000de',
    'Analysis Somebody Else Can Run',
    'markdown',
-   'The test is simple and uncomfortable: a colleague clones your work, runs it, and gets your numbers. Most analyses fail that test, and almost always for one of four reasons.
+   'An analysis somebody else can run is one where the environment, the randomness, the execution order and the inputs are all pinned. Four things break reproducibility and each has a short fix.
 
 ## 1. The environment is not written down
 
 ```python
-# pip freeze > requirements.txt
-# or, better, a pyproject.toml with pinned versions
+import sys
+import platform
+
+# Print it IN THE OUTPUT, not only in a file nobody reads.
+try:
+    import numpy as np
+    import pandas as pd
+    versions = {
+        ''python'': platform.python_version(),
+        ''numpy'': np.__version__,
+        ''pandas'': pd.__version__,
+    }
+except ImportError:
+    versions = {''python'': platform.python_version()}
+
+for name, version in versions.items():
+    print(f''{name:<8} {version}'')
 ```
 
-"It worked last month" usually means a library changed a default. pandas has changed the default of more than one argument between versions; an unpinned analysis is one that produces different numbers over time for reasons unrelated to the data.
+Then pin them, so the next person gets the same ones:
+
+```python
+# Shell commands, shown as text.
+#
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install numpy pandas matplotlib scikit-learn
+#   pip freeze > requirements.txt
+#
+# And to reproduce:
+#
+#   pip install -r requirements.txt
+#
+# `pip freeze` pins transitive dependencies too, which is what makes
+# it reproducible rather than merely documented.
+
+print(''pin everything, including the dependencies of dependencies'')
+```
+
+A `requirements.txt` with `pandas` in it is not a pin. `pandas==2.2.3` is.
 
 ## 2. Nothing fixed the randomness
 
 ```python
 import numpy as np
 
-rng = np.random.default_rng(seed=20260104)
-sample = rng.choice(1000, size=10, replace=False)
+# Not reproducible: a different sample every run.
+a = np.random.default_rng().integers(0, 100, 5)
+b = np.random.default_rng().integers(0, 100, 5)
+print(''unseeded differ:'', not np.array_equal(a, b))
+
+# Reproducible: the same sample every run, forever.
+c = np.random.default_rng(seed=42).integers(0, 100, 5)
+d = np.random.default_rng(seed=42).integers(0, 100, 5)
+print(''seeded agree:   '', np.array_equal(c, d))
+print(c)
 ```
 
-Any sampling, shuffling, train/test split or model initialisation needs a seed, and the seed belongs in the code rather than in your head. `default_rng` is the modern form; the old `np.random.seed` sets global state, which means one library can change another library''s results.
+Three sources of randomness need seeding independently, and missing one is enough:
+
+```python
+import random
+import numpy as np
+
+SEED = 42
+
+random.seed(SEED)                       # the standard library
+rng = np.random.default_rng(SEED)       # NumPy, and pass this around
+# torch.manual_seed(SEED)               # if you use PyTorch
+# and scikit-learn takes random_state= on nearly everything
+
+print(random.randint(0, 100))
+print(rng.integers(0, 100))
+```
+
+Prefer a `Generator` you pass explicitly over the global `np.random.seed`. A global seed is modified by any library that touches `np.random`, so a result that depends on it depends on import order.
+
+```python
+import numpy as np
+from itertools import islice
+
+def sample(rng, values, k):
+    """Takes the generator as an argument - so the caller controls the
+    randomness and the function is testable."""
+    return rng.choice(values, size=k, replace=False)
+
+values = np.arange(20)
+print(sample(np.random.default_rng(7), values, 5))
+print(sample(np.random.default_rng(7), values, 5))     # identical
+```
+
+Pass `random_state=` to every scikit-learn call that takes it: `train_test_split`, `KFold`, `RandomForestClassifier`, `KMeans`. Each has its own, and each unseeded one is a result that will not reproduce.
 
 ## 3. The notebook has hidden state
 
-A cell you edited and did not re-run, a variable from a cell you deleted, a file you created by hand in cell 4 and then rewrote in cell 12. The notebook on your screen is not the notebook in the file.
+```python
+# This sequence leaves no trace in the saved file:
+#
+#   In [1]:  df = load()                      # 10,000 rows
+#   In [2]:  df = df[df.region == ''North'']    # now 2,000
+#   In [1]:  df = load()                      # re-run: back to 10,000
+#   In [3]:  result = analyse(df)             # on 10,000, not 2,000
+#
+# The output under cell 2 still says 2,000. Nothing says the result
+# below came from different data.
 
-The rule is the whole of the fix: **restart the kernel and run all cells, before sharing anything**. If it fails, it was always broken; you just had not noticed.
+print(''restart and run all, before believing any number'')
+```
+
+Three habits:
+
+- **Restart and run all** before you trust a result, and always before you share one.
+- **Keep the cells in execution order**, so restart-and-run-all does what you did.
+- **Move anything reusable into a `.py` module** and import it, so the notebook is a thin layer over code you can test.
+
+```python
+# A notebook cell that imports its own project code, with autoreload
+# so edits to the module take effect without a restart:
+#
+#   %load_ext autoreload
+#   %autoreload 2
+#   from analysis.clean import clean_orders
+#   from analysis.report import monthly_summary
+#
+# The notebook then holds the narrative and the charts; the module
+# holds the logic, under test.
+
+print(''notebook: narrative. module: logic.'')
+```
 
 ## 4. The inputs can change underneath
 
 ```python
-import hashlib, pathlib
+import hashlib
+import io
 
-path = pathlib.Path(''sales.csv'')
-print(path.stat().st_size, hashlib.sha256(path.read_bytes()).hexdigest()[:12])
+RAW = chr(10).join([''order_id,region,units'', ''1,North,10'', ''2,South,20'', ''''])
+
+digest = hashlib.sha256(RAW.encode(''utf-8'')).hexdigest()
+print(''sha256'', digest[:16])
+
+# Record it with the result. If the number changes next month, the
+# first question - "is it the same input?" - has an answer.
+manifest = {
+    ''source'': ''orders-2026-03.csv'',
+    ''sha256'': digest,
+    ''rows'': RAW.count(chr(10)) - 1,
+    ''retrieved'': ''2026-04-01T09:00:00Z'',
+}
+for key, value in manifest.items():
+    print(f''{key:<10} {value}'')
 ```
 
-Recording the size and a hash of the input costs nothing and settles the question of whether the file changed - which is otherwise an argument rather than a fact.
+"The sales table" is not an input; a snapshot of it at a known time is. A query against a live database gives a different answer every day, which means last month''s chart cannot be regenerated. Save the extract, record its hash, and read the file.
 
 ## Asserts are documentation that runs
 
 ```python
-assert df[''order_id''].is_unique, ''order_id should identify a row''
-assert df[''units''].ge(0).all(), ''negative units means a return, not a sale''
-assert len(df) == before, ''the join changed the row count''
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(3)
+orders = pd.DataFrame({
+    ''order_id'': np.arange(1, 101),
+    ''region'': rng.choice([''North'', ''South''], 100),
+    ''revenue'': rng.normal(500, 100, 100).round(2),
+})
+
+# What the next step assumes, stated where it is assumed.
+assert orders[''order_id''].is_unique, ''order_id must be unique''
+assert orders[''revenue''].notna().all(), ''revenue has missing values''
+assert (orders[''revenue''] > 0).all(), ''revenue must be positive''
+assert set(orders[''region'']) <= {''North'', ''South'', ''East'', ''West''}, ''unexpected region''
+assert len(orders) == 100, f''expected 100 rows, got {len(orders)}''
+
+print(''all assumptions hold for'', len(orders), ''rows'')
 ```
 
-Each one states a thing you believe about the data. When the next export breaks that belief, you get a line number instead of a wrong chart.
+An assertion is better than a comment because it is checked, and better than a test because it runs against the real data. Put them at every boundary: after a load, after a merge, before a result is written.
+
+The merge assertion in particular:
+
+```python
+import pandas as pd
+
+left = pd.DataFrame({''k'': [1, 2, 3], ''v'': [10, 20, 30]})
+right = pd.DataFrame({''k'': [1, 2, 3], ''w'': [''a'', ''b'', ''c'']})
+
+before = len(left)
+joined = left.merge(right, on=''k'', how=''left'', validate=''one_to_one'')
+assert len(joined) == before, f''{before} rows became {len(joined)}''
+print(''row count held at'', len(joined))
+```
 
 ## Write down the decisions
 
-Every `fillna`, every dropped row, every outlier excluded is a judgement that changes the answer. A short Markdown cell saying what you did and why is the difference between a number somebody can defend and one they can only repeat.',
-   'An analysis that only runs on your laptop, in the order you happened to press the keys, is not a result - it is an anecdote. Pinned versions, a fixed seed, no hidden state, and a notebook that runs top to bottom from a clean kernel.',
-   11, 389, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+# Every analysis makes judgement calls. The ones that change the
+# answer belong in the output, not in somebody''s memory.
+
+decisions = {
+    ''period'': ''2026-01-01 to 2026-03-31 inclusive'',
+    ''excluded'': ''cancelled and test orders'',
+    ''currency'': ''GBP, converted at the rate on the order date'',
+    ''missing units'': ''imputed with the median, flagged in units_imputed'',
+    ''outliers'': ''kept - the long tail is real, not an error'',
+    ''timezone'': ''UTC throughout, converted for display only'',
+}
+width = max(len(k) for k in decisions)
+for name, choice in decisions.items():
+    print(f''{name:<{width}}  {choice}'')
+```
+
+Six lines, and a reader who gets a different number knows immediately which assumption to check.
+
+## A worked example
+
+```python
+import hashlib
+import io
+import platform
+import random
+import sys
+
+import numpy as np
+import pandas as pd
+
+SEED = 20260407
+
+# ---- 1. Provenance, printed with the result. -----------------------
+print(''environment'')
+print(f''  python {platform.python_version()}  numpy {np.__version__}  ''
+      f''pandas {pd.__version__}'')
+
+random.seed(SEED)
+rng = np.random.default_rng(SEED)
+print(f''  seed   {SEED}'')
+print()
+
+# ---- 2. A snapshot, hashed. ----------------------------------------
+RAW = """order_id,placed_on,region,units,price,status
+1001,2026-01-15,North,120,12.50,complete
+1002,2026-01-16,South,95,12.50,complete
+1003,2026-01-16,North,,11.00,pending
+1004,2026-02-01,East,60,14.00,cancelled
+1005,2026-02-03,West,45,13.25,complete
+1006,2026-02-14,North,143,11.00,complete
+1007,2026-03-02,South,72,12.00,complete
+1008,2026-03-20,East,88,13.50,test
+"""
+
+digest = hashlib.sha256(RAW.encode(''utf-8'')).hexdigest()
+print(''input'')
+print(f''  sha256 {digest[:32]}'')
+print(f''  bytes  {len(RAW)}'')
+print()
+
+# ---- 3. Load, with every dtype named. ------------------------------
+orders = pd.read_csv(
+    io.StringIO(RAW),
+    dtype={''order_id'': ''int64'', ''region'': ''category'', ''status'': ''category''},
+    parse_dates=[''placed_on''],
+)
+
+assert len(orders) == 8, f''expected 8 rows, got {len(orders)}''
+assert orders[''order_id''].is_unique, ''order_id is not unique''
+assert orders[''placed_on''].notna().all(), ''a date failed to parse''
+
+# ---- 4. Decisions, stated. -----------------------------------------
+DECISIONS = {
+    ''period'': ''2026-01-01 to 2026-03-31'',
+    ''excluded statuses'': ''cancelled, test'',
+    ''missing units'': ''median of the included rows, flagged'',
+    ''currency'': ''GBP, no conversion needed'',
+}
+print(''decisions'')
+for name, choice in DECISIONS.items():
+    print(f''  {name:<18} {choice}'')
+print()
+
+# ---- 5. The analysis, with its assumptions checked as it goes. -----
+EXCLUDED = {''cancelled'', ''test''}
+included = orders[~orders[''status''].isin(EXCLUDED)].copy()
+print(f''{len(included)} of {len(orders)} rows included ''
+      f''({len(orders) - len(included)} excluded by status)'')
+
+included[''units_imputed''] = included[''units''].isna()
+median_units = round(float(included[''units''].median()))
+included[''units''] = included[''units''].fillna(median_units).astype(''int64'')
+print(f''{int(included["units_imputed"].sum())} row(s) imputed with {median_units} units'')
+
+included[''revenue''] = (included[''units''] * included[''price'']).round(2)
+assert (included[''revenue''] > 0).all(), ''a revenue is not positive''
+
+period = (included[''placed_on''].min(), included[''placed_on''].max())
+assert period[0] >= pd.Timestamp(''2026-01-01''), ''a row predates the period''
+assert period[1] <= pd.Timestamp(''2026-03-31''), ''a row postdates the period''
+print()
+
+# ---- 6. The result, with the manifest attached. --------------------
+summary = (included.groupby(''region'', as_index=False, observed=True)
+           .agg(orders=(''order_id'', ''size''), revenue=(''revenue'', ''sum''))
+           .sort_values(''revenue'', ascending=False)
+           .round(2))
+print(summary.to_string(index=False))
+print()
+
+total = float(included[''revenue''].sum())
+assert abs(summary[''revenue''].sum() - total) < 0.01, ''the groups do not sum to the total''
+print(f''total {total:,.2f} across {len(included)} orders'')
+print()
+
+manifest = {
+    ''seed'': SEED,
+    ''input_sha256'': digest[:16],
+    ''rows_in'': len(orders),
+    ''rows_used'': len(included),
+    ''imputed'': int(included[''units_imputed''].sum()),
+    ''total_revenue'': round(total, 2),
+    ''python'': platform.python_version(),
+    ''pandas'': pd.__version__,
+}
+print(''manifest'')
+for key, value in manifest.items():
+    print(f''  {key:<14} {value}'')
+print()
+
+# ---- 7. Prove it reproduces, in the same file. ---------------------
+def run(seed):
+    local_rng = np.random.default_rng(seed)
+    sample = local_rng.choice(included.index.to_numpy(), size=3, replace=False)
+    return included.loc[sorted(sample), ''revenue''].tolist()
+
+print(''same seed, same sample:'', run(SEED) == run(SEED))
+print(''different seed, different sample:'', run(SEED) != run(SEED + 1))
+```
+
+Seven things make that reproducible rather than merely tidy. The versions and the seed are printed. The input is hashed. Every dtype is named at load time. The judgement calls are listed. Five assertions check what the next step assumes. The manifest ties the result to the input that produced it. And the last two lines test the reproducibility claim rather than asserting it in prose.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The same notebook gives different numbers | No seed, or cells run out of order |
+| A colleague gets a different answer | Unpinned versions; `pip freeze` |
+| Last month''s chart cannot be regenerated | A live query, not a snapshot |
+| A seed had no effect | A `Generator` was used; seed that, or the library''s own |
+| scikit-learn results vary between runs | A missing `random_state=` |
+| A result changed and nobody knows why | No input hash to compare |
+| A merge silently changed the total | No `validate=` and no row-count assertion |
+| The code works only in one person''s notebook | Hidden state; restart and run all |
+
+## A check you can run
+
+Restart the kernel and run every cell of your current notebook from the top.
+
+If any number, chart or error differs from what was on screen, you have hidden state and every conclusion below that point is unverified. It takes under a minute, and in my experience about one notebook in three fails it the first time.
+',
+   'An analysis that only runs on your laptop, in the order you happened to press the keys, is not a result - it is an anecdote. Pinned versions, a fixed seed, no hidden state, and a notebook that runs top to bottom from a clean kernel.', 8, 1648,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000df',
    'From Notebook to Pipeline',
    'markdown',
-   'A notebook is for discovering something. Once it has to run again next Monday, it needs to become something else - and the gap is smaller than people think.
+   'A notebook is for finding things out. A pipeline is for producing the same answer every week without anyone watching. Turning one into the other is mostly four moves: functions with signatures, one entry point, idempotence, and failing in the right place.
 
 ## Functions with inputs and outputs
 
 ```python
 import pandas as pd
 
-def load(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path, parse_dates=[''date''])
-    assert not df.empty, f''no rows in {path}''
-    return df
+# A notebook cell: reads a global, writes a global, impossible to test.
+#
+#   df = df[df[''status''] != ''cancelled'']
+#   df[''revenue''] = df[''units''] * df[''price'']
+#   total = df.groupby(''region'')[''revenue''].sum()
 
-def clean(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.drop_duplicates(subset=[''order_id''], keep=''last'').copy()
-    df[''region''] = df[''region''].str.strip().str.title()
-    df[''units''] = pd.to_numeric(df[''units''], errors=''coerce'').fillna(0)
-    return df
+# The same work as a function: inputs in, value out, nothing shared.
+def exclude_cancelled(orders: pd.DataFrame) -> pd.DataFrame:
+    return orders[orders[''status''] != ''cancelled''].copy()
 
-def summarise(df: pd.DataFrame) -> pd.DataFrame:
-    return (df.groupby([''region'', pd.Grouper(key=''date'', freq=''W'')], as_index=False)
-              [''units''].sum())
+
+def add_revenue(orders: pd.DataFrame) -> pd.DataFrame:
+    return orders.assign(revenue=(orders[''units''] * orders[''price'']).round(2))
+
+
+def revenue_by_region(orders: pd.DataFrame) -> pd.DataFrame:
+    return (orders.groupby(''region'', as_index=False, observed=True)[''revenue'']
+            .sum().sort_values(''revenue'', ascending=False))
+
+
+frame = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''North''],
+    ''status'': [''complete'', ''cancelled'', ''complete''],
+    ''units'': [10, 5, 20],
+    ''price'': [12.5, 12.5, 11.0],
+})
+
+result = revenue_by_region(add_revenue(exclude_cancelled(frame)))
+print(result.to_string(index=False))
 ```
 
-Three functions, each taking a DataFrame and returning one. No globals, nothing reading a variable defined in a cell above. Each is testable on five rows you write by hand, which is the thing a notebook can never give you.
+Three properties make those functions worth the extra lines. **They take their input as an argument**, so they can be called with a two-row fixture in a test. **They return a new frame**, so the caller''s data is unchanged and the order of calls is visible. And **they are named after what they do**, so the pipeline reads as a description.
+
+`.pipe()` chains them without the nesting:
+
+```python
+import pandas as pd
+
+def exclude(orders, statuses):
+    return orders[~orders[''status''].isin(statuses)].copy()
+
+def add_revenue(orders):
+    return orders.assign(revenue=(orders[''units''] * orders[''price'']).round(2))
+
+frame = pd.DataFrame({
+    ''region'': [''North'', ''South'', ''North''],
+    ''status'': [''complete'', ''cancelled'', ''complete''],
+    ''units'': [10, 5, 20],
+    ''price'': [12.5, 12.5, 11.0],
+})
+
+result = (frame
+          .pipe(exclude, statuses={''cancelled'', ''test''})
+          .pipe(add_revenue)
+          .groupby(''region'', as_index=False, observed=True)[''revenue''].sum())
+print(result.to_string(index=False))
+```
 
 ## One entry point
 
 ```python
-def main(source: str, destination: str) -> None:
-    summary = summarise(clean(load(source)))
-    summary.to_parquet(destination, index=False)
-    print(f''wrote {len(summary)} rows to {destination}'')
+import argparse
+import sys
 
-# if __name__ == ''__main__'':
-#     main(sys.argv[1], sys.argv[2])
+# The shape every pipeline script has.
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=''Monthly revenue report'')
+    parser.add_argument(''--input'', required=True)
+    parser.add_argument(''--output'', required=True)
+    parser.add_argument(''--month'', required=True, help=''YYYY-MM'')
+    parser.add_argument(''--dry-run'', action=''store_true'')
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    args = build_parser().parse_args(argv)
+    print(f''would read {args.input}, write {args.output}, for {args.month}'')
+    if args.dry_run:
+        print(''dry run: nothing written'')
+        return 0
+    return 0
+
+
+# The guard matters: it means the module can be imported by a test
+# without running anything.
+if __name__ == ''__main__'':
+    sys.exit(main([''--input'', ''in.csv'', ''--output'', ''out.parquet'', ''--month'', ''2026-03'', ''--dry-run'']))
 ```
 
-Paths come in as arguments. A path hard-coded to your Downloads folder is the most common reason a pipeline runs on one machine only.
+Everything the pipeline needs comes in through arguments or environment variables. Nothing is a constant in the middle of the file, and nothing is read from a path that only exists on one laptop.
+
+A `--dry-run` flag is worth the three lines it costs. It lets you run the whole thing in anger against production inputs without writing anything.
 
 ## Idempotent, or you will regret it
 
-Running it twice must produce the same result as running it once. That means writing to a file that gets replaced, or upserting on a key - never appending. Jobs get retried, by a scheduler that does not tell you, and an appending job silently doubles a month.
+Running the pipeline twice must give the same result as running it once. Three things break that:
+
+```python
+import pandas as pd
+
+history = pd.DataFrame({''month'': [''2026-01''], ''revenue'': [1000.0]})
+new = pd.DataFrame({''month'': [''2026-02''], ''revenue'': [1200.0]})
+
+# Not idempotent: run twice and February is in there twice.
+appended = pd.concat([history, new], ignore_index=True)
+appended = pd.concat([appended, new], ignore_index=True)
+print(''appended twice:'', len(appended), appended[''revenue''].sum())
+
+# Idempotent: replace the partition, whatever was there before.
+def upsert(existing: pd.DataFrame, incoming: pd.DataFrame, key: str) -> pd.DataFrame:
+    keep = existing[~existing[key].isin(incoming[key])]
+    return pd.concat([keep, incoming], ignore_index=True).sort_values(key)
+
+once = upsert(history, new, ''month'')
+twice = upsert(once, new, ''month'')
+print(''upserted twice:'', len(twice), twice[''revenue''].sum())
+print(''idempotent:'', once.equals(twice))
+```
+
+The three fixes, in order of preference:
+
+- **Write a whole partition, replacing it.** One file per month, overwritten. Re-running the month rewrites that file and touches nothing else.
+- **Upsert on a key**, as above, when appending to one table.
+- **Make the output path contain the period** - `revenue-2026-03.parquet` - so a re-run overwrites itself and never doubles.
+
+A pipeline that appends is a pipeline that cannot be re-run after a failure, which is exactly when you need to re-run it.
 
 ## Fail loudly, in the right place
 
 ```python
-try:
-    main(source, destination)
-except Exception:
-    # A scheduler needs a non-zero exit code to notice.
-    raise
+import pandas as pd
+
+def load(frame: pd.DataFrame) -> pd.DataFrame:
+    """Validate at the boundary, so a bad input is rejected here rather
+    than producing a wrong number three steps later."""
+    required = {''order_id'', ''region'', ''units'', ''price'', ''status''}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f''input is missing columns: {sorted(missing)}'')
+
+    if not frame[''order_id''].is_unique:
+        duplicated = frame.loc[frame[''order_id''].duplicated(), ''order_id''].tolist()
+        raise ValueError(f''duplicate order_id: {duplicated[:5]}'')
+
+    bad = frame[frame[''units''].notna() & (frame[''units''] <= 0)]
+    if len(bad):
+        raise ValueError(f''{len(bad)} row(s) have non-positive units'')
+
+    return frame
+
+
+good = pd.DataFrame({
+    ''order_id'': [1, 2], ''region'': [''N'', ''S''], ''units'': [10, 20],
+    ''price'': [1.0, 2.0], ''status'': [''ok'', ''ok''],
+})
+print(''good input:'', len(load(good)), ''rows'')
+
+for broken, label in [
+    (good.drop(columns=[''price'']), ''missing column''),
+    (pd.concat([good, good.head(1)]), ''duplicate id''),
+    (good.assign(units=[10, -1]), ''negative units''),
+]:
+    try:
+        load(broken)
+    except ValueError as error:
+        print(f''{label:<16} rejected: {error}'')
 ```
 
-A pipeline that catches everything and logs a warning is a pipeline that quietly stops producing data, and nobody finds out until someone asks why the dashboard stopped moving. Let it crash, and make sure the crash reaches a person.
+The rule: **validate at the boundary, assert in the middle, and never silently continue.** A pipeline that drops bad rows without counting them produces a smaller number every week and nobody notices until the quarter.
+
+Logging rather than printing, so the output is usable when it runs unattended:
+
+```python
+import logging
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format=''%(asctime)s %(levelname)-7s %(message)s'',
+    stream=sys.stdout,
+)
+log = logging.getLogger(''pipeline'')
+
+log.info(''loaded %d rows from %s'', 1234, ''orders-2026-03.csv'')
+log.info(''excluded %d cancelled, %d test'', 12, 3)
+log.warning(''%d rows had missing units, imputed with %d'', 4, 95)
+log.info(''wrote %d rows to %s'', 1219, ''revenue-2026-03.parquet'')
+```
+
+Log the **counts at every stage**. When a number is wrong next month, the log tells you which stage lost the rows, and that is usually the whole debugging session.
 
 ## Parquet over CSV for anything downstream
 
 ```python
-summary.to_parquet(''weekly.parquet'', index=False)
+import io
+import pandas as pd
+
+frame = pd.DataFrame({
+    ''region'': pd.Categorical([''North'', ''South''] * 50),
+    ''units'': pd.array([10, 20] * 50, dtype=''int16''),
+    ''placed_on'': pd.to_datetime([''2026-01-15''] * 100),
+})
+
+csv = frame.to_csv(index=False)
+round_tripped = pd.read_csv(io.StringIO(csv))
+
+print(''original  '', frame.dtypes.to_dict())
+print(''after csv '', round_tripped.dtypes.to_dict())
+print(''dtypes survived:'', frame.dtypes.equals(round_tripped.dtypes))
 ```
 
-Parquet keeps dtypes, compresses several times smaller and reads columns selectively. CSV loses every type you worked out during cleaning - which means the next script re-infers them, possibly differently.
+CSV loses every dtype. The category becomes an object, the `int16` becomes `int64`, the timestamp becomes a string, and the next stage has to guess all three again. Parquet stores them, compresses better, and reads only the columns asked for.
+
+Keep CSV for the thing a human opens in a spreadsheet. Use Parquet between stages.
 
 ## What stays in the notebook
 
-The exploration, the charts, the dead ends. Keep it; it is the record of how you got here. It is just no longer the thing that runs.',
-   'The notebook was for finding the answer. Getting the same answer every Monday without you means functions, a defined input and output, idempotence and a loud failure - the few things that separate a script from a scheduled job.',
-   12, 377, '55555555-5555-4555-8555-555555555555', 'published',
+The division that works:
+
+- **Notebook**: the question, the exploration, the charts, the narrative. Things you do once.
+- **Module**: loading, cleaning, joining, aggregating. Things you do every time, with tests.
+- **Script**: the entry point that calls the module in order, with arguments and logging.
+
+The notebook then imports the module, which means a fix to the cleaning logic reaches both the exploration and the production run - rather than being made twice and diverging.
+
+## A worked example
+
+```python
+import io
+import logging
+import sys
+from dataclasses import dataclass
+
+import pandas as pd
+
+logging.basicConfig(level=logging.INFO, format=''%(levelname)-7s %(message)s'',
+                    stream=sys.stdout, force=True)
+log = logging.getLogger(''revenue'')
+
+EXCLUDED_STATUSES = frozenset({''cancelled'', ''test''})
+
+
+@dataclass(frozen=True)
+class Config:
+    month: str
+    excluded_statuses: frozenset = EXCLUDED_STATUSES
+    dry_run: bool = False
+
+
+# ---- stages: each takes a frame, returns a frame ---------------------
+
+def load(text: str) -> pd.DataFrame:
+    frame = pd.read_csv(
+        io.StringIO(text),
+        dtype={''order_id'': ''int64'', ''region'': ''category'', ''status'': ''category''},
+        parse_dates=[''placed_on''],
+    )
+    required = {''order_id'', ''placed_on'', ''region'', ''units'', ''price'', ''status''}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f''input is missing columns: {sorted(missing)}'')
+    if not frame[''order_id''].is_unique:
+        raise ValueError(''order_id is not unique'')
+    log.info(''loaded %d rows'', len(frame))
+    return frame
+
+
+def restrict_to_month(frame: pd.DataFrame, month: str) -> pd.DataFrame:
+    period = frame[''placed_on''].dt.to_period(''M'').astype(str)
+    kept = frame[period == month].copy()
+    log.info(''month %s: kept %d of %d rows'', month, len(kept), len(frame))
+    if kept.empty:
+        raise ValueError(f''no rows for {month}'')
+    return kept
+
+
+def exclude_statuses(frame: pd.DataFrame, statuses: frozenset) -> pd.DataFrame:
+    kept = frame[~frame[''status''].isin(statuses)].copy()
+    log.info(''excluded %d row(s) by status'', len(frame) - len(kept))
+    return kept
+
+
+def impute_units(frame: pd.DataFrame) -> pd.DataFrame:
+    missing = frame[''units''].isna()
+    if not missing.any():
+        return frame.assign(units_imputed=False)
+    median = round(float(frame[''units''].median()))
+    log.warning(''%d row(s) missing units, imputed with %d'', int(missing.sum()), median)
+    return frame.assign(units_imputed=missing,
+                        units=frame[''units''].fillna(median).astype(''int64''))
+
+
+def add_revenue(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.assign(revenue=(frame[''units''] * frame[''price'']).round(2))
+    if (out[''revenue''] <= 0).any():
+        raise ValueError(''a revenue is not positive'')
+    return out
+
+
+def summarise(frame: pd.DataFrame) -> pd.DataFrame:
+    summary = (frame.groupby(''region'', as_index=False, observed=True)
+               .agg(orders=(''order_id'', ''size''),
+                    units=(''units'', ''sum''),
+                    revenue=(''revenue'', ''sum''))
+               .sort_values(''revenue'', ascending=False)
+               .round(2))
+    total = round(float(frame[''revenue''].sum()), 2)
+    assert abs(float(summary[''revenue''].sum()) - total) < 0.01, ''groups do not sum to the total''
+    log.info(''summarised into %d region(s), total %.2f'', len(summary), total)
+    return summary
+
+
+def upsert(existing: pd.DataFrame, incoming: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """Idempotent: the same incoming rows replace, never duplicate."""
+    index = pd.MultiIndex.from_frame(incoming[keys])
+    keep = existing[~pd.MultiIndex.from_frame(existing[keys]).isin(index)]
+    return (pd.concat([keep, incoming], ignore_index=True)
+            .sort_values(keys).reset_index(drop=True))
+
+
+# ---- the entry point -------------------------------------------------
+
+def run(text: str, config: Config, store: pd.DataFrame) -> pd.DataFrame:
+    summary = (
+        load(text)
+        .pipe(restrict_to_month, month=config.month)
+        .pipe(exclude_statuses, statuses=config.excluded_statuses)
+        .pipe(impute_units)
+        .pipe(add_revenue)
+        .pipe(summarise)
+        .assign(month=config.month)
+    )
+    if config.dry_run:
+        log.info(''dry run: nothing written'')
+        return store
+    return upsert(store, summary, keys=[''month'', ''region''])
+
+
+RAW = """order_id,placed_on,region,units,price,status
+1001,2026-02-15,North,120,12.50,complete
+1002,2026-02-16,South,95,12.50,complete
+1003,2026-02-16,North,,11.00,complete
+1004,2026-02-01,East,60,14.00,cancelled
+1005,2026-02-03,West,45,13.25,complete
+1006,2026-03-14,North,143,11.00,complete
+1007,2026-02-20,South,72,12.00,test
+"""
+
+store = pd.DataFrame(columns=[''month'', ''region'', ''orders'', ''units'', ''revenue''])
+
+print(''--- first run ---'')
+store = run(RAW, Config(month=''2026-02''), store)
+print(store.to_string(index=False))
+
+print()
+print(''--- same run again ---'')
+rows_before = len(store)
+total_before = float(store[''revenue''].sum())
+store = run(RAW, Config(month=''2026-02''), store)
+print(f''rows {rows_before} -> {len(store)}, ''
+      f''total {total_before:,.2f} -> {float(store["revenue"].sum()):,.2f}'')
+print(''idempotent:'', len(store) == rows_before)
+
+print()
+print(''--- the next month ---'')
+store = run(RAW, Config(month=''2026-03''), store)
+print(store.to_string(index=False))
+
+print()
+print(''--- a month with no data ---'')
+try:
+    run(RAW, Config(month=''2026-09''), store)
+except ValueError as error:
+    print(''rejected:'', error)
+```
+
+Six properties make that a pipeline rather than a notebook. Every stage is a function with a signature and no globals. The configuration is one frozen object. The counts are logged at every stage. The boundary validates and raises rather than dropping rows quietly. The write is an upsert, so the second run changes nothing. And the empty month raises instead of writing an empty summary that would look like a bad month.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Re-running doubled the numbers | The write appends; upsert or replace a partition |
+| A failure left half the output written | Write to a temporary path and rename |
+| Rows disappeared and nobody noticed | Silent drops; log the count at every stage |
+| The script only runs on one machine | Hard-coded paths; pass them as arguments |
+| Dtypes are re-guessed at every stage | CSV between stages; use Parquet |
+| A test needs the real database | The function reads a global; pass the frame in |
+| An empty input produced an empty report | Validate and raise on empty |
+| Importing the module ran the pipeline | Missing `if __name__ == ''__main__''` |
+
+## A check you can run
+
+Run your pipeline twice in a row against the same input and compare the two outputs byte for byte.
+
+If they differ, it is not idempotent, which means a retry after a failure will corrupt the result. That is a one-command test and it is the single most important property a scheduled job has - more important than its speed, and more important than its correctness on the happy path, because the happy path is not when you will need to re-run it.
+',
+   'The notebook was for finding the answer. Getting the same answer every Monday without you means functions, a defined input and output, idempotence and a loud failure - the few things that separate a script from a scheduled job.', 9, 1766,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 3 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),

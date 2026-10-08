@@ -173,677 +173,4462 @@ VALUES
   ('e0000001-0000-4000-8000-0000000000f1',
    'What a Model Is, and What It Is Not',
    'markdown',
-   'A machine learning model is a function fitted to examples. You supply inputs and known outputs; an algorithm searches for a function that maps one to the other with as few mistakes as possible; you then apply that function to inputs whose output you do not know.
-
-That is the whole idea. It is worth holding onto, because almost every disappointment with machine learning comes from expecting something more.
+   'A model is a function fitted to examples. You give it inputs and the answers, it finds a rule that reproduces the answers, and you hope the rule holds on inputs it has never seen. Everything else in this course is detail on that sentence.
 
 ## The vocabulary, used precisely
 
-- A **feature** is an input column. Age, price, country, number of logins last week.
-- A **label** (or target) is the output column you want to predict.
-- **Supervised** learning has labels. **Unsupervised** does not - it finds structure, such as clusters, without being told what is correct.
-- **Classification** predicts a category: spam or not, which of five plans. **Regression** predicts a number: revenue, days until churn.
-- **Training** is the fitting. **Inference** is using the fitted model on new data.
+```python
+import numpy as np
+import pandas as pd
 
-Most useful business machine learning is supervised, and most of that is classification.
+rng = np.random.default_rng(3)
+n = 500
+
+# Every row is an EXAMPLE. Every column except the last is a FEATURE.
+# The last column is the LABEL - the thing we want to predict.
+data = pd.DataFrame({
+    ''tenure_months'': rng.integers(1, 60, n),
+    ''tickets_last_90d'': rng.poisson(1.8, n),
+    ''plan'': rng.choice([''free'', ''pro'', ''team''], n, p=[.6, .3, .1]),
+    ''monthly_spend'': rng.gamma(3, 24, n).round(2),
+})
+risk = (0.55 - 0.012 * data[''tenure_months''] + 0.09 * data[''tickets_last_90d'']
+        - 0.004 * data[''monthly_spend''])
+data[''churned''] = rng.random(n) < risk.clip(0.02, 0.95)
+
+print(f''{len(data)} examples, {data.shape[1] - 1} features, 1 label'')
+print(f''label balance: {data["churned"].mean():.1%} positive'')
+print(data.head(3).to_string(index=False))
+```
+
+The words, each meaning exactly one thing:
+
+- **Example** (or sample, instance, row): one thing you want a prediction about.
+- **Feature**: an input column. **Label** (or target): the output column.
+- **Training**: finding the rule. **Inference** (or prediction, scoring): applying it.
+- **Supervised**: you have labels. **Unsupervised**: you do not, so there is nothing to predict and the task is structure-finding.
+- **Classification**: the label is a category. **Regression**: the label is a number.
+- **Parameters**: what the model learns. **Hyperparameters**: what you choose before training.
+
+That last distinction matters more than it sounds. A model''s parameters are fitted from the data; its hyperparameters are a choice you make and must therefore be chosen on data the final score is not computed from - which is the whole subject of the cross-validation lesson.
+
+## It learns association, not mechanism
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(7)
+n = 2000
+
+# Umbrella sales and traffic accidents are both caused by rain.
+# Neither causes the other.
+rain = rng.random(n) < 0.3
+umbrellas = rng.poisson(np.where(rain, 40, 6))
+accidents = rng.poisson(np.where(rain, 12, 4))
+
+frame = pd.DataFrame({''umbrellas'': umbrellas, ''accidents'': accidents})
+print(f''correlation {frame["umbrellas"].corr(frame["accidents"]):.3f}'')
+
+# A model predicts accidents from umbrella sales very well.
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+
+X = frame[[''umbrellas'']].to_numpy()
+y = frame[''accidents''].to_numpy()
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0)
+model = LinearRegression().fit(X_train, y_train)
+print(f''R2 on held-out data: {r2_score(y_test, model.predict(X_test)):.3f}'')
+print()
+print(''The model is useful for PREDICTION and says nothing about cause.'')
+print(''Banning umbrellas would not reduce accidents.'')
+```
+
+This is the single most important limitation to state out loud, because a model that predicts well is routinely presented as an explanation of what to change. **A model answers "what is likely, given what I can see", not "what would happen if I changed something".** The second question needs an experiment, or a causal method designed for it.
+
+## It cannot see what is not in the data
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+
+rng = np.random.default_rng(11)
+n = 1200
+
+# The true driver is a feature the model is NOT given.
+quality = rng.normal(0, 1, n)
+price = rng.normal(50, 10, n)
+sales = 200 - 1.5 * price + 40 * quality + rng.normal(0, 8, n)
+
+frame = pd.DataFrame({''price'': price, ''sales'': sales})
+split = int(n * 0.7)
+model = RandomForestRegressor(n_estimators=120, random_state=0).fit(
+    frame[[''price'']][:split], frame[''sales''][:split])
+predicted = model.predict(frame[[''price'']][split:])
+
+print(f''MAE without the quality feature: ''
+      f''{mean_absolute_error(frame["sales"][split:], predicted):.1f}'')
+
+frame[''quality''] = quality
+model_full = RandomForestRegressor(n_estimators=120, random_state=0).fit(
+    frame[[''price'', ''quality'']][:split], frame[''sales''][:split])
+print(f''MAE with it:                     ''
+      f''{mean_absolute_error(frame["sales"][split:], model_full.predict(frame[["price", "quality"]][split:])):.1f}'')
+print()
+print(''No algorithm recovers a variable it was never shown. "Try a'')
+print(''better model" is the wrong response to a missing feature.'')
+```
+
+## It assumes the future resembles the past
+
+```python
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+
+rng = np.random.default_rng(13)
+
+# Train on a world where feature 0 matters.
+X_train = rng.normal(0, 1, (2000, 2))
+y_train = (X_train[:, 0] + rng.normal(0, 0.4, 2000) > 0).astype(int)
+model = LogisticRegression().fit(X_train, y_train)
+
+# The same world, later: nothing changed.
+X_same = rng.normal(0, 1, (2000, 2))
+y_same = (X_same[:, 0] + rng.normal(0, 0.4, 2000) > 0).astype(int)
+print(f''accuracy, same world:    {accuracy_score(y_same, model.predict(X_same)):.3f}'')
+
+# A changed world: the relationship flipped.
+X_new = rng.normal(0, 1, (2000, 2))
+y_new = (-X_new[:, 0] + rng.normal(0, 0.4, 2000) > 0).astype(int)
+print(f''accuracy, changed world: {accuracy_score(y_new, model.predict(X_new)):.3f}'')
+print()
+print(''The model did not break. The world moved, and nothing in the'')
+print(''model can tell you that it did - which is why monitoring exists.'')
+```
+
+Accuracy below 0.5 is worse than guessing. The model is confidently wrong, it reports no error, and only a monitoring system comparing predictions with outcomes will notice.
 
 ## What it does not do
 
-**It does not find causes.** A model that predicts churn from support tickets has not shown that tickets cause churn. It has found that they move together, which is where the analytics course left off.
+Four things people expect of a model that it does not provide:
 
-**It does not work without examples.** If you have no labelled cases, you have no supervised problem, and acquiring labels is usually the real project.
+**It does not explain itself.** Feature importance says which inputs the model used, not why the world works that way. A spuriously correlated feature gets high importance.
 
-**It does not extrapolate.** A model trained on last year''s prices knows nothing about a price range it has never seen. It will still return a confident number for it.
+**It does not know what it does not know.** Asked about an input unlike anything in training, it answers confidently.
+
+```python
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+
+rng = np.random.default_rng(17)
+X = rng.uniform(0, 10, (500, 1))
+y = (2 * X[:, 0] + rng.normal(0, 0.5, 500))
+
+model = RandomForestRegressor(n_estimators=100, random_state=0).fit(X, y)
+
+for value in [5.0, 9.5, 50.0, 500.0]:
+    prediction = model.predict([[value]])[0]
+    truth = 2 * value
+    print(f''input {value:>6.1f}  predicted {prediction:>7.2f}  true {truth:>7.1f}  ''
+          f''{"in range" if value <= 10 else "EXTRAPOLATING"}'')
+print()
+print(''A tree model cannot extrapolate at all: it returns the nearest'')
+print(''leaf it knows, forever. It does not say so.'')
+```
+
+**It does not fix bad labels.** If the label was recorded wrongly, the model learns the mistake faithfully.
+
+**It does not produce fairness.** A model trained on past decisions reproduces the pattern of those decisions, including the parts nobody would defend.
 
 ## When not to use it
 
-- **A rule would do.** If the policy is "flag any transaction over 10,000 from a new account", write that. It is auditable, instant, and will not drift.
-- **Being wrong is expensive and unexplainable.** Credit, hiring, medical triage - the bar is far higher than accuracy, and "the model said so" is not a defence.
-- **The data does not contain the answer.** No algorithm recovers information that was never recorded. Predicting cancellation from a table with no behavioural columns is not a modelling problem; it is an instrumentation problem.
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''situation'': ''a rule would do'',
+     ''instead'': ''write the rule - it is testable, explainable and free''},
+    {''situation'': ''fewer than a few hundred labelled examples'',
+     ''instead'': ''collect more, or use a rule''},
+    {''situation'': ''the decision must be explainable in law'',
+     ''instead'': ''a simple model you can write down, or a rule''},
+    {''situation'': ''the cost of a wrong answer is catastrophic'',
+     ''instead'': ''a model as an aid, with a human deciding''},
+    {''situation'': ''you want to know what to CHANGE'',
+     ''instead'': ''an experiment; a model answers a different question''},
+    {''situation'': ''the labels are the thing you are trying to define'',
+     ''instead'': ''define it first; a model cannot invent the target''},
+]).to_string(index=False))
+```
+
+The first row is the one most often ignored. A great deal of what gets built as a model is three conditions and a threshold, and the rule version is faster, cheaper, auditable, and does not need a retraining pipeline.
 
 ## The honest framing
 
-"Given these columns, can we predict this one, well enough to be worth acting on, often enough to beat what we do now?" Every word matters. The baseline - what we do now - is what a model has to beat, and it is frequently a simple rule that nobody wrote down.',
-   'A model is a function fitted to examples. This lesson covers the vocabulary used loosely everywhere, the difference between supervised and unsupervised learning, and the kinds of problem machine learning is the wrong answer to.',
-   9, 419, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+rng = np.random.default_rng(seed=23)
+n = 4000
+
+# A churn model, framed honestly from the start.
+tenure = rng.integers(1, 48, n)
+tickets = rng.poisson(1.6, n)
+spend = rng.gamma(3, 22, n)
+risk = (0.62 - 0.013 * tenure + 0.10 * tickets - 0.006 * spend)
+churned = (rng.random(n) < np.clip(risk, 0.02, 0.95)).astype(int)
+
+X = np.column_stack([tenure, tickets, spend])
+X_train, X_test, y_train, y_test = train_test_split(
+    X, churned, test_size=0.3, random_state=0, stratify=churned)
+
+model = LogisticRegression(max_iter=1000).fit(X_train, y_train)
+predicted = model.predict(X_test)
+
+accuracy = accuracy_score(y_test, predicted)
+baseline = max(y_test.mean(), 1 - y_test.mean())
+matrix = confusion_matrix(y_test, predicted)
+
+print(''THE CLAIM, written as it should be'')
+print()
+print(f''Given tenure, ticket count and monthly spend, this model assigns'')
+print(f''each account a churn probability. On {len(y_test):,} accounts it did'')
+print(f''not see during training it is right {accuracy:.1%} of the time.'')
+print()
+print(f''The baseline - always predicting the majority class - is ''
+      f''{baseline:.1%},'')
+print(f''so the model adds {accuracy - baseline:+.1%}.'')
+print()
+print(''confusion matrix (rows: actual, columns: predicted):'')
+print(pd.DataFrame(matrix, index=[''stayed'', ''churned''],
+                   columns=[''predicted stay'', ''predicted churn'']).to_string())
+print()
+print(''WHAT IT DOES NOT SAY'')
+for limitation in [
+    ''that any of these features CAUSES churn'',
+    ''what would happen if we changed one of them'',
+    ''anything about accounts unlike those in the training data'',
+    ''anything about a world where the product or market changes'',
+]:
+    print('' -'', limitation)
+print()
+print(''HOW IT WOULD BE USED'')
+print('' - rank accounts by probability, work the top of the list'')
+print('' - a human reads the account before acting'')
+print('' - measure whether intervention changes the outcome, by experiment'')
+```
+
+Three parts, and the middle one is what separates a useful model from an overclaimed one. **The score, with its baseline and the size of the test set.** **The list of things it does not say.** **How a decision will actually be made from it**, including who looks at it.
+
+That baseline line is the one most often missing. A model with 91% accuracy on a problem where 90% of cases are negative has learned almost nothing, and the accuracy figure conceals it completely.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| High accuracy, no business value | A skewed label; compare with the baseline |
+| The model is treated as an explanation | It learned association, not mechanism |
+| "Try a better algorithm" does not help | A missing feature; no model recovers it |
+| Accuracy fell below chance | The world changed; monitor outcomes |
+| Confident answers on strange inputs | Models do not know their own limits |
+| The model reproduced a past bias | It learned the labels it was given |
+| A tree model would not extrapolate | By construction; it predicts the nearest leaf |
+| A model where a rule would do | Three conditions is not machine learning |
+
+## A check you can run
+
+Take any model in use and write down three sentences: **what it predicts, what the baseline is, and what somebody does with the output.**
+
+If the second is missing, compute it - it takes one line and it is sometimes most of the reported score. If the third is vague, the model is not in production even if the code is running, and the first conversation to have is about the decision rather than the algorithm.
+',
+   'A model is a function fitted to examples. This lesson covers the vocabulary used loosely everywhere, the difference between supervised and unsupervised learning, and the kinds of problem machine learning is the wrong answer to.', 8, 1696,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000f2',
    'Features, Labels and the Split That Makes It Honest',
    'markdown',
-   'A model scored on the data it was trained on is not being tested. It is being asked to recall, and a complex enough model can recall perfectly while knowing nothing.
+   'A model''s score on data it was trained on is not evidence of anything. The split is what makes the number honest, and getting it wrong is the commonest way a project reports a result that does not survive contact with production.
 
-So the first thing you do, before exploring, before engineering a single feature, is set data aside.
+## Features, labels and the matrix
 
 ```python
-from sklearn.model_selection import train_test_split
+import numpy as np
+import pandas as pd
 
-X = df[[''tenure_days'', ''logins_last_week'', ''plan'']]
-y = df[''churned'']
+rng = np.random.default_rng(3)
+n = 1500
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+frame = pd.DataFrame({
+    ''tenure_months'': rng.integers(1, 60, n),
+    ''tickets_90d'': rng.poisson(1.7, n),
+    ''plan'': rng.choice([''free'', ''pro'', ''team''], n, p=[.6, .3, .1]),
+    ''monthly_spend'': rng.gamma(3, 25, n).round(2),
+    ''signed_up'': pd.Timestamp(''2024-01-01'') + pd.to_timedelta(rng.integers(0, 700, n), ''D''),
+})
+risk = 0.60 - 0.012 * frame[''tenure_months''] + 0.09 * frame[''tickets_90d'']
+frame[''churned''] = (rng.random(n) < risk.clip(0.02, 0.95)).astype(int)
+
+FEATURES = [''tenure_months'', ''tickets_90d'', ''plan'', ''monthly_spend'']
+LABEL = ''churned''
+
+X = frame[FEATURES]
+y = frame[LABEL]
+print(f''X {X.shape}   y {y.shape}   positive rate {y.mean():.1%}'')
+print(X.dtypes.to_dict())
 ```
 
-Four arguments, three of which matter.
+Two conventions worth following. `X` is the feature matrix and `y` the label vector; everyone uses those names and deviating from them makes code harder to read. And **the feature list is a named constant**, not an inline `drop(columns=[...])`, so that training and inference cannot drift apart.
 
-- **`test_size=0.2`** keeps a fifth back. With small data, 0.3; with millions of rows, 0.1 is plenty.
-- **`random_state`** makes it reproducible. Without it, every run gives a different score and you will chase the variation.
-- **`stratify=y`** keeps the class proportions the same in both halves. With an imbalanced label - 3% churn - a random split can easily give a test set with twice the churn rate of the training set, and then the score is about the split rather than the model.
+## The three-way split
+
+```python
+import numpy as np
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(5)
+X = rng.normal(size=(2000, 4))
+y = (X[:, 0] + rng.normal(0, 0.5, 2000) > 0).astype(int)
+
+# First carve off the test set, and then do not touch it.
+X_rest, X_test, y_rest, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=0, stratify=y)
+
+# Then split what remains into train and validation.
+X_train, X_val, y_train, y_val = train_test_split(
+    X_rest, y_rest, test_size=0.25, random_state=0, stratify=y_rest)
+
+for name, part in [(''train'', y_train), (''validation'', y_val), (''test'', y_test)]:
+    print(f''{name:<11} {len(part):>5,}  ({len(part) / len(y):.0%})  ''
+          f''positive {part.mean():.1%}'')
+```
+
+Each set has one job and they are not interchangeable:
+
+- **Train** - fit the parameters.
+- **Validation** - choose hyperparameters, compare models, pick a threshold. Used many times.
+- **Test** - the final estimate of performance. Used **once**.
+
+`stratify=y` keeps the label proportions equal across the splits. Without it, a rare class can be unevenly distributed by chance and the scores become incomparable.
 
 ## Random is not always right
 
-**Time series.** If you are predicting the future, the test set must come after the training set. A random split lets the model learn from Thursday to predict Wednesday, which it will never be able to do in production. Split by date.
+A random split assumes the rows are independent. Three common situations where they are not, and a random split then leaks.
+
+**1. Time.** If the model will predict the future, the test set must be the future.
 
 ```python
-cutoff = ''2026-03-01''
-train = df[df[''date''] < cutoff]
-test = df[df[''date''] >= cutoff]
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+
+rng = np.random.default_rng(11)
+n = 3000
+
+days = np.sort(rng.integers(0, 365, n))
+# The relationship DRIFTS over the year.
+strength = np.linspace(2.0, -0.5, 365)[days]
+feature = rng.normal(0, 1, n)
+label = (feature * strength + rng.normal(0, 1, n) > 0).astype(int)
+
+frame = pd.DataFrame({''day'': days, ''feature'': feature, ''label'': label})
+
+# Random split: train and test are interleaved in time.
+shuffled = frame.sample(frac=1.0, random_state=0)
+split = int(n * 0.75)
+model = LogisticRegression().fit(shuffled[[''feature'']][:split], shuffled[''label''][:split])
+random_score = accuracy_score(shuffled[''label''][split:],
+                              model.predict(shuffled[[''feature'']][split:]))
+
+# Time split: train on the past, test on the future.
+ordered = frame.sort_values(''day'')
+model = LogisticRegression().fit(ordered[[''feature'']][:split], ordered[''label''][:split])
+time_score = accuracy_score(ordered[''label''][split:],
+                            model.predict(ordered[[''feature'']][split:]))
+
+print(f''random split accuracy: {random_score:.3f}'')
+print(f''time split accuracy:   {time_score:.3f}'')
+print()
+print(''The random split is optimistic because it lets the model train'')
+print(''on days that come after days it is tested on.'')
 ```
 
-**Grouped data.** If one customer has forty rows, a random split puts some in train and some in test, and the model recognises the customer rather than the pattern. Split by group - `GroupShuffleSplit` - so every row for a customer lands on one side.
+**2. Groups.** If several rows belong to one entity - a customer, a patient, a device - all of that entity''s rows must be on the same side.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
+from sklearn.metrics import accuracy_score
+
+rng = np.random.default_rng(13)
+n_customers, per_customer = 300, 8
+
+customer = np.repeat(np.arange(n_customers), per_customer)
+# A per-customer quirk the model can memorise.
+customer_effect = rng.normal(0, 2, n_customers)[customer]
+feature = rng.normal(0, 1, len(customer))
+label = ((feature + customer_effect + rng.normal(0, 0.6, len(customer))) > 0).astype(int)
+
+X = np.column_stack([feature, customer])      # customer id as a feature, deliberately
+y = label
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, random_state=0)
+naive = accuracy_score(y_te, RandomForestClassifier(n_estimators=120, random_state=0)
+                       .fit(X_tr, y_tr).predict(X_te))
+
+splitter = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=0)
+train_idx, test_idx = next(splitter.split(X, y, groups=customer))
+grouped = accuracy_score(y[test_idx], RandomForestClassifier(n_estimators=120, random_state=0)
+                         .fit(X[train_idx], y_tr := y[train_idx]).predict(X[test_idx]))
+
+print(f''random split (same customer on both sides): {naive:.3f}'')
+print(f''grouped split (customers kept together):    {grouped:.3f}'')
+print()
+print(''The gap is memorisation of individual customers, which is'')
+print(''useless for a new customer - the case the model is for.'')
+```
+
+**3. Near-duplicates.** Rows that are copies of each other, or near copies - the same document scraped twice, the same transaction retried - put the same information on both sides.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(17)
+base = pd.DataFrame({''a'': rng.normal(size=400), ''b'': rng.normal(size=400)})
+# 15% of rows are duplicated, as happens in scraped or retried data.
+duplicated = pd.concat([base, base.sample(60, random_state=0)], ignore_index=True)
+
+exact = int(duplicated.duplicated().sum())
+print(f''{len(duplicated)} rows, {exact} exact duplicates ({exact / len(duplicated):.0%})'')
+print(''After a random split, roughly half of those pairs straddle the'')
+print(''split - and the model has seen the answer.'')
+```
+
+Deduplicate **before** splitting, always. After splitting it is too late.
 
 ## The test set is spent when you look at it
 
-Each time you check the test score and change something in response, a little of it leaks into your decisions. Do that twenty times and the test set has become a second training set, and the score is optimistic again.
+```python
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
 
-The discipline: use cross-validation on the training set for every decision, and touch the test set once, at the end, to report a number. If you must look more often, hold out a third set.
+rng = np.random.default_rng(19)
+# Pure noise: there is NOTHING to learn here.
+X = rng.normal(size=(600, 30))
+y = rng.integers(0, 2, 600)
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0)
+
+best = 0.0
+for depth in range(1, 25):
+    score = accuracy_score(y_te, RandomForestClassifier(
+        max_depth=depth, n_estimators=60, random_state=0).fit(X_tr, y_tr).predict(X_te))
+    best = max(best, score)
+
+print(f''true accuracy achievable: 0.500 (the labels are random)'')
+print(f''best of 24 settings, chosen ON THE TEST SET: {best:.3f}'')
+print()
+print(''Trying enough settings against the test set finds one that fits'')
+print(''its noise. The reported number is then a selection artefact.'')
+```
+
+Every time you look at the test set and change something, it becomes a little more like a validation set. After a dozen such rounds the number it reports is optimistic by a few points, and nobody can say by how much.
+
+The discipline: **choose everything on the validation set or by cross-validation, and run the test set once, at the end, as the number you publish.** If you must look again, say so, and treat the result as an estimate with a question mark.
 
 ## The number worth watching
 
-Not the test score on its own, but the gap between training and test:
+```python
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
 
-```
-train 0.99, test 0.71   -> memorised; the model is too complex for the data
-train 0.72, test 0.70   -> learned something, and it generalises
-train 0.61, test 0.60   -> underfitted; it has not found the pattern yet
+rng = np.random.default_rng(23)
+n = 1200
+X = rng.normal(size=(n, 8))
+y = (X[:, 0] + 0.6 * X[:, 1] + rng.normal(0, 0.9, n) > 0).astype(int)
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+rows = []
+for depth in [2, 4, 6, 10, 16, None]:
+    model = RandomForestClassifier(max_depth=depth, n_estimators=150, random_state=0)
+    model.fit(X_tr, y_tr)
+    train_score = accuracy_score(y_tr, model.predict(X_tr))
+    test_score = accuracy_score(y_te, model.predict(X_te))
+    rows.append({''max_depth'': str(depth), ''train'': round(train_score, 3),
+                 ''test'': round(test_score, 3), ''gap'': round(train_score - test_score, 3)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The gap between train and test is the overfitting measure.'')
+print(''A gap near zero with a low score is underfitting; a large gap'')
+print(''with a high train score is memorisation.'')
 ```
 
-That one comparison diagnoses most of what goes wrong, and the next level is about what to do in each case.',
-   'A model scored on the data it was fitted to tells you how well it memorised. The train/test split is the fix, and getting it right - including for time series and grouped data - decides whether every number after it is meaningful.',
-   10, 438, '55555555-5555-4555-8555-555555555555', 'published',
+**Always report both numbers.** A test score alone cannot distinguish "this problem is hard" from "this model memorised the training set".
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+rng = np.random.default_rng(seed=31)
+
+# Support tickets. Several per customer, spread over a year, and the
+# relationship between features and outcome drifts slowly.
+n_customers = 600
+rows = []
+for customer in range(n_customers):
+    quirk = rng.normal(0, 1.6)                    # a strong per-customer effect
+    plan = rng.choice([''free'', ''pro'', ''team''], p=[.5, .35, .15])
+    joined = int(rng.integers(0, 330))            # customers arrive over the year
+    for _ in range(int(rng.integers(3, 12))):
+        day = min(joined + int(rng.integers(0, 40)), 364)
+        drift = np.linspace(1.4, 0.4, 365)[day]   # the world changes
+        complexity = rng.gamma(2, 1.2)
+        first_response = rng.gamma(2, 3)
+        score = (-1.1 + 0.42 * complexity * drift + 0.1 * first_response
+                 + quirk + rng.normal(0, 0.7))
+        rows.append({''customer'': customer, ''day'': day, ''plan'': plan,
+                     ''complexity'': complexity, ''first_response_h'': first_response,
+                     ''escalated'': int(score > 0)})
+tickets = pd.DataFrame(rows)
+
+# A feature computed over the WHOLE dataset: each customer''s own
+# escalation rate. It is the kind of thing that gets added without
+# thinking, and it is exactly what a grouped split exists to expose.
+tickets[''customer_rate''] = tickets.groupby(''customer'')[''escalated''].transform(''mean'')
+
+HONEST_FEATURES = [''complexity'', ''first_response_h'', ''plan'']
+LEAKY_FEATURES = HONEST_FEATURES + [''customer_rate'']
+CATEGORICAL = [''plan'']
+LABEL = ''escalated''
+
+print(f''{len(tickets):,} tickets from {tickets["customer"].nunique()} customers'')
+print(f''positive rate {tickets[LABEL].mean():.1%}'')
+print(f''duplicated rows: {int(tickets.duplicated().sum())}'')
+print()
+
+def build(features, depth=8):
+    numeric = [f for f in features if f not in CATEGORICAL]
+    return Pipeline([
+        (''prepare'', ColumnTransformer([
+            (''num'', StandardScaler(), numeric),
+            (''cat'', OneHotEncoder(handle_unknown=''ignore''), CATEGORICAL),
+        ])),
+        (''model'', RandomForestClassifier(n_estimators=200, max_depth=depth, random_state=0)),
+    ])
+
+def evaluate(train, test, label, features):
+    model = build(features).fit(train[features], train[LABEL])
+    probabilities = model.predict_proba(test[features])[:, 1]
+    return {
+        ''split'': label,
+        ''train_n'': len(train), ''test_n'': len(test),
+        ''honest_auc'' if features is HONEST_FEATURES else ''leaky_auc'':
+            round(roc_auc_score(test[LABEL], probabilities), 3),
+    }
+
+def both(train, test, label):
+    honest = evaluate(train, test, label, HONEST_FEATURES)
+    leaky = evaluate(train, test, label, LEAKY_FEATURES)
+    return {**honest, ''leaky_auc'': leaky[''leaky_auc'']}
+
+results = []
+
+# 1. Random - wrong here on two counts at once.
+train_idx, test_idx = train_test_split(
+    tickets.index, test_size=0.25, random_state=0, stratify=tickets[LABEL])
+results.append(both(tickets.loc[train_idx], tickets.loc[test_idx], ''random (wrong)''))
+
+# 2. Grouped by customer - fixes the leakage between a customer''s rows.
+splitter = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=0)
+gi, gj = next(splitter.split(tickets, groups=tickets[''customer'']))
+results.append(both(tickets.iloc[gi], tickets.iloc[gj], ''grouped by customer''))
+
+# 3. Time-ordered - fixes training on the future.
+ordered = tickets.sort_values(''day'')
+cut = int(len(ordered) * 0.75)
+results.append(both(ordered.iloc[:cut], ordered.iloc[cut:], ''time-ordered''))
+
+# 4. Both at once, which is what production actually requires: a
+#    customer who has not been seen, in a month that has not happened.
+cutoff_day = int(np.percentile(tickets[''day''], 70))
+early = tickets[tickets[''day''] <= cutoff_day]
+early_customers = set(early[''customer''])
+late = tickets[(tickets[''day''] > cutoff_day) & (~tickets[''customer''].isin(early_customers))]
+print(f''time + unseen customers: {len(early):,} train, {len(late):,} test'')
+results.append(both(early, late, ''time + unseen customers''))
+
+print()
+print(pd.DataFrame(results).to_string(index=False))
+print()
+print(''Two things in that table, and the second is the important one.'')
+print()
+print(''The honest column moves with the split, and the two'')
+print(''time-respecting rows are the lowest - which is the drift'')
+print(''in the data showing up as soon as the model is asked to'')
+print(''predict a period it did not train on. Those are the rows'')
+print(''that describe production.'')
+print()
+print(''The leaky column is high under EVERY split, including the'')
+print(''strictest. customer_rate was computed over the whole dataset,'')
+print(''so it carries the test labels into every fold - and no amount'')
+print(''of splitting discipline removes a feature that was built from'')
+print(''the answer. The split protects against one kind of leakage;'')
+print(''this is the other kind, and it has its own lesson.'')
+print()
+
+# 5. The test set, used ONCE, after everything is settled.
+splitter = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=1)
+rest_idx, test_idx = next(splitter.split(tickets, groups=tickets[''customer'']))
+rest, held_out = tickets.iloc[rest_idx], tickets.iloc[test_idx]
+
+inner = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=2)
+tr_idx, val_idx = next(inner.split(rest, groups=rest[''customer'']))
+train, validation = rest.iloc[tr_idx], rest.iloc[val_idx]
+
+print(f''train {len(train):,}  validation {len(validation):,}  test {len(held_out):,}'')
+print(f''customer overlap train/test: ''
+      f''{len(set(train["customer"]) & set(held_out["customer"]))}'')
+print()
+
+# Tuning uses the HONEST features only - the leaky one is dropped.
+best_depth, best_score = None, -1.0
+for depth in [4, 6, 8, 12, None]:
+    pipeline = build(HONEST_FEATURES, depth).fit(train[HONEST_FEATURES], train[LABEL])
+    score = roc_auc_score(validation[LABEL],
+                          pipeline.predict_proba(validation[HONEST_FEATURES])[:, 1])
+    print(f''  max_depth {str(depth):<5} validation AUC {score:.3f}'')
+    if score > best_score:
+        best_depth, best_score = depth, score
+
+print(f''chosen on VALIDATION: max_depth={best_depth} (AUC {best_score:.3f})'')
+
+final = build(HONEST_FEATURES, best_depth).fit(rest[HONEST_FEATURES], rest[LABEL])
+test_auc = roc_auc_score(held_out[LABEL],
+                         final.predict_proba(held_out[HONEST_FEATURES])[:, 1])
+print(f''TEST AUC (looked at once): {test_auc:.3f}'')
+print()
+print(''The validation number chose the model. The test number is the'')
+print(''one that goes in the report, and it was computed once.'')
+```
+
+The table in step four carries two lessons. The honest column moves by several points across the four splits, and the two that respect time are the lowest - because the relationship in this data drifts, and a split that lets the model train on later days flatters it. Those two rows are the ones that describe production; reporting a looser number and deploying against a stricter reality is how a model that "worked in testing" disappoints.
+
+The leaky column is the harder lesson: it stays high under every split, including the one with no shared customers and no shared time. `customer_rate` was computed across the whole dataset with `groupby(...).transform(''mean'')`, which is a line that appears in a great many feature-engineering notebooks and quietly carries the test labels into every fold. A disciplined split cannot save you from it. That is a different failure, and it gets its own lesson.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Great validation score, poor production | The split let information leak |
+| The score fell when the split got stricter | It was leaking; the stricter number is real |
+| Several rows per entity | Use a grouped split |
+| The model predicts the future | Split in time, never randomly |
+| The test score crept up over weeks | The test set was used for selection |
+| A rare class is missing from a fold | Use `stratify=` |
+| Duplicates straddle the split | Deduplicate before splitting |
+| Only the test score is reported | Report the train score too; the gap is the signal |
+
+## A check you can run
+
+Take your current split and ask two questions: **could any entity appear on both sides**, and **does any test row come from a time before any training row?**
+
+If either is yes, re-split properly and re-measure. The number will fall. That fall is not a regression - it is the first honest estimate you have had, and it is far better to find it now than after deployment.
+',
+   'A model scored on the data it was fitted to tells you how well it memorised. The train/test split is the fix, and getting it right - including for time series and grouped data - decides whether every number after it is meaningful.', 11, 2249,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000f3',
    'A First Model, End to End',
    'markdown',
-   'Six lines train a model. The work is in the seventh.
+   'This is the whole loop, end to end, with nothing skipped: load, split, build a pipeline, fit, score against a baseline, inspect what it learned, and decide whether it is worth anything.
+
+## The data, and the first look
 
 ```python
-from sklearn.datasets import load_breast_cancer
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
+import numpy as np
+import pandas as pd
 
-data = load_breast_cancer(as_frame=True)
-X, y = data.data, data.target
+rng = np.random.default_rng(seed=41)
+n = 4000
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+# Loan applications. The label is whether the loan was repaid.
+frame = pd.DataFrame({
+    ''income'': rng.lognormal(10.3, 0.5, n).round(-2),
+    ''loan_amount'': rng.lognormal(9.0, 0.6, n).round(-2),
+    ''term_months'': rng.choice([12, 24, 36, 60], n, p=[.2, .35, .3, .15]),
+    ''employment_years'': rng.gamma(2.2, 2.4, n).round(1),
+    ''prior_defaults'': rng.poisson(0.22, n),
+    ''purpose'': rng.choice([''car'', ''home'', ''business'', ''other''], n, p=[.3, .3, .2, .2]),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n),
+})
+frame[''ratio''] = (frame[''loan_amount''] / frame[''income'']).round(3)
 
-model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000))
-model.fit(X_train, y_train)
+risk = (-1.6 + 2.4 * frame[''ratio''] + 0.75 * frame[''prior_defaults'']
+        - 0.09 * frame[''employment_years''] + 0.012 * frame[''term_months'']
+        + rng.normal(0, 0.8, n))
+frame[''defaulted''] = (risk > 0).astype(int)
 
-print(''train'', model.score(X_train, y_train))
-print(''test '', model.score(X_test, y_test))
+# Some missing values, because real data has them.
+frame.loc[rng.choice(n, 180, replace=False), ''employment_years''] = np.nan
+
+print(frame.shape)
+print(frame.dtypes.to_dict())
+print()
+print(f''default rate {frame["defaulted"].mean():.1%}'')
+print(f''missing: {frame.isna().sum().to_dict()}'')
+print()
+print(frame.describe().round(2).to_string())
 ```
 
-`fit` then `predict` or `score` is the entire scikit-learn interface, and it is the same for every model in the library. Swapping LogisticRegression for RandomForestClassifier is a one-word change, which is why the library is worth learning rather than any one algorithm.
+The three things to establish before modelling anything: **the shape**, **the label balance** (which gives you the baseline), and **the missing values** (which decide what the pipeline must handle).
 
 ## The pipeline is not optional
 
-`make_pipeline(StandardScaler(), LogisticRegression())` matters more than it looks. The scaler learns the mean and standard deviation of each column, and it must learn them from the training data only. Scaling the whole dataset first lets information from the test set into the training process - which is leakage, quietly, in the first three lines of nearly every tutorial.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-Inside a pipeline, `fit` scales using training statistics and `predict` reuses them. It is correct by construction.
+NUMERIC = [''income'', ''loan_amount'', ''term_months'', ''employment_years'',
+           ''prior_defaults'', ''ratio'']
+CATEGORICAL = [''purpose'', ''region'']
+FEATURES = NUMERIC + CATEGORICAL
+LABEL = ''defaulted''
+
+def build_model():
+    numeric = Pipeline([
+        (''impute'', SimpleImputer(strategy=''median'')),
+        (''scale'', StandardScaler()),
+    ])
+    categorical = Pipeline([
+        (''impute'', SimpleImputer(strategy=''most_frequent'')),
+        (''encode'', OneHotEncoder(handle_unknown=''ignore'')),
+    ])
+    return Pipeline([
+        (''prepare'', ColumnTransformer([
+            (''num'', numeric, NUMERIC),
+            (''cat'', categorical, CATEGORICAL),
+        ])),
+        (''model'', LogisticRegression(max_iter=2000)),
+    ])
+
+print(build_model())
+```
+
+Three reasons the pipeline is not a convenience:
+
+**The imputer and the scaler are fitted.** The median used to fill missing values is learned from the training data. Computing it over the whole dataset before splitting leaks the test set into training, and inflates the score.
+
+**One object, one `fit`.** There is no way to forget to apply the scaler at inference time, because inference calls the same object.
+
+**`handle_unknown=''ignore''`** means a category that appears only in production does not crash the encoder.
+
+The leakage is worth seeing rather than taking on trust:
+
+```python
+import numpy as np
+from sklearn.model_selection import cross_val_score, KFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+
+rng = np.random.default_rng(43)
+# Pure noise: 400 rows, 3000 features, random labels. Nothing to learn.
+X = rng.normal(size=(400, 3000))
+y = rng.integers(0, 2, 400)
+
+# WRONG: select features using ALL the data, then cross-validate.
+selector = SelectKBest(f_classif, k=20).fit(X, y)
+X_selected = selector.transform(X)
+leaked = cross_val_score(LogisticRegression(max_iter=1000), X_selected, y,
+                         cv=KFold(5, shuffle=True, random_state=0)).mean()
+
+# RIGHT: selection inside the pipeline, so it happens per fold.
+honest = cross_val_score(
+    Pipeline([(''select'', SelectKBest(f_classif, k=20)),
+              (''model'', LogisticRegression(max_iter=1000))]),
+    X, y, cv=KFold(5, shuffle=True, random_state=0)).mean()
+
+print(f''selection outside the pipeline: {leaked:.3f}'')
+print(f''selection inside the pipeline:  {honest:.3f}'')
+print(f''truth (labels are random):      0.500'')
+```
+
+Feature selection done before cross-validation produces a confident result on data with no signal at all. That is the most expensive version of this mistake and it has been published in real papers.
+
+## Fit, and score against a baseline
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.dummy import DummyClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (accuracy_score, roc_auc_score, average_precision_score,
+                             confusion_matrix, classification_report)
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+rng = np.random.default_rng(seed=41)
+n = 4000
+frame = pd.DataFrame({
+    ''income'': rng.lognormal(10.3, 0.5, n).round(-2),
+    ''loan_amount'': rng.lognormal(9.0, 0.6, n).round(-2),
+    ''term_months'': rng.choice([12, 24, 36, 60], n, p=[.2, .35, .3, .15]),
+    ''employment_years'': rng.gamma(2.2, 2.4, n).round(1),
+    ''prior_defaults'': rng.poisson(0.22, n),
+    ''purpose'': rng.choice([''car'', ''home'', ''business'', ''other''], n, p=[.3, .3, .2, .2]),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n),
+})
+frame[''ratio''] = (frame[''loan_amount''] / frame[''income'']).round(3)
+risk = (-1.6 + 2.4 * frame[''ratio''] + 0.75 * frame[''prior_defaults'']
+        - 0.09 * frame[''employment_years''] + 0.012 * frame[''term_months'']
+        + rng.normal(0, 0.8, n))
+frame[''defaulted''] = (risk > 0).astype(int)
+frame.loc[rng.choice(n, 180, replace=False), ''employment_years''] = np.nan
+
+NUMERIC = [''income'', ''loan_amount'', ''term_months'', ''employment_years'',
+           ''prior_defaults'', ''ratio'']
+CATEGORICAL = [''purpose'', ''region'']
+FEATURES = NUMERIC + CATEGORICAL
+
+X, y = frame[FEATURES], frame[''defaulted'']
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=0, stratify=y)
+
+model = Pipeline([
+    (''prepare'', ColumnTransformer([
+        (''num'', Pipeline([(''impute'', SimpleImputer(strategy=''median'')),
+                          (''scale'', StandardScaler())]), NUMERIC),
+        (''cat'', Pipeline([(''impute'', SimpleImputer(strategy=''most_frequent'')),
+                          (''encode'', OneHotEncoder(handle_unknown=''ignore''))]), CATEGORICAL),
+    ])),
+    (''model'', LogisticRegression(max_iter=2000)),
+]).fit(X_train, y_train)
+
+probabilities = model.predict_proba(X_test)[:, 1]
+predictions = model.predict(X_test)
+
+baseline = DummyClassifier(strategy=''most_frequent'').fit(X_train, y_train)
+baseline_acc = accuracy_score(y_test, baseline.predict(X_test))
+
+print(f''{"":<22}{"model":>9}{"baseline":>11}'')
+print(f''{"accuracy":<22}{accuracy_score(y_test, predictions):>9.3f}{baseline_acc:>11.3f}'')
+print(f''{"ROC AUC":<22}{roc_auc_score(y_test, probabilities):>9.3f}{0.500:>11.3f}'')
+print(f''{"average precision":<22}{average_precision_score(y_test, probabilities):>9.3f}''
+      f''{y_test.mean():>11.3f}'')
+print()
+print(''confusion matrix:'')
+print(pd.DataFrame(confusion_matrix(y_test, predictions),
+                   index=[''actually repaid'', ''actually defaulted''],
+                   columns=[''predicted repaid'', ''predicted default'']).to_string())
+print()
+print(classification_report(y_test, predictions,
+                           target_names=[''repaid'', ''defaulted''], digits=3))
+```
 
 ## Is the score good?
 
-```python
-from sklearn.dummy import DummyClassifier
+A score has no meaning without a comparison. Three baselines, each answering a different question:
 
-baseline = DummyClassifier(strategy=''most_frequent'')
-baseline.fit(X_train, y_train)
-print(''baseline'', baseline.score(X_test, y_test))
+```python
+import numpy as np
+from sklearn.dummy import DummyClassifier
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(47)
+n = 3000
+X = rng.normal(size=(n, 4))
+y = (X[:, 0] * 1.2 + rng.normal(0, 1, n) > 0.8).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+print(f''positive rate {y_te.mean():.1%}'')
+for strategy in [''most_frequent'', ''stratified'', ''uniform'']:
+    dummy = DummyClassifier(strategy=strategy, random_state=0).fit(X_tr, y_tr)
+    print(f''  {strategy:<14} accuracy {accuracy_score(y_te, dummy.predict(X_te)):.3f}'')
+print()
+print(''On a 23% positive rate, "always predict the majority" scores'')
+print(''0.77 and has learned nothing. A model at 0.80 has added 3'')
+print(''points, which may or may not be worth a deployment.'')
 ```
 
-Always. If 95% of your rows are one class, predicting that class for everything scores 95%, and a model at 96% has added almost nothing. The baseline turns an impressive-sounding number into a comparison.
+And the question behind the question: **what would the current process score?** A model that beats the baseline but loses to the three rules the team already uses is not a result.
 
 ## What the model learned
 
 ```python
+import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-coefficients = pd.Series(
-    model[-1].coef_[0], index=X.columns
-).sort_values()
-print(coefficients.head(3))
-print(coefficients.tail(3))
+rng = np.random.default_rng(seed=41)
+n = 3000
+frame = pd.DataFrame({
+    ''ratio'': rng.gamma(2, 0.2, n).round(3),
+    ''prior_defaults'': rng.poisson(0.22, n),
+    ''employment_years'': rng.gamma(2.2, 2.4, n).round(1),
+    ''term_months'': rng.choice([12, 24, 36, 60], n),
+    ''purpose'': rng.choice([''car'', ''home'', ''business'', ''other''], n),
+})
+risk = (-1.6 + 2.4 * frame[''ratio''] + 0.75 * frame[''prior_defaults'']
+        - 0.09 * frame[''employment_years''] + 0.012 * frame[''term_months'']
+        + rng.normal(0, 0.8, n))
+frame[''defaulted''] = (risk > 0).astype(int)
+
+NUMERIC = [''ratio'', ''prior_defaults'', ''employment_years'', ''term_months'']
+CATEGORICAL = [''purpose'']
+FEATURES = NUMERIC + CATEGORICAL
+
+X_tr, X_te, y_tr, y_te = train_test_split(
+    frame[FEATURES], frame[''defaulted''], test_size=0.3, random_state=0,
+    stratify=frame[''defaulted''])
+
+model = Pipeline([
+    (''prepare'', ColumnTransformer([
+        (''num'', StandardScaler(), NUMERIC),
+        (''cat'', OneHotEncoder(handle_unknown=''ignore''), CATEGORICAL)])),
+    (''model'', LogisticRegression(max_iter=2000)),
+]).fit(X_tr, y_tr)
+
+# Coefficients, on standardised features, so they are comparable.
+names = model.named_steps[''prepare''].get_feature_names_out()
+coefficients = model.named_steps[''model''].coef_[0]
+table = pd.DataFrame({''feature'': names, ''coefficient'': coefficients.round(3)})
+table[''odds_multiplier''] = np.exp(coefficients).round(2)
+print(table.sort_values(''coefficient'', key=abs, ascending=False).to_string(index=False))
+print()
+
+# Permutation importance: shuffle one column and see what the score
+# loses. Model-agnostic, and it uses held-out data.
+result = permutation_importance(model, X_te, y_te, n_repeats=10, random_state=0)
+importance = pd.DataFrame({
+    ''feature'': FEATURES,
+    ''drop_in_accuracy'': result.importances_mean.round(4),
+    ''std'': result.importances_std.round(4),
+}).sort_values(''drop_in_accuracy'', ascending=False)
+print(importance.to_string(index=False))
+print()
+print(''The true coefficients were: ratio +2.4, prior_defaults +0.75,'')
+print(''employment_years -0.09, term_months +0.012, purpose 0.'')
+print(''The model recovered the ordering and the signs.'')
 ```
 
-For a linear model on scaled inputs, the coefficients are comparable: the largest absolute values are the features doing the work. If something nonsensical is at the top - an id column, a timestamp - you have found a bug, and finding it now is much cheaper than finding it after launch.
+Two kinds of inspection and they answer different questions. **Coefficients** say how the model uses each feature, and are only comparable when the features are standardised. **Permutation importance** says how much the score depends on each feature, works for any model, and is computed on held-out data.
+
+Neither says anything causal. `ratio` has the largest coefficient because it predicts best, not because lowering it would prevent defaults.
 
 ## The order to work in
 
-Split, baseline, simplest model that could work, look at what it learned, and only then reach for something more complicated. Most projects that go wrong skipped to the end.',
-   'Load, split, fit, predict, score - and then the part people skip, which is working out whether the score is good. A model that is 95% accurate on data that is 95% one class has learned nothing at all.',
-   11, 347, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''step'': ''1'', ''do'': ''write down the decision the model will inform''},
+    {''step'': ''2'', ''do'': ''compute the baseline - majority class, or the current rule''},
+    {''step'': ''3'', ''do'': ''split properly, and put the test set away''},
+    {''step'': ''4'', ''do'': ''build the simplest model that could work, in a pipeline''},
+    {''step'': ''5'', ''do'': ''score it against the baseline, with an interval''},
+    {''step'': ''6'', ''do'': ''look at what it learned, and at the errors it makes''},
+    {''step'': ''7'', ''do'': ''only then: better features, then a better model''},
+]).to_string(index=False))
+```
+
+Steps four to seven are the ones people reverse. Starting with gradient boosting and forty engineered features means that when the score is poor you have no idea which part is at fault, and when it is good you cannot tell whether the simple version would have done.
+
+A logistic regression in a pipeline takes ten minutes and tells you whether the problem is learnable at all.
+
+## Look at the errors
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+rng = np.random.default_rng(53)
+n = 3000
+frame = pd.DataFrame({
+    ''ratio'': rng.gamma(2, 0.2, n).round(3),
+    ''prior_defaults'': rng.poisson(0.22, n),
+    ''employment_years'': rng.gamma(2.2, 2.4, n).round(1),
+})
+risk = (-1.0 + 3.0 * frame[''ratio''] + 0.8 * frame[''prior_defaults'']
+        - 0.1 * frame[''employment_years''] + rng.normal(0, 0.8, n))
+frame[''defaulted''] = (risk > 0).astype(int)
+
+FEATURES = [''ratio'', ''prior_defaults'', ''employment_years'']
+X_tr, X_te, y_tr, y_te = train_test_split(
+    frame[FEATURES], frame[''defaulted''], test_size=0.3, random_state=0,
+    stratify=frame[''defaulted''])
+
+model = Pipeline([(''scale'', StandardScaler()),
+                  (''model'', LogisticRegression(max_iter=1000))]).fit(X_tr, y_tr)
+
+errors = X_te.copy()
+errors[''actual''] = y_te
+errors[''probability''] = model.predict_proba(X_te)[:, 1]
+errors[''predicted''] = model.predict(X_te)
+errors[''correct''] = errors[''actual''] == errors[''predicted'']
+
+print(''feature means, by whether the model got it right:'')
+print(errors.groupby(''correct'')[FEATURES].mean().round(3).to_string())
+print()
+print(''the five most confident mistakes:'')
+wrong = errors[~errors[''correct'']].copy()
+wrong[''confidence''] = (wrong[''probability''] - 0.5).abs()
+print(wrong.nlargest(5, ''confidence'')[
+    FEATURES + [''actual'', ''probability'']].round(3).to_string(index=False))
+print()
+print(''Confidently wrong rows are where a missing feature usually'')
+print(''lives. Reading five of them is worth an hour of tuning.'')
+```
+
+**Always look at the errors**, and in particular at the confident ones. They tell you whether the problem is noise (the model is right to be uncertain) or a missing feature (the model is wrong for a reason you can see).
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A high score that means nothing | A skewed label; compare with the baseline |
+| Cross-validation disagrees with the test set | Preprocessing outside the pipeline |
+| An unseen category crashed inference | `handle_unknown=''ignore''` on the encoder |
+| Coefficients are not comparable | Features are on different scales; standardise |
+| `max_iter` warnings from the solver | Unscaled features, or too few iterations |
+| The model beats the baseline but not the current rule | The baseline was the wrong one |
+| A complex model, no idea why it is poor | Start simple, then add |
+| Feature importance read as causation | It is association; an experiment is needed |
+
+## A check you can run
+
+Take any model you have and add three lines: `DummyClassifier(strategy=''most_frequent'')`, fit it on the same training data, and score it on the same test set.
+
+That number is what your model must beat to be worth anything. In my experience the gap is smaller than people expect, and on a skewed problem it is sometimes zero - the model has learned to predict the majority class and reported it as 94% accuracy.
+',
+   'Load, split, fit, predict, score - and then the part people skip, which is working out whether the score is good. A model that is 95% accurate on data that is 95% one class has learned nothing at all.', 9, 1811,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000f5',
    'Overfitting, Underfitting and Cross-Validation',
    'markdown',
-   'A model that is too simple misses the pattern. A model that is too complex memorises the noise. Everything in between is a choice, and cross-validation is how you make it with evidence.
+   'A model can fail in two opposite ways: by being too simple to capture the pattern, or by being complex enough to memorise the noise. Telling them apart is the single most useful diagnostic skill in machine learning, and it needs two numbers rather than one.
 
 ## The two failures
 
-**Underfitting**: poor on training data and poor on test data. The model cannot represent the relationship - a straight line through a curve. Fix by adding capacity or better features.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
 
-**Overfitting**: excellent on training data, poor on test data. The model has learned the specific rows, including their noise. Fix by simplifying, regularising, or getting more data.
+rng = np.random.default_rng(3)
+n = 60
 
+# The truth is a gentle curve. The data has noise on top.
+x = np.sort(rng.uniform(0, 1, n))
+truth = np.sin(2 * np.pi * x)
+y = truth + rng.normal(0, 0.28, n)
+
+x_tr, x_te, y_tr, y_te = train_test_split(x, y, test_size=0.4, random_state=0)
+
+rows = []
+for degree in [0, 1, 3, 9, 15, 25]:
+    coefficients = np.polyfit(x_tr, y_tr, degree)
+    rows.append({
+        ''degree'': degree,
+        ''train_rmse'': round(float(np.sqrt(mean_squared_error(
+            y_tr, np.polyval(coefficients, x_tr)))), 3),
+        ''test_rmse'': round(float(np.sqrt(mean_squared_error(
+            y_te, np.polyval(coefficients, x_te)))), 3),
+    })
+table = pd.DataFrame(rows)
+table[''gap''] = (table[''test_rmse''] - table[''train_rmse'']).round(3)
+print(table.to_string(index=False))
+print()
+print(f''the noise floor is {0.28:.2f} - no model can beat it'')
+print()
+print(''degree 0-1: both errors high      -> UNDERFITTING'')
+print(''degree 3:   both near the floor   -> about right'')
+print(''degree 15+: train tiny, test huge -> OVERFITTING'')
 ```
-train 0.99, test 0.71   overfitted
-train 0.61, test 0.60   underfitted
-train 0.74, test 0.72   about right
-```
+
+The diagnosis comes from the **pair** of numbers, never from one:
+
+- **Both high** - underfitting. The model is not flexible enough, or the features do not contain the signal.
+- **Train low, test high** - overfitting. The model has memorised the training set.
+- **Both low** - you are done.
+- **Train high, test low** - almost always a bug in the split, or a tiny test set.
+
+Reporting only the test score cannot distinguish "this problem is hard" from "this model memorised".
 
 ## Cross-validation
 
-A single train/validation split wastes data and gives a score that depends on which rows happened to land where. K-fold cross-validation splits the training data into k parts, fits k times - each time holding out a different part - and averages.
+A single train/test split gives one number, and that number is noisy. Cross-validation gives several.
 
 ```python
-from sklearn.model_selection import cross_val_score
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import (cross_val_score, StratifiedKFold,
+                                     train_test_split)
+from sklearn.metrics import accuracy_score
 
-scores = cross_val_score(model, X_train, y_train, cv=5, scoring=''roc_auc'')
-print(scores.mean().round(3), ''+/-'', scores.std().round(3))
+rng = np.random.default_rng(7)
+n = 600
+X = rng.normal(size=(n, 6))
+y = (X[:, 0] + 0.8 * X[:, 1] + rng.normal(0, 1.1, n) > 0).astype(int)
+
+# Five different single splits of the same data.
+singles = []
+for seed in range(5):
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X, y, test_size=0.25, random_state=seed, stratify=y)
+    model = RandomForestClassifier(n_estimators=150, random_state=0).fit(X_tr, y_tr)
+    singles.append(accuracy_score(y_te, model.predict(X_te)))
+
+print(''five single splits of the SAME data:'')
+print('' '', [round(s, 3) for s in singles])
+print(f''  range {min(singles):.3f} to {max(singles):.3f} - a spread of ''
+      f''{max(singles) - min(singles):.3f}'')
+print()
+
+scores = cross_val_score(
+    RandomForestClassifier(n_estimators=150, random_state=0), X, y,
+    cv=StratifiedKFold(5, shuffle=True, random_state=0))
+print(f''5-fold cross-validation: {scores.round(3)}'')
+print(f''  mean {scores.mean():.3f}  std {scores.std():.3f}'')
+print(f''  report as {scores.mean():.3f} +/- {2 * scores.std():.3f}'')
 ```
 
-The standard deviation is as informative as the mean. A model scoring 0.80 plus or minus 0.02 is a different proposition from one scoring 0.80 plus or minus 0.11 - the second is unstable, and on a different sample it might be 0.69.
+The spread between single splits is the thing to notice. A model reported as 0.84 when a different random seed would have said 0.79 is not reporting a property of the model.
 
-Use `StratifiedKFold` for imbalanced classes, `TimeSeriesSplit` when order matters, `GroupKFold` when rows share an entity.
+**Report the mean and the spread**, and when comparing two models, compare them on the same folds:
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(11)
+n = 2000
+X = rng.normal(size=(n, 8))
+y = ((X[:, 0] + 0.9 * (X[:, 1] > 0) * (X[:, 2] > 0) + rng.normal(0, 1, n)) > 0.5).astype(int)
+
+folds = StratifiedKFold(5, shuffle=True, random_state=0)
+models = {
+    ''logistic'': Pipeline([(''s'', StandardScaler()), (''m'', LogisticRegression(max_iter=1000))]),
+    ''forest'': RandomForestClassifier(n_estimators=200, random_state=0),
+    ''boosting'': HistGradientBoostingClassifier(random_state=0),
+}
+rows = []
+for name, model in models.items():
+    scores = cross_val_score(model, X, y, cv=folds, scoring=''roc_auc'')
+    rows.append({''model'': name, ''mean_auc'': round(scores.mean(), 4),
+                 ''std'': round(scores.std(), 4),
+                 ''folds'': '' ''.join(f''{s:.3f}'' for s in scores)})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The same folds for every model, so the comparison is paired'')
+print(''and the fold-to-fold variation cancels.'')
+```
+
+Which splitter to use is the same question as in the split lesson: `StratifiedKFold` for a classification label, `GroupKFold` when rows share an entity, `TimeSeriesSplit` when the data is ordered in time.
+
+```python
+import numpy as np
+from sklearn.model_selection import TimeSeriesSplit
+
+X = np.arange(20).reshape(-1, 1)
+for fold, (train, test) in enumerate(TimeSeriesSplit(n_splits=4).split(X), 1):
+    print(f''fold {fold}: train {train.min():>2}-{train.max():>2}  ''
+          f''test {test.min():>2}-{test.max():>2}'')
+print()
+print(''Each fold trains only on the past. A shuffled KFold would let'')
+print(''the model see the future, and the score would be a fiction.'')
+```
 
 ## The learning curve
 
+A learning curve answers a different question: **would more data help?**
+
 ```python
-from sklearn.model_selection import learning_curve
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import learning_curve, StratifiedKFold
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(13)
+n = 4000
+X = rng.normal(size=(n, 10))
+y = ((1.2 * X[:, 0] + 0.9 * (X[:, 1] > 0) * (X[:, 2] > 0)
+      + rng.normal(0, 1.0, n)) > 0.6).astype(int)
+
+for name, model in [
+    (''underfitting (1 feature)'',
+     Pipeline([(''s'', StandardScaler()), (''m'', LogisticRegression(max_iter=1000))])),
+    (''overfitting (deep forest)'',
+     RandomForestClassifier(n_estimators=100, random_state=0)),
+]:
+    data = X[:, :1] if ''underfitting'' in name else X
+    sizes, train_scores, test_scores = learning_curve(
+        model, data, y, train_sizes=np.linspace(0.05, 1.0, 6),
+        cv=StratifiedKFold(4, shuffle=True, random_state=0), scoring=''roc_auc'')
+    table = pd.DataFrame({
+        ''n'': sizes,
+        ''train'': train_scores.mean(axis=1).round(3),
+        ''cv'': test_scores.mean(axis=1).round(3),
+    })
+    table[''gap''] = (table[''train''] - table[''cv'']).round(3)
+    print(name)
+    print(table.to_string(index=False))
+    print()
 ```
 
-Plot the training and validation scores against the amount of data used. The shape tells you what to do next:
+How to read the two shapes:
 
-- Both low, converged: **underfitting**. More data will not help. Better features or a stronger model will.
-- Large gap, validation still rising: **overfitting**, and more data probably will help.
-- Both converged and acceptable: you are done; spend the effort elsewhere.
+- **Both curves flat and close together, at a low level** - underfitting. More data will not help; a more flexible model or better features will.
+- **A wide and slowly closing gap** - overfitting. More data **will** help, and so will regularisation.
+- **Both curves high and converged** - you are at the limit of what this data supports.
 
-This is worth running before deciding to collect more data, because collecting more data is usually the most expensive option available.
+That first case is the valuable one, because "we need more data" is an expensive conclusion and the learning curve is how you find out whether it is true.
 
-## Regularisation, in one paragraph
+## Regularisation, and the bias-variance trade
 
-Regularisation penalises complexity: the fit is scored on accuracy minus a penalty for large coefficients. It is the dial between the two failures, exposed as `C` in scikit-learn''s linear models (smaller is more regularised) and as depth and leaf limits in trees. Tuning it is most of what hyperparameter search does.',
-   'Every model sits somewhere between memorising the training set and missing the pattern entirely. Cross-validation measures where, using the training data alone, so the test set stays untouched for the one number you report.',
-   11, 379, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import cross_val_score, KFold
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+
+rng = np.random.default_rng(17)
+n = 120
+x = rng.uniform(0, 1, n)
+y = np.sin(2 * np.pi * x) + rng.normal(0, 0.3, n)
+X = x.reshape(-1, 1)
+
+rows = []
+for alpha in [1e-6, 1e-3, 1e-1, 1.0, 10.0, 100.0]:
+    model = Pipeline([
+        (''poly'', PolynomialFeatures(degree=15)),
+        (''scale'', StandardScaler()),
+        (''model'', Ridge(alpha=alpha)),
+    ])
+    scores = -cross_val_score(model, X, y, cv=KFold(5, shuffle=True, random_state=0),
+                              scoring=''neg_root_mean_squared_error'')
+    fitted = model.fit(X, y)
+    train_rmse = float(np.sqrt(np.mean((y - fitted.predict(X)) ** 2)))
+    rows.append({''alpha'': alpha, ''train_rmse'': round(train_rmse, 3),
+                 ''cv_rmse'': round(scores.mean(), 3)})
+table = pd.DataFrame(rows)
+table[''gap''] = (table[''cv_rmse''] - table[''train_rmse'']).round(3)
+print(table.to_string(index=False))
+print()
+print(f''noise floor {0.30:.2f}'')
+print(''Low alpha: a degree-15 polynomial fits the noise.'')
+print(''High alpha: the model is pulled flat and underfits.'')
+print(''The best alpha sits between, near the noise floor.'')
+```
+
+Regularisation is a dial between the two failures. Every model family has one:
+
+- **Linear**: the `alpha` of ridge or lasso.
+- **Trees**: `max_depth`, `min_samples_leaf`, `ccp_alpha`.
+- **Boosting**: `learning_rate` with `max_iter`, plus early stopping.
+- **Neural networks**: weight decay, dropout, early stopping.
+
+More data moves the whole curve down; regularisation moves you along it.
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import (StratifiedKFold, cross_validate,
+                                     learning_curve, train_test_split)
+from sklearn.metrics import roc_auc_score
+
+rng = np.random.default_rng(seed=71)
+n = 3000
+
+# A moderately hard problem: real signal, real noise, an interaction.
+X = rng.normal(size=(n, 12))
+signal = (1.1 * X[:, 0] - 0.7 * X[:, 1] + 1.2 * (X[:, 2] > 0) * (X[:, 3] > 0)
+          + 0.6 * np.abs(X[:, 4]))
+y = (signal + rng.normal(0, 1.3, n) > 1.0).astype(int)
+
+X_rest, X_test, y_rest, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=0, stratify=y)
+folds = StratifiedKFold(5, shuffle=True, random_state=0)
+print(f''{len(X_rest):,} for development, {len(X_test):,} held out'')
+print(f''positive rate {y.mean():.1%}'')
+print()
+
+# ---- 1. Sweep the regularisation dial, measuring BOTH scores. ------
+rows = []
+for leaves, min_leaf in [(3, 50), (7, 25), (15, 10), (31, 5), (63, 1), (127, 1)]:
+    model = HistGradientBoostingClassifier(
+        max_leaf_nodes=leaves, min_samples_leaf=min_leaf,
+        learning_rate=0.1, max_iter=200, early_stopping=False, random_state=0)
+    result = cross_validate(model, X_rest, y_rest, cv=folds, scoring=''roc_auc'',
+                            return_train_score=True)
+    rows.append({
+        ''max_leaf_nodes'': leaves, ''min_samples_leaf'': min_leaf,
+        ''train_auc'': round(result[''train_score''].mean(), 3),
+        ''cv_auc'': round(result[''test_score''].mean(), 3),
+        ''cv_std'': round(result[''test_score''].std(), 3),
+    })
+table = pd.DataFrame(rows)
+table[''gap''] = (table[''train_auc''] - table[''cv_auc'']).round(3)
+print(table.to_string(index=False))
+print()
+
+best = table.loc[table[''cv_auc''].idxmax()]
+print(f''best cross-validated AUC {best["cv_auc"]:.3f} at ''
+      f''max_leaf_nodes={int(best["max_leaf_nodes"])}'')
+print(f''the largest model trains to {table["train_auc"].max():.3f} and ''
+      f''cross-validates at {table.loc[table["train_auc"].idxmax(), "cv_auc"]:.3f} ''
+      f''- a gap of {table["gap"].max():.3f}'')
+print()
+
+# ---- 2. The learning curve: would more data help? ------------------
+model = HistGradientBoostingClassifier(
+    max_leaf_nodes=int(best[''max_leaf_nodes'']),
+    min_samples_leaf=int(best[''min_samples_leaf'']),
+    learning_rate=0.1, max_iter=200, early_stopping=False, random_state=0)
+
+sizes, train_scores, cv_scores = learning_curve(
+    model, X_rest, y_rest, train_sizes=np.linspace(0.1, 1.0, 6),
+    cv=folds, scoring=''roc_auc'')
+curve = pd.DataFrame({
+    ''train_rows'': sizes.astype(int),
+    ''train_auc'': train_scores.mean(axis=1).round(3),
+    ''cv_auc'': cv_scores.mean(axis=1).round(3),
+})
+curve[''gap''] = (curve[''train_auc''] - curve[''cv_auc'']).round(3)
+print(curve.to_string(index=False))
+print()
+
+improvement = curve[''cv_auc''].iloc[-1] - curve[''cv_auc''].iloc[-2]
+print(f''the last doubling of data bought {improvement:+.3f} AUC'')
+print(f''the gap is {"still closing" if curve["gap"].iloc[-1] < curve["gap"].iloc[0] else "not closing"}, ''
+      f''{curve["gap"].iloc[0]:.3f} -> {curve["gap"].iloc[-1]:.3f}'')
+print()
+if improvement > 0.005:
+    print(''More data would still help: the curve has not flattened.'')
+else:
+    print(''More data would help little: the curve has flattened, and the'')
+    print(''remaining error is noise or a missing feature.'')
+print()
+
+# ---- 3. Early stopping, instead of guessing the iteration count. ---
+with_stopping = HistGradientBoostingClassifier(
+    max_leaf_nodes=int(best[''max_leaf_nodes'']),
+    min_samples_leaf=int(best[''min_samples_leaf'']),
+    learning_rate=0.05, max_iter=2000, early_stopping=True,
+    validation_fraction=0.15, n_iter_no_change=30, random_state=0).fit(X_rest, y_rest)
+print(f''early stopping used {with_stopping.n_iter_} of 2000 iterations'')
+print()
+
+# ---- 4. The test set, once. ---------------------------------------
+final = HistGradientBoostingClassifier(
+    max_leaf_nodes=int(best[''max_leaf_nodes'']),
+    min_samples_leaf=int(best[''min_samples_leaf'']),
+    learning_rate=0.05, max_iter=with_stopping.n_iter_,
+    early_stopping=False, random_state=0).fit(X_rest, y_rest)
+
+train_auc = roc_auc_score(y_rest, final.predict_proba(X_rest)[:, 1])
+test_auc = roc_auc_score(y_test, final.predict_proba(X_test)[:, 1])
+print(f''train AUC {train_auc:.3f}'')
+print(f''TEST  AUC {test_auc:.3f}   (cross-validated estimate was {best["cv_auc"]:.3f})'')
+print(f''gap {train_auc - test_auc:.3f}'')
+print()
+print(''The cross-validated estimate and the held-out test score agree'')
+print(''to within the fold-to-fold spread, which is what you want: it'')
+print(''means the selection process did not overfit the folds.'')
+```
+
+Three outputs there answer three different questions. The sweep shows where the model stops generalising, and the gap column shows it directly. The learning curve says whether collecting more data is worth doing. And the agreement between the cross-validated estimate and the held-out score is evidence that the tuning itself did not overfit - which is the thing a single number cannot tell you.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Only the test score is reported | The gap is the diagnosis; report both |
+| Both scores are poor | Underfitting, or the features lack the signal |
+| Training score is near perfect | Memorisation; regularise or simplify |
+| Scores swing with the random seed | A single split; use cross-validation |
+| Cross-validation beats the test set badly | The folds were used for selection too |
+| More data did not help | The curve had flattened; it was the model or the features |
+| Cross-validation on a time series looks great | Use `TimeSeriesSplit` |
+| The gap is small but the score is low | The problem may simply be hard |
+
+## A check you can run
+
+Take your current model and print its training score alongside its test score.
+
+If the training score is near perfect, the model is memorising and the test score will fall further in production. If both are poor, no amount of tuning will help and the next step is features, not hyperparameters. Those two numbers take one extra line and they tell you which of two completely different problems you have.
+',
+   'Every model sits somewhere between memorising the training set and missing the pattern entirely. Cross-validation measures where, using the training data alone, so the test set stays untouched for the one number you report.', 9, 1842,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000f6',
    'Feature Engineering, and the Leakage That Fakes a Result',
    'markdown',
-   'Most of the lift in a modelling project comes from features rather than from algorithms. And so does the most common catastrophic error.
+   'Features are where most of the gain in a model comes from, and where the most expensive mistake lives. Leakage - a feature that contains the answer - produces a result that looks excellent and is worth nothing, and it is the single most common reason a model fails after deployment.
 
 ## Useful features
 
-**Ratios and rates.** Logins per day since signup is usually more predictive than logins, because it is not confounded with tenure.
-
-**Recency.** Days since last activity is one of the strongest single predictors of churn in most products.
-
-**Aggregates with a window.** Orders in the last 7, 30 and 90 days, together, carry a trend that any one of them alone does not.
-
-**Categorical encoding, chosen deliberately.** One-hot for a handful of categories; for high-cardinality columns such as postcode, one-hot creates thousands of columns and target encoding is the usual answer - computed inside the cross-validation fold, for the reason below.
-
 ```python
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold
 
-prep = ColumnTransformer([
-    (''num'', StandardScaler(), [''tenure_days'', ''logins_per_day'']),
-    (''cat'', OneHotEncoder(handle_unknown=''ignore''), [''plan'', ''country'']),
-])
+rng = np.random.default_rng(3)
+n = 4000
+
+frame = pd.DataFrame({
+    ''income'': rng.lognormal(10.3, 0.5, n).round(-2),
+    ''loan_amount'': rng.lognormal(9.0, 0.6, n).round(-2),
+    ''applied_at'': pd.Timestamp(''2026-01-01'') + pd.to_timedelta(rng.integers(0, 365 * 24, n), ''h''),
+    ''employment_years'': rng.gamma(2.2, 2.4, n).round(1),
+})
+risk = (-1.0 + 3.0 * (frame[''loan_amount''] / frame[''income''])
+        - 0.08 * frame[''employment_years''] + rng.normal(0, 0.8, n))
+frame[''defaulted''] = (risk > 0).astype(int)
+
+folds = StratifiedKFold(5, shuffle=True, random_state=0)
+
+raw = [''income'', ''loan_amount'', ''employment_years'']
+base = cross_val_score(HistGradientBoostingClassifier(random_state=0),
+                       frame[raw], frame[''defaulted''], cv=folds, scoring=''roc_auc'').mean()
+
+# A RATIO, which is the single most productive feature type.
+frame[''loan_to_income''] = frame[''loan_amount''] / frame[''income'']
+with_ratio = cross_val_score(HistGradientBoostingClassifier(random_state=0),
+                             frame[raw + [''loan_to_income'']], frame[''defaulted''],
+                             cv=folds, scoring=''roc_auc'').mean()
+
+print(f''raw features only:  AUC {base:.3f}'')
+print(f''plus the ratio:     AUC {with_ratio:.3f}'')
+print()
+print(''The model could in principle learn the ratio from the two'')
+print(''columns. Giving it directly saves it the trouble, and on a'')
+print(''tree model it saves a great deal of depth.'')
 ```
 
-`handle_unknown=''ignore''` matters: production will send a category that was not in your training data, and the default is to raise.
+The categories worth trying, roughly in order of how often they pay:
+
+**Ratios and differences.** `loan / income`, `price - cost`, `errors / requests`. A tree can only split on one feature at a time, so a ratio it would need a dozen splits to approximate is nearly free as a column.
+
+**Dates broken into parts.** A raw timestamp is useless to most models; its components are not.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(5)
+stamps = pd.Series(pd.Timestamp(''2026-01-01'')
+                   + pd.to_timedelta(rng.integers(0, 365 * 24, 6), ''h''))
+
+parts = pd.DataFrame({
+    ''hour'': stamps.dt.hour,
+    ''day_of_week'': stamps.dt.dayofweek,
+    ''is_weekend'': stamps.dt.dayofweek >= 5,
+    ''month'': stamps.dt.month,
+    ''day_of_month'': stamps.dt.day,
+    ''is_month_end'': stamps.dt.is_month_end,
+})
+# Cyclic encoding, so 23:00 and 00:00 are close rather than far apart.
+parts[''hour_sin''] = np.sin(2 * np.pi * stamps.dt.hour / 24).round(3)
+parts[''hour_cos''] = np.cos(2 * np.pi * stamps.dt.hour / 24).round(3)
+print(parts.to_string(index=False))
+```
+
+**Counts and aggregates over a window.** "Orders in the last 30 days", "mean session length last week". These are usually the strongest features in a behavioural model - and they are also where leakage enters, so the window must close before the prediction point.
+
+**Categorical encodings.** One-hot for a handful of values; target encoding for many, computed inside the cross-validation fold.
+
+**Text length, token counts, flags.** Cheap, and often surprisingly predictive.
 
 ## Leakage
 
-Leakage is any information in your features that would not be available at prediction time. It produces excellent scores and a model that fails completely in production.
+Leakage is any feature that would not be available, with that value, at the moment the prediction is actually made.
 
-The classic cases:
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold
 
-- **A column that is a consequence of the label.** Predicting churn with `cancellation_reason`. It is only populated for churners.
-- **An aggregate computed over the whole dataset.** A customer average that includes rows from the test period.
-- **Timestamps.** Predicting fraud with `investigated_at`, which only exists because fraud was suspected.
-- **Scaling or imputing before the split.** The scaler saw the test set. Small, real, and the reason to use pipelines.
+rng = np.random.default_rng(7)
+n = 3000
+
+frame = pd.DataFrame({
+    ''tenure'': rng.integers(1, 60, n),
+    ''tickets'': rng.poisson(1.6, n),
+    ''spend'': rng.gamma(3, 25, n).round(2),
+})
+risk = -0.5 - 0.04 * frame[''tenure''] + 0.4 * frame[''tickets''] + rng.normal(0, 1, n)
+frame[''churned''] = (risk > 0).astype(int)
+
+# A field filled in BECAUSE the customer churned.
+frame[''cancellation_reason_given''] = np.where(
+    frame[''churned''] == 1, rng.random(n) < 0.85, rng.random(n) < 0.02).astype(int)
+
+folds = StratifiedKFold(5, shuffle=True, random_state=0)
+honest = [''tenure'', ''tickets'', ''spend'']
+print(f''honest features:  AUC ''
+      f''{cross_val_score(HistGradientBoostingClassifier(random_state=0), frame[honest], frame["churned"], cv=folds, scoring="roc_auc").mean():.3f}'')
+print(f''plus the leak:    AUC ''
+      f''{cross_val_score(HistGradientBoostingClassifier(random_state=0), frame[honest + ["cancellation_reason_given"]], frame["churned"], cv=folds, scoring="roc_auc").mean():.3f}'')
+print()
+print(''In production that field is empty for every account that has'')
+print(''not churned yet. The model would score near chance.'')
+```
+
+Five shapes it takes, and all five appear in real projects:
+
+**1. A field recorded as a consequence.** `cancellation_reason`, `refund_amount`, `closed_date`. Available in the training table, absent at prediction time.
+
+**2. An aggregate computed over the whole dataset.**
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold, GroupKFold
+
+rng = np.random.default_rng(11)
+n_customers, per_customer = 400, 6
+customer = np.repeat(np.arange(n_customers), per_customer)
+n = len(customer)
+
+quirk = rng.normal(0, 1.5, n_customers)[customer]
+feature = rng.normal(0, 1, n)
+y = ((feature + quirk + rng.normal(0, 0.8, n)) > 0).astype(int)
+
+frame = pd.DataFrame({''customer'': customer, ''feature'': feature, ''y'': y})
+# Computed over ALL rows, including the ones in the test fold.
+frame[''customer_rate''] = frame.groupby(''customer'')[''y''].transform(''mean'')
+
+folds = GroupKFold(5)
+honest = cross_val_score(HistGradientBoostingClassifier(random_state=0),
+                         frame[[''feature'']], frame[''y''], cv=folds,
+                         groups=frame[''customer''], scoring=''roc_auc'').mean()
+leaked = cross_val_score(HistGradientBoostingClassifier(random_state=0),
+                         frame[[''feature'', ''customer_rate'']], frame[''y''], cv=folds,
+                         groups=frame[''customer''], scoring=''roc_auc'').mean()
+print(f''feature only:            AUC {honest:.3f}'')
+print(f''plus customer_rate:      AUC {leaked:.3f}'')
+print()
+print(''A GROUPED split did not save it. The feature was built from the'')
+print(''labels of every row, so it carries them into every fold.'')
+```
+
+**3. Preprocessing fitted before the split.** The scaler''s mean, the imputer''s median, the feature selector''s choice - all learned from the test rows. The pipeline exists to prevent exactly this.
+
+**4. A future-dated value.** A "last activity date" that is after the prediction date, a target encoding computed over all time.
+
+**5. Duplicate rows straddling the split.** The same record on both sides, so the model has seen the answer.
 
 ## How to find it
 
-**Be suspicious of a very high score.** On a messy business problem, 0.99 means leakage until proven otherwise. Nothing is that predictable.
+Three checks, in increasing order of effort.
 
-**Look at feature importance.** A column at the top that you did not expect is the first place to check.
+**1. The 0.99 rule.** An AUC above about 0.99 on a messy real-world problem is leakage until proved otherwise.
 
-**Ask of every feature: would I know this at the moment I need the prediction?** If the answer is no, or "only for some rows", it leaks.
+```python
+import numpy as np
+import pandas as pd
 
-**Drop it and see.** If removing one column collapses the score from 0.98 to 0.71, that column was the answer in disguise.
+print(pd.DataFrame([
+    {''AUC'': ''0.60-0.75'', ''reading'': ''plausible for a hard behavioural problem''},
+    {''AUC'': ''0.75-0.90'', ''reading'': ''a good model, check it anyway''},
+    {''AUC'': ''0.90-0.97'', ''reading'': ''excellent, or a subtle leak''},
+    {''AUC'': ''0.97-0.999'', ''reading'': ''assume leakage; find it before celebrating''},
+    {''AUC'': ''1.000'', ''reading'': ''certainly leakage''},
+]).to_string(index=False))
+```
 
-## The 0.99 rule
+**2. Rank the features and interrogate the top one.**
 
-A model that scores 0.99 on a real business problem is wrong roughly every time. It is worth saying so plainly, before it reaches a slide: the fastest way to lose credibility is to present a leaked model and have somebody else find the column.',
-   'Features are where domain knowledge enters a model, and where the most embarrassing mistakes happen. A 0.99 score is almost never brilliance - it is a column that contains the answer, and this lesson is about finding it before a presentation does.',
-   12, 419, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.inspection import permutation_importance
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(13)
+n = 3000
+frame = pd.DataFrame({
+    ''tenure'': rng.integers(1, 60, n),
+    ''tickets'': rng.poisson(1.6, n),
+    ''spend'': rng.gamma(3, 25, n).round(2),
+})
+risk = -0.5 - 0.04 * frame[''tenure''] + 0.4 * frame[''tickets''] + rng.normal(0, 1, n)
+frame[''churned''] = (risk > 0).astype(int)
+frame[''exit_survey_sent''] = np.where(frame[''churned''] == 1,
+                                     rng.random(n) < 0.9, rng.random(n) < 0.03).astype(int)
+
+FEATURES = [''tenure'', ''tickets'', ''spend'', ''exit_survey_sent'']
+X_tr, X_te, y_tr, y_te = train_test_split(frame[FEATURES], frame[''churned''],
+                                          test_size=0.3, random_state=0, stratify=frame[''churned''])
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+result = permutation_importance(model, X_te, y_te, n_repeats=10, random_state=0)
+
+table = pd.DataFrame({''feature'': FEATURES,
+                      ''importance'': result.importances_mean.round(4)}
+                     ).sort_values(''importance'', ascending=False)
+print(table.to_string(index=False))
+print()
+print(''For the top feature, ask one question: WOULD I HAVE THIS VALUE,'')
+print(''with this value, at the moment I need the prediction?'')
+print(''For exit_survey_sent the answer is no, and the model is void.'')
+```
+
+**3. Simulate the prediction moment.** Build the feature table using only data with a timestamp before the prediction point, and re-score. Any feature that cannot be built that way is leakage by definition.
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(17)
+events = pd.DataFrame({
+    ''customer'': rng.integers(1, 40, 600),
+    ''day'': rng.integers(0, 180, 600),
+    ''amount'': rng.gamma(2, 30, 600).round(2),
+})
+PREDICTION_DAY = 120
+
+# Features built ONLY from before the prediction day.
+past = events[events[''day''] < PREDICTION_DAY]
+features = past.groupby(''customer'').agg(
+    orders_before=(''amount'', ''size''),
+    spend_before=(''amount'', ''sum''),
+    last_order_day=(''day'', ''max''),
+).round(2)
+features[''days_since_last''] = PREDICTION_DAY - features[''last_order_day'']
+
+print(f''{len(events)} events, {len(past)} before day {PREDICTION_DAY}'')
+print(features.head(4).to_string())
+print()
+print(f''max day used: {int(past["day"].max())} < {PREDICTION_DAY}'')
+print(''Every feature is computable at the prediction moment. That is'')
+print(''the only test that catches all five shapes of leakage.'')
+```
+
+## Target encoding, done safely
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.preprocessing import TargetEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+
+rng = np.random.default_rng(19)
+n = 4000
+category = rng.integers(0, 120, n)          # high cardinality
+effect = rng.normal(0, 1.0, 120)[category]
+y = ((effect + rng.normal(0, 1.0, n)) > 0).astype(int)
+frame = pd.DataFrame({''category'': category, ''noise'': rng.normal(0, 1, n)})
+
+folds = StratifiedKFold(5, shuffle=True, random_state=0)
+
+# WRONG: encode using the whole dataset, then cross-validate.
+leaky = frame.copy()
+leaky[''category_rate''] = pd.Series(y).groupby(frame[''category'']).transform(''mean'').to_numpy()
+leaked_score = cross_val_score(HistGradientBoostingClassifier(random_state=0),
+                               leaky[[''category_rate'', ''noise'']], y,
+                               cv=folds, scoring=''roc_auc'').mean()
+
+# RIGHT: TargetEncoder inside the pipeline, fitted per fold with its
+# own internal cross-fitting.
+pipeline = Pipeline([
+    (''encode'', ColumnTransformer([(''cat'', TargetEncoder(), [''category''])],
+                                 remainder=''passthrough'')),
+    (''model'', HistGradientBoostingClassifier(random_state=0)),
+])
+honest_score = cross_val_score(pipeline, frame, y, cv=folds, scoring=''roc_auc'').mean()
+
+print(f''encoded outside the pipeline: AUC {leaked_score:.3f}'')
+print(f''encoded inside the pipeline:  AUC {honest_score:.3f}'')
+print()
+print(''The first number is the one that gets put in a slide. The'')
+print(''second is the one that survives production.'')
+```
+
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.inspection import permutation_importance
+from sklearn.model_selection import GroupKFold, cross_val_score, train_test_split
+
+rng = np.random.default_rng(seed=89)
+
+# Subscription accounts, with an event log. The question: will the
+# account cancel in the 30 days after the prediction date?
+n_accounts = 1200
+PREDICTION_DAY = 240
+HORIZON = 30
+
+accounts = pd.DataFrame({
+    ''account'': np.arange(n_accounts),
+    ''plan'': rng.choice([''free'', ''pro'', ''team''], n_accounts, p=[.5, .35, .15]),
+    ''signed_up_day'': rng.integers(0, 200, n_accounts),
+})
+
+rows = []
+for account, signed_up in zip(accounts[''account''], accounts[''signed_up_day'']):
+    health = rng.normal(0, 1)
+    for day in range(int(signed_up), 300):
+        if rng.random() < 0.25 + 0.08 * health:
+            rows.append({''account'': account, ''day'': day,
+                         ''kind'': rng.choice([''login'', ''lesson'', ''ticket''],
+                                            p=[.6, .3, .1]),
+                         ''value'': rng.gamma(2, 10)})
+    accounts.loc[accounts[''account''] == account, ''health''] = health
+events = pd.DataFrame(rows)
+
+# The label: cancelled in the window AFTER the prediction day.
+cancel_risk = -1.4 - 0.9 * accounts[''health''] + rng.normal(0, 0.6, n_accounts)
+accounts[''cancelled_in_window''] = (cancel_risk > 0).astype(int)
+# A field that is only filled in once an account cancels - the leak.
+accounts[''cancellation_reason''] = np.where(
+    accounts[''cancelled_in_window''] == 1,
+    rng.choice([''price'', ''unused'', ''competitor''], n_accounts), None)
+
+print(f''{n_accounts:,} accounts, {len(events):,} events'')
+print(f''cancellation rate {accounts["cancelled_in_window"].mean():.1%}'')
+print()
+
+# ---- 1. Build features from BEFORE the prediction day only. --------
+past = events[events[''day''] < PREDICTION_DAY]
+recent = past[past[''day''] >= PREDICTION_DAY - 30]
+
+features = past.groupby(''account'').agg(
+    events_total=(''day'', ''size''),
+    active_days=(''day'', ''nunique''),
+    last_day=(''day'', ''max''),
+    mean_value=(''value'', ''mean''),
+).reset_index()
+features[''days_since_last''] = PREDICTION_DAY - features[''last_day'']
+
+recent_counts = recent.groupby([''account'', ''kind'']).size().unstack(fill_value=0)
+recent_counts.columns = [f''recent_{c}'' for c in recent_counts.columns]
+features = features.merge(recent_counts.reset_index(), on=''account'', how=''left'').fillna(0)
+
+# A ratio: recent activity against the account''s own history.
+features[''recent_share''] = (
+    features[[c for c in features.columns if c.startswith(''recent_'')]].sum(axis=1)
+    / features[''events_total''].clip(lower=1)).round(3)
+
+data = accounts.merge(features, on=''account'', how=''inner'')
+data[''tenure_days''] = PREDICTION_DAY - data[''signed_up_day'']
+data[''plan_code''] = data[''plan''].map({''free'': 0, ''pro'': 1, ''team'': 2})
+
+print(f''max event day used: {int(past["day"].max())} (prediction day {PREDICTION_DAY})'')
+print(f''{len(data):,} accounts with features'')
+print()
+
+HONEST = [''events_total'', ''active_days'', ''days_since_last'', ''mean_value'',
+          ''recent_login'', ''recent_lesson'', ''recent_ticket'', ''recent_share'',
+          ''tenure_days'', ''plan_code'']
+LABEL = ''cancelled_in_window''
+
+# ---- 2. Score the honest feature set. ------------------------------
+folds = GroupKFold(5)
+honest_auc = cross_val_score(
+    HistGradientBoostingClassifier(random_state=0), data[HONEST], data[LABEL],
+    cv=folds, groups=data[''account''], scoring=''roc_auc'')
+print(f''honest features: AUC {honest_auc.mean():.3f} +/- {honest_auc.std():.3f}'')
+
+# ---- 3. Add the leak, and watch it become "excellent". -------------
+data[''has_reason''] = data[''cancellation_reason''].notna().astype(int)
+leaky_auc = cross_val_score(
+    HistGradientBoostingClassifier(random_state=0), data[HONEST + [''has_reason'']],
+    data[LABEL], cv=folds, groups=data[''account''], scoring=''roc_auc'')
+print(f''plus the leak:   AUC {leaky_auc.mean():.3f} +/- {leaky_auc.std():.3f}'')
+print()
+
+# ---- 4. The 0.99 rule, and the question that catches it. ----------
+if leaky_auc.mean() > 0.97:
+    print(f''AUC {leaky_auc.mean():.3f} on a behavioural problem: investigate.'')
+X_tr, X_te, y_tr, y_te = train_test_split(
+    data[HONEST + [''has_reason'']], data[LABEL], test_size=0.3,
+    random_state=0, stratify=data[LABEL])
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+importance = permutation_importance(model, X_te, y_te, n_repeats=10, random_state=0)
+ranked = pd.DataFrame({''feature'': X_tr.columns,
+                       ''importance'': importance.importances_mean.round(4)}
+                      ).sort_values(''importance'', ascending=False)
+print(ranked.head(5).to_string(index=False))
+print()
+print(f''top feature: {ranked.iloc[0]["feature"]}'')
+print(''Question: would I have this value, with this value, on day 240?'')
+print(''cancellation_reason is written when the account cancels, which'')
+print(''is after the prediction point. The answer is no.'')
+print()
+
+# ---- 5. The honest model, inspected. ------------------------------
+X_tr, X_te, y_tr, y_te = train_test_split(
+    data[HONEST], data[LABEL], test_size=0.3, random_state=0, stratify=data[LABEL])
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+importance = permutation_importance(model, X_te, y_te, n_repeats=10, random_state=0)
+ranked = pd.DataFrame({''feature'': X_tr.columns,
+                       ''importance'': importance.importances_mean.round(4)}
+                      ).sort_values(''importance'', ascending=False)
+print(''honest model, feature importance:'')
+print(ranked.to_string(index=False))
+print()
+print(f''An AUC of {honest_auc.mean():.3f} is high enough to deserve the'')
+print(''same question asked of ITS top feature - which is tenure_days,'')
+print(''computable on day 240, so it survives. A perfect 1.000 did not.'')
+```
+
+The structure of that example is the one to reuse on every behavioural model. **Fix a prediction day.** Build every feature from events strictly before it. Build the label from the window strictly after it. Then any feature that cannot be constructed under that rule is leakage, and the rule catches all five shapes at once.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| AUC above 0.99 on messy data | Leakage, until proved otherwise |
+| One feature dominates the importance | Interrogate it: is it available at prediction time? |
+| Excellent offline, useless in production | A feature that is empty or different live |
+| A grouped split did not stop the leak | The feature was built from all the labels |
+| Cross-validation beats the held-out set | Preprocessing fitted outside the pipeline |
+| Target encoding gave a huge gain | Encode inside the fold, with cross-fitting |
+| A date feature helped enormously | It may encode the label''s time ordering |
+| The model degrades month by month | A feature''s meaning drifted upstream |
+
+## A check you can run
+
+Take your best feature - the one at the top of the importance list - and ask one question: **at the exact moment the prediction is needed, would this column exist, and would it hold this value?**
+
+If you hesitate, trace where the column is written in the source system. In my experience one project in three has a leak in its top three features, and the model''s real performance is several points below what was reported.
+',
+   'Features are where domain knowledge enters a model, and where the most embarrassing mistakes happen. A 0.99 score is almost never brilliance - it is a column that contains the answer, and this lesson is about finding it before a presentation does.', 11, 2162,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000f7',
    'Choosing a Metric That Matches the Cost',
    'markdown',
-   'A fraud model that flags nothing is 99.8% accurate. Accuracy is the default metric and almost always the wrong one.
+   'Accuracy is the wrong metric for most real problems, and the threshold that turns a probability into a decision is a business choice rather than a modelling one. Getting both right is usually worth more than any amount of tuning.
 
-## The confusion matrix
+## Accuracy lies when the classes are skewed
 
 ```python
-from sklearn.metrics import confusion_matrix, classification_report
+import numpy as np
+import pandas as pd
+from sklearn.dummy import DummyClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.model_selection import train_test_split
 
-print(confusion_matrix(y_test, model.predict(X_test)))
-print(classification_report(y_test, model.predict(X_test)))
+rng = np.random.default_rng(3)
+n = 10_000
+
+# 2% fraud, which is a realistic rate.
+X = rng.normal(size=(n, 5))
+y = (rng.random(n) < 0.02).astype(int)
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+useless = DummyClassifier(strategy=''most_frequent'').fit(X_tr, y_tr)
+
+print(f''fraud rate {y_te.mean():.2%}'')
+print(f''accuracy of "always say no fraud": {accuracy_score(y_te, useless.predict(X_te)):.3%}'')
+print()
+print(pd.DataFrame(confusion_matrix(y_te, useless.predict(X_te)),
+                   index=[''actually legitimate'', ''actually fraud''],
+                   columns=[''predicted legit'', ''predicted fraud'']).to_string())
+print()
+print(''98% accurate, and it catches not one fraud. Accuracy on a'')
+print(''skewed problem is a measure of the skew.'')
 ```
 
-Four numbers: true positives, false positives, true negatives, false negatives. Every other metric is a summary of them, and the four are worth looking at directly because they are what the business feels.
+## The confusion matrix, and the four numbers from it
 
-- **Precision** - of the cases we flagged, how many were real. Low precision means wasted effort and annoyed customers.
-- **Recall** - of the real cases, how many we caught. Low recall means the thing you were trying to catch got through.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 
-These trade off. You can always have more of one by accepting less of the other, which is why the question "is this model good" cannot be answered without knowing what the errors cost.
+actual =    np.array([0, 0, 0, 0, 0, 0, 1, 1, 1, 1])
+predicted = np.array([0, 0, 0, 0, 1, 1, 0, 1, 1, 1])
+
+matrix = confusion_matrix(actual, predicted)
+tn, fp, fn, tp = matrix.ravel()
+print(pd.DataFrame(matrix, index=[''actual no'', ''actual yes''],
+                   columns=[''predicted no'', ''predicted yes'']).to_string())
+print()
+print(f''true negatives  {tn}   false positives {fp}'')
+print(f''false negatives {fn}   true positives  {tp}'')
+print()
+print(f''precision  {tp / (tp + fp):.3f}  - of those we flagged, how many were right'')
+print(f''recall     {tp / (tp + fn):.3f}  - of those that were positive, how many we caught'')
+print(f''F1         {f1_score(actual, predicted):.3f}  - their harmonic mean'')
+print(f''specificity{tn / (tn + fp):>7.3f}  - of the negatives, how many we left alone'')
+```
+
+The two words to keep straight:
+
+- **Precision** answers "when we say yes, how often are we right?" It is about the cost of a **false positive**.
+- **Recall** answers "of all the real cases, how many did we find?" It is about the cost of a **false negative**.
+
+They trade off. Flagging everything gives perfect recall and terrible precision; flagging only the single most certain case gives the reverse.
 
 ## Which to favour
 
-- **Screening for a serious condition**: recall. A missed case is far worse than a second test.
-- **Sending an expensive intervention**: precision. Every false positive is money spent on somebody who was fine.
-- **Both matter roughly equally**: F1, their harmonic mean - but say so deliberately rather than reaching for it by default.
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''problem'': ''cancer screening'',
+     ''false negative costs'': ''a missed diagnosis'',
+     ''false positive costs'': ''an unnecessary follow-up test'',
+     ''favour'': ''recall''},
+    {''problem'': ''spam filter'',
+     ''false negative costs'': ''a spam email in the inbox'',
+     ''false positive costs'': ''a real email lost'',
+     ''favour'': ''precision''},
+    {''problem'': ''fraud blocking'',
+     ''false negative costs'': ''a fraudulent transaction'',
+     ''false positive costs'': ''a blocked legitimate customer'',
+     ''favour'': ''depends on the amounts''},
+    {''problem'': ''churn outreach'',
+     ''false negative costs'': ''a customer leaves unprompted'',
+     ''false positive costs'': ''a wasted phone call'',
+     ''favour'': ''recall - calls are cheap''},
+]).to_string(index=False))
+```
+
+The question is never "which metric is best" but **what does each kind of mistake cost**. Write the two costs down in money or in hours, and the metric chooses itself.
 
 ## The threshold is yours to pick
 
+`predict()` applies a 0.5 threshold. There is nothing special about 0.5, and on a skewed problem it is almost always wrong.
+
 ```python
-probabilities = model.predict_proba(X_test)[:, 1]
-flagged = probabilities > 0.3     # not 0.5
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(7)
+n = 20_000
+
+X = rng.normal(size=(n, 6))
+score = 1.4 * X[:, 0] + 0.9 * X[:, 1] - 0.7 * X[:, 2] + rng.normal(0, 1.4, n)
+y = (score > 3.0).astype(int)                       # about 2% positive
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+probabilities = model.predict_proba(X_te)[:, 1]
+
+print(f''positive rate {y_te.mean():.2%}'')
+print()
+rows = []
+for threshold in [0.02, 0.05, 0.10, 0.25, 0.50, 0.75]:
+    flagged = (probabilities >= threshold).astype(int)
+    rows.append({
+        ''threshold'': threshold,
+        ''flagged'': int(flagged.sum()),
+        ''precision'': round(precision_score(y_te, flagged, zero_division=0), 3),
+        ''recall'': round(recall_score(y_te, flagged), 3),
+        ''f1'': round(f1_score(y_te, flagged, zero_division=0), 3),
+    })
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''One model, six different products. The threshold is the'')
+print(''product decision and it does not require retraining.'')
 ```
 
-`predict` uses 0.5, which has no special meaning. Lowering the threshold catches more and flags more; raising it does the opposite. Choosing it is a business decision, and it is one of the few dials you can turn after training with no retraining at all.
+Choosing the threshold by cost, which is the honest way:
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(11)
+n = 20_000
+X = rng.normal(size=(n, 6))
+score = 1.4 * X[:, 0] + 0.9 * X[:, 1] - 0.7 * X[:, 2] + rng.normal(0, 1.4, n)
+y = (score > 3.0).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+probabilities = model.predict_proba(X_te)[:, 1]
+
+# The costs, in pounds, agreed with the business.
+COST_FALSE_POSITIVE = 4        # the review costs four pounds of someone''s time
+COST_FALSE_NEGATIVE = 180      # an undetected case costs 180 pounds
+
+rows = []
+for threshold in np.arange(0.01, 0.80, 0.01):
+    flagged = probabilities >= threshold
+    false_positives = int((flagged & (y_te == 0)).sum())
+    false_negatives = int((~flagged & (y_te == 1)).sum())
+    rows.append({
+        ''threshold'': round(threshold, 2),
+        ''reviewed'': int(flagged.sum()),
+        ''missed'': false_negatives,
+        ''cost'': false_positives * COST_FALSE_POSITIVE
+                + false_negatives * COST_FALSE_NEGATIVE,
+    })
+table = pd.DataFrame(rows)
+best = table.loc[table[''cost''].idxmin()]
+
+print(table.iloc[::8].to_string(index=False))
+print()
+print(f''cheapest threshold {best["threshold"]:.2f}: ''
+      f''{int(best["reviewed"]):,} reviewed, {int(best["missed"])} missed, ''
+      f''cost {best["cost"]:,.0f}'')
+print(f''at the default 0.50: cost ''
+      f''{table.loc[(table["threshold"] - 0.5).abs().idxmin(), "cost"]:,.0f}'')
+```
+
+That difference is typically larger than anything a week of model tuning would buy, and it takes ten lines.
 
 ## ROC AUC, and when it misleads
 
-ROC AUC measures ranking quality across every threshold - the probability that a random positive is ranked above a random negative. It is threshold-free, which makes it good for comparing models.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.model_selection import train_test_split
 
-With heavy class imbalance it flatters: a model can have excellent AUC and still be useless at any threshold you would actually use, because the metric gives credit for discriminating among the vast negative class. For rare positives, use average precision (the area under the precision-recall curve) instead.
+rng = np.random.default_rng(13)
+n = 40_000
+
+X = rng.normal(size=(n, 5))
+latent = 1.3 * X[:, 0] + 0.7 * X[:, 1] + rng.normal(0, 1.5, n)
+
+for rate_label, cut in [(''balanced (50%)'', 0.0), (''skewed (1%)'', 3.6)]:
+    y = (latent > cut).astype(int)
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+    model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+    probabilities = model.predict_proba(X_te)[:, 1]
+    print(f''{rate_label:<16} positive rate {y_te.mean():.2%}   ''
+          f''ROC AUC {roc_auc_score(y_te, probabilities):.3f}   ''
+          f''avg precision {average_precision_score(y_te, probabilities):.3f} ''
+          f''(baseline {y_te.mean():.3f})'')
+print()
+print(''ROC AUC barely moves between the two. Average precision falls'')
+print(''a long way, because it measures the thing that actually got'')
+print(''harder: finding the rare positives.'')
+```
+
+**ROC AUC** is the probability that a random positive is scored above a random negative. It is threshold-free and comparable across datasets, which is why it is the default for model selection.
+
+Its weakness is that it uses the **true negative rate**, and when negatives are overwhelming, a large number of false positives barely moves it. On a 1% problem, a model with an AUC of 0.95 can still be wrong four times out of five when it says yes.
+
+**Average precision** (the area under the precision-recall curve) has the positive rate as its baseline and does not have this problem. **For a skewed problem, report both.**
 
 ## For regression
 
 ```python
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+import numpy as np
+import pandas as pd
+from sklearn.metrics import (mean_absolute_error, mean_squared_error,
+                             mean_absolute_percentage_error, r2_score)
+
+rng = np.random.default_rng(17)
+actual = rng.gamma(4, 300, 2000)
+typical = actual + rng.normal(0, 150, 2000)
+with_outliers = typical.copy()
+with_outliers[rng.choice(2000, 20, replace=False)] += 9000
+
+for name, predicted in [(''typical errors'', typical), (''plus 20 big misses'', with_outliers)]:
+    print(f''{name}'')
+    print(f''  MAE  {mean_absolute_error(actual, predicted):8.1f}'')
+    print(f''  RMSE {np.sqrt(mean_squared_error(actual, predicted)):8.1f}'')
+    print(f''  MAPE {mean_absolute_percentage_error(actual, predicted):8.1%}'')
+    print(f''  R2   {r2_score(actual, predicted):8.3f}'')
+    print()
+print(''Twenty bad predictions out of two thousand barely move the MAE'')
+print(''and move the RMSE a long way. Which you want depends on whether'')
+print(''one big miss is worse than many small ones.'')
 ```
 
-MAE is in the units people think in and treats all errors alike. RMSE punishes large errors more, which is right when one big miss is worse than several small ones. R-squared says how much variance you explained and is easy to misread as a grade - 0.3 can be excellent or terrible depending on the domain.
+- **MAE** - the average error, in the units of the target. Robust, and the easiest to explain.
+- **RMSE** - penalises large errors disproportionately. Use it when one big miss is much worse than several small ones.
+- **MAPE** - percentage error. Useful across different scales, and undefined when the actual value is zero.
+- **R2** - the share of variance explained. Comparable within a dataset, meaningless across datasets.
 
-Pick before you model. Choosing the metric after seeing the results is how a model gets reported as a success.',
-   'Accuracy is almost always the wrong metric. Precision, recall, the confusion matrix and the threshold you get to choose - and which of them to optimise depends entirely on what each kind of mistake actually costs.',
-   11, 443, '55555555-5555-4555-8555-555555555555', 'published',
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import (average_precision_score, confusion_matrix,
+                             precision_recall_curve, roc_auc_score)
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(seed=59)
+n = 60_000
+
+# Transactions. Fraud is rare, and the amounts vary enormously, so
+# the cost of a miss is not constant.
+amount = rng.lognormal(3.4, 1.1, n).round(2)
+hour = rng.integers(0, 24, n)
+age_days = rng.gamma(2, 180, n).round()
+country_risk = rng.choice([0, 1, 2], n, p=[.85, .12, .03])
+
+latent = (0.9 * np.log1p(amount) + 1.3 * country_risk
+          + 0.8 * ((hour < 5) | (hour > 22)) - 0.004 * np.sqrt(age_days)
+          + rng.normal(0, 1.1, n))
+fraud = (latent > 7.0).astype(int)      # about 1.8%, a realistic rate
+
+X = pd.DataFrame({''amount'': amount, ''hour'': hour, ''age_days'': age_days,
+                  ''country_risk'': country_risk})
+X_tr, X_te, y_tr, y_te, amount_tr, amount_te = train_test_split(
+    X, fraud, amount, test_size=0.3, random_state=0, stratify=fraud)
+
+print(f''{len(X_tr):,} train, {len(X_te):,} test'')
+print(f''fraud rate {y_te.mean():.2%} ({int(y_te.sum())} cases)'')
+print(f''median fraudulent amount {np.median(amount_te[y_te == 1]):,.2f}'')
+print()
+
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+probabilities = model.predict_proba(X_te)[:, 1]
+
+# ---- 1. The threshold-free numbers. --------------------------------
+print(f''ROC AUC           {roc_auc_score(y_te, probabilities):.3f}  (baseline 0.500)'')
+print(f''average precision {average_precision_score(y_te, probabilities):.3f}  ''
+      f''(baseline {y_te.mean():.3f})'')
+print()
+
+# ---- 2. The default threshold, which is a bad product. -------------
+default = (probabilities >= 0.5).astype(int)
+matrix = confusion_matrix(y_te, default)
+tn, fp, fn, tp = matrix.ravel()
+print(''at the default threshold of 0.5:'')
+print(f''  flagged {tp + fp:,}   caught {tp} of {tp + fn} frauds ''
+      f''({tp / (tp + fn):.0%})   false alarms {fp}'')
+print()
+
+# ---- 3. Choose by cost, using the real amounts. --------------------
+REVIEW_COST = 3.50          # a human review
+CHARGEBACK_FEE = 25.00      # on top of losing the transaction amount
+
+rows = []
+for threshold in np.arange(0.005, 0.60, 0.005):
+    flagged = probabilities >= threshold
+    review_cost = int(flagged.sum()) * REVIEW_COST
+    missed = (~flagged) & (y_te == 1)
+    loss = float(amount_te[missed].sum()) + int(missed.sum()) * CHARGEBACK_FEE
+    rows.append({''threshold'': round(threshold, 3),
+                 ''reviewed'': int(flagged.sum()),
+                 ''caught'': int((flagged & (y_te == 1)).sum()),
+                 ''missed'': int(missed.sum()),
+                 ''review_cost'': round(review_cost),
+                 ''fraud_loss'': round(loss),
+                 ''total'': round(review_cost + loss)})
+table = pd.DataFrame(rows)
+best = table.loc[table[''total''].idxmin()]
+default_row = table.loc[(table[''threshold''] - 0.5).abs().idxmin()]
+
+print(table.iloc[::15].to_string(index=False))
+print()
+print(f''cheapest threshold  {best["threshold"]:.3f}  total cost ''
+      f''{best["total"]:,.0f}  ({int(best["caught"])} caught, ''
+      f''{int(best["missed"])} missed, {int(best["reviewed"]):,} reviewed)'')
+print(f''default threshold   0.500  total cost {default_row["total"]:,.0f}'')
+print(f''saving from moving the threshold alone: ''
+      f''{default_row["total"] - best["total"]:,.0f}'')
+print()
+
+# ---- 4. What a capacity constraint does instead. -------------------
+CAPACITY = 400       # reviews the team can do per period
+cutoff = float(np.sort(probabilities)[-CAPACITY])
+flagged = probabilities >= cutoff
+print(f''with capacity for {CAPACITY} reviews, the threshold is {cutoff:.3f}'')
+print(f''  precision {float((flagged & (y_te == 1)).sum()) / flagged.sum():.1%}  ''
+      f''recall {float((flagged & (y_te == 1)).sum()) / y_te.sum():.1%}'')
+print(f''  fraud value caught ''
+      f''{float(amount_te[flagged & (y_te == 1)].sum()):,.0f} of ''
+      f''{float(amount_te[y_te == 1].sum()):,.0f}'')
+print()
+print(''When the team has fixed capacity, the threshold is not chosen'')
+print(''at all - it falls out of the capacity, and the metric to'')
+print(''optimise is precision in the top N.'')
+```
+
+Three results there and the third is the one most often missed. The threshold-free numbers say the model is good. Moving the threshold from the default to the cost-minimising one saves a substantial sum with no retraining. And when the review team has fixed capacity, the threshold is determined by the capacity, which makes "precision at the top 400" the metric to improve rather than AUC.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| 98% accurate, catches nothing | A skewed label; accuracy measures the skew |
+| High AUC, useless in production | Few positives; look at average precision |
+| The model never predicts the minority class | The 0.5 threshold; move it |
+| Precision and recall both fell | The model got worse, not the threshold |
+| F1 chosen without thinking | It weights the two errors equally; yours may not |
+| RMSE dominated by a handful of rows | That is its purpose; use MAE if unwanted |
+| MAPE is infinite | A zero actual value; use MAE |
+| The metric does not match the decision | Write down the cost of each error first |
+
+## A check you can run
+
+Take any classifier you have deployed and sweep its threshold from 0.01 to 0.9, computing at each step the number of each kind of error multiplied by its cost.
+
+Plot or print the total. The minimum is almost never at 0.5, and the distance between it and where you are is usually worth more than the next model you were about to train.
+',
+   'Accuracy is almost always the wrong metric. Precision, recall, the confusion matrix and the threshold you get to choose - and which of them to optimise depends entirely on what each kind of mistake actually costs.', 10, 2010,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000f9',
    'Linear and Logistic Regression',
    'markdown',
-   'Linear models predict a weighted sum of the inputs. That is their limitation and the reason to start with them.
+   'Linear and logistic regression are the models to try first and the ones to beat. They fit in seconds, their coefficients are readable, and a problem where they do badly tells you something before you have spent a day on anything larger.
 
 ## Linear regression
 
-```python
-from sklearn.linear_model import Ridge
+The model is a weighted sum: `prediction = intercept + w1 * x1 + w2 * x2 + ...`, with the weights chosen to minimise the squared error.
 
-model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
-model.fit(X_train, y_train)
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(3)
+n = 2000
+
+area = rng.normal(95, 25, n).clip(30)
+bedrooms = np.clip((area / 30 + rng.normal(0, 0.5, n)).round(), 1, 6)
+age = rng.gamma(2, 12, n).clip(0, 120)
+
+# A genuinely linear relationship, plus noise.
+price = (42_000 + 2_150 * area + 9_500 * bedrooms - 380 * age
+         + rng.normal(0, 22_000, n))
+
+frame = pd.DataFrame({''area'': area, ''bedrooms'': bedrooms, ''age'': age, ''price'': price})
+X_tr, X_te, y_tr, y_te = train_test_split(
+    frame[[''area'', ''bedrooms'', ''age'']], frame[''price''], test_size=0.3, random_state=0)
+
+model = LinearRegression().fit(X_tr, y_tr)
+predicted = model.predict(X_te)
+
+print(pd.DataFrame({''feature'': X_tr.columns, ''coefficient'': model.coef_.round(0),
+                    ''true'': [2150, 9500, -380]}).to_string(index=False))
+print(f''intercept {model.intercept_:,.0f} (true 42,000)'')
+print()
+print(f''R2  {r2_score(y_te, predicted):.3f}'')
+print(f''MAE {mean_absolute_error(y_te, predicted):,.0f}'')
 ```
 
-Each feature gets a coefficient; the prediction is the sum. With scaled inputs the coefficients are directly comparable, and "a one standard deviation increase in recency reduces the prediction by 0.4" is a sentence you can put in front of anybody.
+Each coefficient reads as: **holding the other features constant, one more unit of this feature changes the prediction by this much.** That sentence is the whole reason to start here - no other model family gives it to you for free.
 
-`Ridge` rather than plain `LinearRegression` as a default: the `alpha` penalty on large coefficients is what stops correlated features producing enormous opposing weights that fit the training noise.
+`R2` is the share of the variance the model accounts for. It is comparable within one dataset and meaningless across datasets, because it depends on how much variance there was to begin with.
+
+## The assumptions, and what breaks them
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+
+rng = np.random.default_rng(7)
+n = 1500
+x = rng.uniform(1, 20, n)
+
+shapes = {
+    ''linear'': 3 * x + rng.normal(0, 3, n),
+    ''monotonic curve'': 0.4 * x ** 2 + rng.normal(0, 3, n),
+    ''u-shaped'': 0.5 * (x - 10) ** 2 + rng.normal(0, 3, n),
+    ''periodic'': 20 * np.sin(x) + rng.normal(0, 3, n),
+    ''step at the middle'': np.where(x > 10, 40, 10) + rng.normal(0, 3, n),
+}
+for name, y in shapes.items():
+    model = LinearRegression().fit(x.reshape(-1, 1), y)
+    print(f''{name:<20} R2 {r2_score(y, model.predict(x.reshape(-1, 1))):.3f}'')
+print()
+print(''A monotonic curve is approximated passably by a straight line;'')
+print(''a U-shape and a periodic signal are not approximated at all,'')
+print(''because no single slope describes them. The fix is usually a'')
+print(''transformed feature, not a different algorithm.'')
+```
+
+The fix for a curve is often a feature, not a model:
+
+```python
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+
+rng = np.random.default_rng(7)
+n = 1500
+x = rng.uniform(1, 20, n)
+y = 0.5 * (x - 10) ** 2 + rng.normal(0, 3, n)       # the U-shape
+
+plain = LinearRegression().fit(x.reshape(-1, 1), y)
+with_square = LinearRegression().fit(np.column_stack([x, x ** 2]), y)
+
+print(f''x only        R2 {r2_score(y, plain.predict(x.reshape(-1, 1))):.3f}'')
+print(f''x and x**2    R2 {r2_score(y, with_square.predict(np.column_stack([x, x ** 2]))):.3f}'')
+print()
+print(''"Linear" means linear in the PARAMETERS, not in the inputs.'')
+print(''A squared term, a log, an interaction - all still linear models.'')
+```
+
+Two more assumptions worth checking:
+
+**Constant error variance.** If the errors grow with the prediction, the model is overconfident at the top end. The usual fix is to model `log(y)` instead of `y`.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_percentage_error
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(11)
+n = 2000
+x = rng.uniform(1, 10, n)
+# Error proportional to the level - very common with money.
+y = 1000 * np.exp(0.4 * x) * rng.lognormal(0, 0.25, n)
+
+X_tr, X_te, y_tr, y_te = train_test_split(x.reshape(-1, 1), y, test_size=0.3, random_state=0)
+
+direct = LinearRegression().fit(X_tr, y_tr)
+logged = LinearRegression().fit(X_tr, np.log(y_tr))
+
+print(f''on y:        MAPE {mean_absolute_percentage_error(y_te, direct.predict(X_te)):.1%}'')
+print(f''on log(y):   MAPE ''
+      f''{mean_absolute_percentage_error(y_te, np.exp(logged.predict(X_te))):.1%}'')
+```
+
+**No extreme multicollinearity.** Two features that carry the same information make the coefficients unstable, even though the predictions stay fine.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+
+rng = np.random.default_rng(13)
+n = 500
+a = rng.normal(0, 1, n)
+b = a + rng.normal(0, 0.02, n)           # almost identical to a
+y = 3 * a + rng.normal(0, 0.5, n)
+
+for seed in range(3):
+    sample = rng.choice(n, n, replace=True)
+    model = LinearRegression().fit(np.column_stack([a[sample], b[sample]]), y[sample])
+    print(f''sample {seed}: coefficients {model.coef_.round(2)}  ''
+          f''(their sum {model.coef_.sum():.2f})'')
+print()
+print(''The individual coefficients swing wildly between samples; their'')
+print(''SUM is stable. Do not interpret a coefficient when two features'')
+print(''are nearly the same thing.'')
+```
 
 ## Logistic regression
 
-For classification. It predicts a probability by passing the same weighted sum through a function that squashes it into 0 to 1.
+For a yes/no label, the same weighted sum is passed through a function that squashes it into a probability.
 
 ```python
+import numpy as np
+import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
-model = make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=2000))
-model.fit(X_train, y_train)
-proba = model.predict_proba(X_test)[:, 1]
+rng = np.random.default_rng(17)
+n = 3000
+
+tenure = rng.integers(1, 60, n)
+tickets = rng.poisson(1.6, n)
+spend = rng.gamma(3, 25, n)
+
+logit = -0.5 - 0.045 * tenure + 0.42 * tickets - 0.011 * spend
+probability = 1 / (1 + np.exp(-logit))
+churned = (rng.random(n) < probability).astype(int)
+
+X = np.column_stack([tenure, tickets, spend])
+X_tr, X_te, y_tr, y_te = train_test_split(X, churned, test_size=0.3,
+                                          random_state=0, stratify=churned)
+
+model = Pipeline([(''scale'', StandardScaler()),
+                  (''model'', LogisticRegression(max_iter=1000))]).fit(X_tr, y_tr)
+
+probabilities = model.predict_proba(X_te)[:, 1]
+print(f''positive rate {churned.mean():.1%}'')
+print(f''accuracy {accuracy_score(y_te, model.predict(X_te)):.3f}'')
+print(f''ROC AUC  {roc_auc_score(y_te, probabilities):.3f}'')
+print()
+print(''first five probabilities:'', probabilities[:5].round(3))
 ```
 
-`C` is the inverse of regularisation strength: smaller C, simpler model. It is the first thing to tune.
+The output is a **probability**, which is more useful than the class. `predict()` applies a 0.5 threshold, which is a choice - and rarely the right one, as the evaluation lesson shows.
 
-Despite the name it is a classifier, and it is the workhorse of credit scoring, medical risk and anywhere a decision has to be explained - because the contribution of each feature is visible.
+Coefficients in logistic regression are log-odds, and exponentiating them gives an odds ratio:
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+rng = np.random.default_rng(19)
+n = 4000
+tenure = rng.integers(1, 60, n)
+tickets = rng.poisson(1.6, n)
+spend = rng.gamma(3, 25, n)
+logit = -0.5 - 0.045 * tenure + 0.42 * tickets - 0.011 * spend
+churned = (rng.random(n) < 1 / (1 + np.exp(-logit))).astype(int)
+
+# Unscaled, so the coefficients are in the features'' own units.
+model = LogisticRegression(max_iter=2000).fit(
+    np.column_stack([tenure, tickets, spend]), churned)
+
+table = pd.DataFrame({
+    ''feature'': [''tenure_months'', ''tickets_90d'', ''monthly_spend''],
+    ''coefficient'': model.coef_[0].round(4),
+    ''true'': [-0.045, 0.42, -0.011],
+})
+table[''odds_ratio''] = np.exp(model.coef_[0]).round(3)
+print(table.to_string(index=False))
+print()
+print(''Read the third row as: each extra ticket multiplies the odds of'')
+print(f''churn by {np.exp(model.coef_[0][1]):.2f} - about a ''
+      f''{(np.exp(model.coef_[0][1]) - 1) * 100:.0f}% increase in the odds,'')
+print(''holding tenure and spend constant.'')
+```
 
 ## Why start here
 
-- **Fast.** Seconds on millions of rows, which means you can iterate on features rather than waiting.
-- **Interpretable.** You can say why it decided what it decided.
-- **Hard to overfit** when regularised, so the gap between training and test is usually small.
-- **A real baseline.** If gradient boosting beats it by half a point, the extra complexity may not be worth operating.
+```python
+import numpy as np
+import pandas as pd
+import time
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(23)
+n = 4000
+X = rng.normal(size=(n, 8))
+# A LINEAR relationship, which is the common case in tabular business data.
+logit = 1.2 * X[:, 0] - 0.8 * X[:, 1] + 0.5 * X[:, 2] + rng.normal(0, 0.8, n)
+y = (logit > 0).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+models = {
+    ''logistic regression'': Pipeline([(''s'', StandardScaler()),
+                                     (''m'', LogisticRegression(max_iter=1000))]),
+    ''random forest'': RandomForestClassifier(n_estimators=300, random_state=0),
+    ''gradient boosting'': GradientBoostingClassifier(random_state=0),
+}
+for name, model in models.items():
+    start = time.perf_counter()
+    model.fit(X_tr, y_tr)
+    seconds = time.perf_counter() - start
+    auc = roc_auc_score(y_te, model.predict_proba(X_te)[:, 1])
+    print(f''{name:<22} AUC {auc:.3f}   fitted in {seconds * 1000:7.0f}ms'')
+print()
+print(''On a linear problem the simplest model wins and is far faster.'')
+print(''That is not a coincidence - it is the right inductive bias.'')
+```
+
+Four practical reasons it earns the first attempt:
+
+**It is fast**, so you learn whether the problem is learnable in minutes.
+**It is readable**, so a coefficient with the wrong sign reveals a data problem immediately.
+**It extrapolates**, unlike tree models, which matters when inputs move outside the training range.
+**It is a baseline that is hard to argue with.** If the complicated model does not beat it, ship the simple one.
+
+## Regularisation: ridge and lasso
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+rng = np.random.default_rng(29)
+n, p = 300, 60
+
+X = rng.normal(size=(n, p))
+true_weights = np.zeros(p)
+true_weights[:5] = [3.0, -2.0, 1.5, -1.0, 0.8]      # only 5 of 60 matter
+y = X @ true_weights + rng.normal(0, 1.0, n)
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0)
+
+rows = []
+for name, estimator in [(''linear'', LinearRegression()),
+                        (''ridge (a=1)'', Ridge(alpha=1.0)),
+                        (''ridge (a=10)'', Ridge(alpha=10.0)),
+                        (''lasso (a=0.1)'', Lasso(alpha=0.1, max_iter=5000)),
+                        (''lasso (a=0.3)'', Lasso(alpha=0.3, max_iter=5000))]:
+    model = Pipeline([(''scale'', StandardScaler()), (''model'', estimator)]).fit(X_tr, y_tr)
+    coefficients = model.named_steps[''model''].coef_
+    rows.append({
+        ''model'': name,
+        ''test MAE'': round(mean_absolute_error(y_te, model.predict(X_te)), 3),
+        ''nonzero coefs'': int((np.abs(coefficients) > 1e-6).sum()),
+        ''found the 5'': int((np.abs(coefficients[:5]) > 1e-6).sum()),
+    })
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''With 60 features and 210 training rows, plain linear regression'')
+print(''fits the noise. Lasso sets most coefficients to exactly zero and'')
+print(''keeps the five that matter.'')
+```
+
+**Ridge** shrinks every coefficient towards zero without reaching it, which stabilises them when features are correlated. **Lasso** drives some to exactly zero, which performs feature selection. **ElasticNet** does both.
+
+Both require scaled features - the penalty is on the coefficient size, so a feature measured in pounds is penalised a thousand times more than the same feature in thousands of pounds.
 
 ## What they cannot do
 
-They fit a straight relationship. If the effect of price is to increase sales up to a point and then reduce them, a linear model will average the two into nothing.
-
-You can help by hand - add a squared term, bucket the variable, cross two features - and that is often enough. When it is not, the answer is the next lesson: trees find interactions and non-linearity without being told.
-
-## Lasso, for feature selection
-
 ```python
-from sklearn.linear_model import LassoCV
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(31)
+n = 3000
+X = rng.normal(size=(n, 2))
+
+# The label depends on an INTERACTION: positive when the signs agree.
+y = ((X[:, 0] > 0) == (X[:, 1] > 0)).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0)
+
+plain = LogisticRegression(max_iter=1000).fit(X_tr, y_tr)
+print(f''logistic, raw features:   AUC ''
+      f''{roc_auc_score(y_te, plain.predict_proba(X_te)[:, 1]):.3f}'')
+
+# Give it the interaction explicitly and it recovers.
+with_interaction = LogisticRegression(max_iter=1000).fit(
+    np.column_stack([X_tr, X_tr[:, 0] * X_tr[:, 1]]), y_tr)
+print(f''logistic, with x0 * x1:   AUC ''
+      f''{roc_auc_score(y_te, with_interaction.predict_proba(np.column_stack([X_te, X_te[:, 0] * X_te[:, 1]]))[:, 1]):.3f}'')
+
+forest = RandomForestClassifier(n_estimators=200, random_state=0).fit(X_tr, y_tr)
+print(f''random forest:            AUC ''
+      f''{roc_auc_score(y_te, forest.predict_proba(X_te)[:, 1]):.3f}'')
+print()
+print(''A linear model cannot find an interaction unless you give it'')
+print(''one. A tree finds it automatically - which is the main reason'')
+print(''trees are the next thing to try.'')
 ```
 
-L1 regularisation drives some coefficients to exactly zero, which selects features as a side effect of fitting. Useful when you have four hundred columns and want to know which forty matter.',
-   'The models to try first: fast, interpretable, hard to overfit when regularised, and often within a point or two of anything more elaborate. Also the only ones whose decisions you can explain in a sentence.',
-   11, 385, '55555555-5555-4555-8555-555555555555', 'published',
+The three limitations, in order of how often they bite:
+
+- **No interactions unless you write them.** `x1 * x2` must be an explicit feature.
+- **No non-linearity unless you transform.** `log(x)` and `x**2` must be explicit.
+- **Sensitive to outliers**, because squared error punishes a single large residual enormously. `HuberRegressor` is the robust alternative.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A coefficient has the wrong sign | Collinearity, or a confounder in the features |
+| Coefficients swing between samples | Two features carry the same information |
+| Good R2, obviously curved residuals | Linear fit on a non-linear relationship |
+| The solver warns about convergence | Unscaled features; add a `StandardScaler` |
+| Lasso zeroed a feature you believe in | It is correlated with another one it kept |
+| Errors grow with the prediction | Model `log(y)` instead of `y` |
+| The model misses an obvious interaction | Add the product term, or use a tree |
+| Regularisation hurt badly | Features are unscaled; the penalty is uneven |
+
+## A check you can run
+
+Fit a linear or logistic regression before the model you intended to build, on the same split, and write both scores down.
+
+If the gap is small, ship the simple one: it is faster, explainable, and it extrapolates. If the gap is large, you have learned something specific - the relationship is non-linear or has interactions - and that tells you which features to engineer rather than which library to install.
+',
+   'The models to try first: fast, interpretable, hard to overfit when regularised, and often within a point or two of anything more elaborate. Also the only ones whose decisions you can explain in a sentence.', 10, 1957,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000fa',
    'Trees, Forests and Gradient Boosting',
    'markdown',
-   'A decision tree splits the data on one feature at a time, choosing the split that best separates the outcome, and repeats. The result is a flowchart.
+   'Trees are the other family worth knowing. They find interactions without being told, need no scaling, handle mixed types, and on ordinary tabular data they are usually what wins.
 
 ## One tree
 
-```python
-from sklearn.tree import DecisionTreeClassifier, export_text
+A decision tree splits the data repeatedly, choosing at each step the feature and threshold that best separate the labels.
 
-tree = DecisionTreeClassifier(max_depth=3, random_state=42)
-tree.fit(X_train, y_train)
+```python
+import numpy as np
+import pandas as pd
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+rng = np.random.default_rng(3)
+n = 2000
+
+tenure = rng.integers(1, 60, n)
+tickets = rng.poisson(1.6, n)
+spend = rng.gamma(3, 25, n).round(2)
+# An INTERACTION: short tenure matters much more for low spenders.
+risk = np.where(spend < 60, 0.8 - 0.015 * tenure, 0.25) + 0.08 * tickets
+churned = (rng.random(n) < np.clip(risk, 0.02, 0.95)).astype(int)
+
+X = pd.DataFrame({''tenure'': tenure, ''tickets'': tickets, ''spend'': spend})
+y = churned
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+tree = DecisionTreeClassifier(max_depth=3, random_state=0).fit(X_tr, y_tr)
+print(f''accuracy {accuracy_score(y_te, tree.predict(X_te)):.3f}'')
+print()
 print(export_text(tree, feature_names=list(X.columns)))
 ```
 
-Readable, and that is its main virtue - you can print the rules and show them to someone. Grown without a depth limit it will memorise the training set perfectly and generalise badly, which is overfitting in its purest form.
+That printed tree is the whole model. You can read it, argue with it, and implement it as a chain of `if` statements. No other model family gives you that.
 
-Trees need no scaling, handle non-linearity naturally, and find interactions without being told. Those three properties carry over to everything built from them.
+A tree needs no scaling and no encoding of ordinal features, because a split is a comparison rather than an arithmetic operation.
+
+The problem is that one tree, left alone, memorises:
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+rng = np.random.default_rng(5)
+n = 1500
+X = rng.normal(size=(n, 6))
+y = (X[:, 0] + 0.7 * X[:, 1] + rng.normal(0, 1.1, n) > 0).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+rows = []
+for depth in [2, 3, 5, 8, 12, None]:
+    tree = DecisionTreeClassifier(max_depth=depth, random_state=0).fit(X_tr, y_tr)
+    rows.append({
+        ''max_depth'': str(depth),
+        ''leaves'': tree.get_n_leaves(),
+        ''train'': round(accuracy_score(y_tr, tree.predict(X_tr)), 3),
+        ''test'': round(accuracy_score(y_te, tree.predict(X_te)), 3),
+    })
+table = pd.DataFrame(rows)
+table[''gap''] = (table[''train''] - table[''test'']).round(3)
+print(table.to_string(index=False))
+print()
+print(''An unlimited tree reaches a perfect training score by giving'')
+print(''almost every row its own leaf, and the test score falls.'')
+```
 
 ## Random forest
 
-```python
-from sklearn.ensemble import RandomForestClassifier
+Fit many trees, each on a bootstrap sample of the rows and a random subset of the features at each split, and average their votes. The individual trees are overfitted; their errors are partly independent, so averaging cancels them.
 
-forest = RandomForestClassifier(
-    n_estimators=300, max_depth=None, min_samples_leaf=2,
-    n_jobs=-1, random_state=42,
-)
-forest.fit(X_train, y_train)
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, roc_auc_score
+
+rng = np.random.default_rng(7)
+n = 3000
+X = rng.normal(size=(n, 8))
+y = ((X[:, 0] > 0) == (X[:, 1] > 0)).astype(int)      # an interaction
+y = np.where(rng.random(n) < 0.12, 1 - y, y)          # plus noise
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+single = DecisionTreeClassifier(random_state=0).fit(X_tr, y_tr)
+print(f''one unlimited tree:  test {accuracy_score(y_te, single.predict(X_te)):.3f}  ''
+      f''train {accuracy_score(y_tr, single.predict(X_tr)):.3f}'')
+
+rows = []
+for trees in [1, 5, 25, 100, 400]:
+    forest = RandomForestClassifier(n_estimators=trees, random_state=0).fit(X_tr, y_tr)
+    rows.append({''trees'': trees,
+                 ''test_acc'': round(accuracy_score(y_te, forest.predict(X_te)), 3),
+                 ''auc'': round(roc_auc_score(y_te, forest.predict_proba(X_te)[:, 1]), 3)})
+print()
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''More trees never hurts accuracy - it only costs time. That is'')
+print(''why n_estimators is not really a tuning parameter: set it as'')
+print(''high as you can afford.'')
 ```
 
-Hundreds of trees, each fitted on a random sample of rows and offered a random subset of features at each split, then averaged. The randomness makes the trees disagree, and averaging disagreeing models cancels much of their individual overfitting.
+The hyperparameters that matter, in order:
 
-Strong out of the box, hard to misuse, and the sensible default when you want something better than linear without tuning.
+- **`n_estimators`** - more is better, with diminishing returns after a few hundred. Not a risk of overfitting.
+- **`max_depth` / `min_samples_leaf`** - the main controls on overfitting. `min_samples_leaf=5` or more is a good default on noisy data.
+- **`max_features`** - how many features each split may consider. Lower means more decorrelated trees. `''sqrt''` is the default for classification and is usually right.
+- **`class_weight=''balanced''`** - for a skewed label.
 
 ## Gradient boosting
 
-```python
-from sklearn.ensemble import HistGradientBoostingClassifier
+Fit a small tree, look at what it got wrong, fit another tree to the remaining error, and repeat. Each tree is weak; the sum is strong.
 
-boosted = HistGradientBoostingClassifier(
-    max_iter=300, learning_rate=0.1, max_depth=None, random_state=42,
-)
-boosted.fit(X_train, y_train)
+```python
+import numpy as np
+import pandas as pd
+import time
+from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier,
+                              HistGradientBoostingClassifier)
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(11)
+n = 6000
+X = rng.normal(size=(n, 10))
+signal = (1.1 * X[:, 0] - 0.8 * X[:, 1]
+          + 1.4 * (X[:, 2] > 0) * (X[:, 3] > 0)        # interaction
+          + 0.9 * np.abs(X[:, 4]))                     # non-linearity
+y = (signal + rng.normal(0, 1.0, n) > 1.0).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+models = {
+    ''logistic regression'': Pipeline([(''s'', StandardScaler()),
+                                     (''m'', LogisticRegression(max_iter=1000))]),
+    ''random forest'': RandomForestClassifier(n_estimators=300, min_samples_leaf=3,
+                                            random_state=0),
+    ''gradient boosting'': GradientBoostingClassifier(random_state=0),
+    ''hist gradient boosting'': HistGradientBoostingClassifier(random_state=0),
+}
+for name, model in models.items():
+    start = time.perf_counter()
+    model.fit(X_tr, y_tr)
+    seconds = time.perf_counter() - start
+    auc = roc_auc_score(y_te, model.predict_proba(X_te)[:, 1])
+    print(f''{name:<24} AUC {auc:.3f}   {seconds:6.2f}s'')
+print()
+print(''With interactions and non-linearity present, the boosted models'')
+print(''win - which is the usual result on real tabular data.'')
 ```
 
-Trees built in sequence, each fitted on the errors the previous ones are still making. More accurate than a forest on most tabular problems, and the thing that wins competitions - XGBoost and LightGBM are the same idea with better engineering.
+`HistGradientBoostingClassifier` is the one to reach for in practice: it bins the features, which makes it far faster on large data, and it handles missing values natively with no imputer.
 
-The cost is that it will overfit if you let it. `learning_rate` and `max_iter` trade against each other: lower rate, more iterations, better results, longer training. Use early stopping on a validation set rather than guessing.
+The three hyperparameters that matter, and they trade off:
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+
+rng = np.random.default_rng(13)
+n = 5000
+X = rng.normal(size=(n, 8))
+y = ((1.0 * X[:, 0] + 1.2 * (X[:, 1] > 0) * (X[:, 2] > 0)
+      + rng.normal(0, 1.0, n)) > 0.7).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+rows = []
+for rate, iterations in [(0.3, 50), (0.1, 150), (0.05, 400), (0.5, 400)]:
+    model = HistGradientBoostingClassifier(
+        learning_rate=rate, max_iter=iterations, max_leaf_nodes=15,
+        early_stopping=False, random_state=0).fit(X_tr, y_tr)
+    rows.append({
+        ''learning_rate'': rate, ''max_iter'': iterations,
+        ''train_auc'': round(roc_auc_score(y_tr, model.predict_proba(X_tr)[:, 1]), 3),
+        ''test_auc'': round(roc_auc_score(y_te, model.predict_proba(X_te)[:, 1]), 3),
+    })
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''A low learning rate with many iterations generalises best; a'')
+print(''high rate with many iterations overfits. The two must move in'')
+print(''opposite directions.'')
+```
+
+**Use early stopping** rather than guessing the iteration count:
+
+```python
+import numpy as np
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+
+rng = np.random.default_rng(17)
+n = 5000
+X = rng.normal(size=(n, 8))
+y = ((X[:, 0] + 1.2 * (X[:, 1] > 0) * (X[:, 2] > 0) + rng.normal(0, 1, n)) > 0.7).astype(int)
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+model = HistGradientBoostingClassifier(
+    learning_rate=0.05, max_iter=2000, early_stopping=True,
+    validation_fraction=0.15, n_iter_no_change=25, random_state=0).fit(X_tr, y_tr)
+
+print(f''max_iter asked for: 2000'')
+print(f''iterations used:    {model.n_iter_}'')
+print(f''test AUC:           {roc_auc_score(y_te, model.predict_proba(X_te)[:, 1]):.3f}'')
+```
 
 ## Feature importance, carefully
 
 ```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.inspection import permutation_importance
+from sklearn.model_selection import train_test_split
 
-result = permutation_importance(forest, X_test, y_test, n_repeats=10, random_state=42)
+rng = np.random.default_rng(19)
+n = 3000
+
+# Three features matter. Two do not: one is pure noise, and one is a
+# high-cardinality id, which impurity importance loves.
+useful_a = rng.normal(0, 1, n)
+useful_b = rng.integers(0, 3, n)
+useful_c = rng.normal(0, 1, n)
+noise = rng.normal(0, 1, n)
+row_id = np.arange(n)
+
+y = ((1.3 * useful_a + 0.8 * useful_b + 0.6 * useful_c
+      + rng.normal(0, 1.0, n)) > 1.0).astype(int)
+
+X = pd.DataFrame({''useful_a'': useful_a, ''useful_b'': useful_b,
+                  ''useful_c'': useful_c, ''noise'': noise, ''row_id'': row_id})
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y)
+
+forest = RandomForestClassifier(n_estimators=300, random_state=0).fit(X_tr, y_tr)
+
+impurity = pd.Series(forest.feature_importances_, index=X.columns)
+permutation = permutation_importance(forest, X_te, y_te, n_repeats=10, random_state=0)
+
+table = pd.DataFrame({
+    ''impurity'': impurity.round(3),
+    ''permutation'': pd.Series(permutation.importances_mean, index=X.columns).round(4),
+}).sort_values(''impurity'', ascending=False)
+print(table.to_string())
+print()
+print(''Impurity importance ranks row_id and noise far too high: a'')
+print(''continuous feature offers more places to split, so it wins'')
+print(''ties by accident. Permutation importance, computed on held-out'')
+print(''data, puts them near zero where they belong.'')
 ```
 
-The built-in `feature_importances_` is biased towards high-cardinality features and is computed on the training data. Permutation importance - shuffle a column and see how much the score drops - is slower, measured on held-out data, and far more trustworthy.
+**Prefer permutation importance**, and compute it on the test set. Impurity importance is biased towards high-cardinality features and is computed on training data, which means a feature the model memorised looks important.
 
-Either way, importance is not causation. A feature can be important because it proxies for something you cannot measure.
+Both share a limitation: with two correlated features, importance is split between them arbitrarily, and dropping either one individually costs nothing.
 
 ## Choosing
 
-Start linear. If the relationship is clearly non-linear or interactions matter, go to a forest. If you need the last two points of accuracy and can afford the tuning and the slower inference, boost. For tabular data, deep learning is usually not the answer - that is the next course, and it is for a different kind of input.',
-   'A decision tree asks a sequence of yes-or-no questions. One is weak and interpretable; hundreds averaged are strong; hundreds built to correct each other are what wins on tabular data. This lesson covers all three and what each costs.',
-   12, 420, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''situation'': ''tabular data, mixed types, interactions likely'',
+     ''reach for'': ''HistGradientBoosting, then a random forest''},
+    {''situation'': ''the relationship looks linear'',
+     ''reach for'': ''logistic or linear regression''},
+    {''situation'': ''the decision must be explainable line by line'',
+     ''reach for'': ''one shallow tree, or a linear model''},
+    {''situation'': ''inputs will go outside the training range'',
+     ''reach for'': ''a linear model - trees cannot extrapolate''},
+    {''situation'': ''images, audio, text'',
+     ''reach for'': ''a neural network; trees are the wrong family''},
+    {''situation'': ''a few hundred rows'',
+     ''reach for'': ''a linear model with regularisation''},
+]).to_string(index=False))
+```
+
+The extrapolation limit is worth seeing, because it is absolute:
+
+```python
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+
+rng = np.random.default_rng(23)
+X = rng.uniform(0, 10, (600, 1))
+y = 3 * X[:, 0] + rng.normal(0, 1, 600)
+
+forest = RandomForestRegressor(n_estimators=200, random_state=0).fit(X, y)
+linear = LinearRegression().fit(X, y)
+
+print(f''{"input":>8} {"truth":>8} {"forest":>8} {"linear":>8}'')
+for value in [5.0, 9.9, 15.0, 40.0]:
+    print(f''{value:>8.1f} {3 * value:>8.1f} ''
+          f''{forest.predict([[value]])[0]:>8.1f} {linear.predict([[value]])[0]:>8.1f}'')
+print()
+print(''The forest flat-lines at the edge of what it saw. It cannot do'')
+print(''otherwise: a leaf holds an average of training rows.'')
+```
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Perfect training score, poor test | An unlimited tree; set `max_depth` or `min_samples_leaf` |
+| Predictions flat-line outside a range | Trees cannot extrapolate; use a linear model |
+| An id column is the top feature | Impurity importance bias; use permutation |
+| Two correlated features both look useless | Importance is split between them |
+| More trees made no difference | Expected; `n_estimators` saturates |
+| Boosting overfitted badly | Learning rate too high for the iteration count |
+| Training takes minutes | Use `HistGradientBoosting` instead |
+| The minority class is never predicted | Set `class_weight=''balanced''` or move the threshold |
+
+## A check you can run
+
+Fit a random forest and a `HistGradientBoostingClassifier` on your data with default settings, and compare both with the logistic regression from the previous lesson.
+
+Three numbers, ten minutes. If the trees win by a lot, the relationship has interactions or non-linearity and that is worth knowing. If they do not, ship the linear model - it is faster, explainable, and it extrapolates.
+',
+   'A decision tree asks a sequence of yes-or-no questions. One is weak and interpretable; hundreds averaged are strong; hundreds built to correct each other are what wins on tabular data. This lesson covers all three and what each costs.', 8, 1670,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000fb',
    'Clustering and Dimensionality Reduction',
    'markdown',
-   'Unsupervised learning has no labels. You are asking what structure exists, not whether a prediction is right - which means there is no score to check, and that is the danger.
+   'Unsupervised learning has no labels, which means there is no score to optimise and no test set to check against. That makes it far easier to produce a confident, meaningless result - so the discipline is different, and mostly consists of validating the output against something outside the algorithm.
 
 ## k-means
 
+k-means partitions the data into k groups by minimising the distance from each point to its group''s centre.
+
 ```python
+import numpy as np
+import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
-scaled = StandardScaler().fit_transform(X)
-km = KMeans(n_clusters=4, n_init=10, random_state=42)
-labels = km.fit_predict(scaled)
+rng = np.random.default_rng(3)
+
+# Three genuine groups.
+groups = [
+    rng.normal([0, 0], 0.8, (300, 2)),
+    rng.normal([5, 5], 0.8, (300, 2)),
+    rng.normal([0, 6], 0.8, (300, 2)),
+]
+X = np.vstack(groups)
+truth = np.repeat([0, 1, 2], 300)
+
+model = KMeans(n_clusters=3, n_init=10, random_state=0).fit(X)
+print(''cluster centres:'')
+print(np.round(model.cluster_centers_, 2))
+print()
+print(''cluster sizes:'', np.bincount(model.labels_))
+print(f''inertia (total squared distance to centres): {model.inertia_:.0f}'')
+print()
+# The labels are arbitrary, so compare the partition rather than the ids.
+crosstab = pd.crosstab(truth, model.labels_)
+print(crosstab.to_string())
+print()
+print(f''each true group maps to one cluster: ''
+      f''{bool((crosstab > 0).sum(axis=1).max() == 1)}'')
 ```
 
-It finds k groups by minimising the distance from each point to its group centre. Three things to know:
+Three things k-means assumes, and each one is a way it goes wrong:
 
-- **Scaling is mandatory.** k-means measures distance, so a column in thousands dominates a column in fractions entirely.
-- **You choose k**, and the algorithm will happily produce whatever number you ask for, including on data with no groups at all.
-- **It assumes round, similar-sized clusters.** Elongated or nested structures come out wrong, and DBSCAN handles those better.
+**Scale matters.** Distance is computed across all features, so a feature in pounds dominates one in years.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(5)
+n = 600
+frame = pd.DataFrame({
+    ''tenure_years'': np.r_[rng.normal(2, 0.6, n // 2), rng.normal(8, 0.6, n // 2)],
+    ''annual_spend'': np.r_[rng.normal(50_000, 9_000, n // 2),
+                          rng.normal(52_000, 9_000, n // 2)],
+})
+truth = np.repeat([0, 1], n // 2)
+
+for label, data in [(''raw'', frame.to_numpy()),
+                    (''standardised'', StandardScaler().fit_transform(frame))]:
+    labels = KMeans(n_clusters=2, n_init=10, random_state=0).fit_predict(data)
+    agreement = max((labels == truth).mean(), (labels != truth).mean())
+    print(f''{label:<14} recovers the true split {agreement:.1%} of the time'')
+print()
+print(''Unstandardised, the clustering is entirely about spend, which'')
+print(''varies by thousands, and ignores tenure, which varies by years.'')
+```
+
+**Clusters are assumed round and similar in size.** k-means draws straight boundaries at equal distance between centres, so it cannot find an elongated or a curved group.
+
+```python
+import numpy as np
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.datasets import make_moons
+
+X, truth = make_moons(n_samples=600, noise=0.06, random_state=0)
+
+for name, labels in [
+    (''k-means'', KMeans(n_clusters=2, n_init=10, random_state=0).fit_predict(X)),
+    (''DBSCAN'', DBSCAN(eps=0.2, min_samples=5).fit_predict(X)),
+]:
+    agreement = max((labels == truth).mean(), (labels != truth).mean())
+    print(f''{name:<10} recovers the two crescents {agreement:.1%} of the time'')
+print()
+print(''k-means cuts a straight line through both crescents. DBSCAN'')
+print(''follows density instead, and gets them exactly.'')
+```
+
+**k must be chosen.** The algorithm will happily produce whatever number you ask for.
 
 ## Choosing k, and being honest
 
 ```python
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-for k in range(2, 8):
-    labels = KMeans(n_clusters=k, n_init=10, random_state=42).fit_predict(scaled)
-    print(k, round(silhouette_score(scaled, labels), 3))
+rng = np.random.default_rng(7)
+X = np.vstack([rng.normal([0, 0], 0.8, (250, 2)),
+               rng.normal([5, 5], 0.8, (250, 2)),
+               rng.normal([0, 6], 0.8, (250, 2))])
+
+rows = []
+for k in range(2, 9):
+    model = KMeans(n_clusters=k, n_init=10, random_state=0).fit(X)
+    rows.append({''k'': k, ''inertia'': round(model.inertia_),
+                 ''silhouette'': round(silhouette_score(X, model.labels_), 3)})
+table = pd.DataFrame(rows)
+table[''inertia_drop''] = (-table[''inertia''].diff()).fillna(0).astype(int)
+print(table.to_string(index=False))
+print()
+print(f''the true k is 3'')
+print(f''silhouette picks k={int(table.loc[table["silhouette"].idxmax(), "k"])}'')
+print(''inertia falls monotonically and always will - it cannot choose k'')
 ```
 
-The silhouette score measures how much better each point fits its own cluster than the next nearest. A clear peak suggests real structure; a flat curve means the data does not cluster, and the right response is to say so rather than to pick the largest number.
+**Inertia always falls as k rises**, because more centres means shorter distances; at k = n it reaches zero. The "elbow" is a visual judgement and often ambiguous.
 
-The real test is different: do the clusters differ on something you did not cluster on? If segment 3 also has twice the churn and half the spend, you have found something. If the only thing distinguishing them is the variables you fed in, you have drawn arbitrary lines through a cloud.
+**Silhouette** measures how much closer each point is to its own cluster than to the next nearest, and it does have a maximum. It is the better default.
+
+But the honest test is external:
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+
+rng = np.random.default_rng(11)
+# NO clusters at all: one uniform blob.
+X = rng.normal(0, 1, (900, 4))
+
+rows = []
+for k in range(2, 8):
+    labels = KMeans(n_clusters=k, n_init=10, random_state=0).fit_predict(X)
+    rows.append({''k'': k, ''silhouette'': round(silhouette_score(X, labels), 3),
+                 ''sizes'': np.bincount(labels).tolist()})
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''There is no structure here, and k-means still returns k tidy'')
+print(''groups with a positive silhouette for every k. The algorithm'')
+print(''cannot tell you that there is nothing to find.'')
+```
+
+So the validation has to come from outside the clustering:
+
+- **Do the clusters differ on a variable that was not used to build them?** If a "high-value" segment does not actually spend more on a held-out measure, it is not a segment.
+- **Are they stable?** Re-cluster on a random half of the data and see whether the same groups appear.
+- **Can somebody name them?** A cluster nobody can describe in a sentence will not be used.
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(13)
+n = 1200
+# Three real segments, each with its own behaviour.
+segment = rng.choice([0, 1, 2], n, p=[.5, .3, .2])
+frame = pd.DataFrame({
+    ''sessions'': rng.poisson([4, 14, 28][0] if False else np.choose(segment, [4, 14, 28])),
+    ''lessons'': rng.poisson(np.choose(segment, [1, 6, 18])),
+    ''days_active'': rng.poisson(np.choose(segment, [2, 9, 22])),
+})
+# A variable NOT used for clustering, held back for validation.
+frame[''paid''] = rng.random(n) < np.choose(segment, [0.03, 0.18, 0.52])
+
+CLUSTER_ON = [''sessions'', ''lessons'', ''days_active'']
+labels = KMeans(n_clusters=3, n_init=10, random_state=0).fit_predict(
+    StandardScaler().fit_transform(frame[CLUSTER_ON]))
+frame[''cluster''] = labels
+
+profile = frame.groupby(''cluster'').agg(
+    n=(''paid'', ''size''), sessions=(''sessions'', ''mean''),
+    lessons=(''lessons'', ''mean''), days=(''days_active'', ''mean''),
+    paid_rate=(''paid'', ''mean'')).round(2).sort_values(''lessons'')
+print(profile.to_string())
+print()
+spread = profile[''paid_rate''].max() - profile[''paid_rate''].min()
+print(f''the held-out conversion rate ranges {spread:.1%} across clusters'')
+print(''That is the evidence the segments are real: they differ on a'')
+print(''variable the clustering never saw.'')
+```
+
+## Stability
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.metrics import adjusted_rand_score
+
+rng = np.random.default_rng(17)
+real = np.vstack([rng.normal([0, 0], 0.7, (300, 2)),
+                  rng.normal([4, 4], 0.7, (300, 2)),
+                  rng.normal([0, 5], 0.7, (300, 2))])
+noise = rng.normal(0, 1, (900, 2))
+
+for name, X in [(''three real clusters'', real), (''no structure'', noise)]:
+    agreements = []
+    for seed in range(10):
+        half = rng.permutation(len(X))[:len(X) // 2]
+        a = KMeans(3, n_init=10, random_state=0).fit(X[half])
+        b = KMeans(3, n_init=10, random_state=seed + 1).fit(X)
+        agreements.append(adjusted_rand_score(a.predict(X), b.labels_))
+    print(f''{name:<22} stability {np.mean(agreements):.3f} ''
+          f''(1.0 = identical partitions)'')
+print()
+print(''Real structure reproduces across resamples. Noise does not.'')
+print(''This is the single most useful check in clustering.'')
+```
 
 ## PCA
 
-```python
-from sklearn.decomposition import PCA
+Principal component analysis rotates the data so that the first axis carries the most variance, the second the most of what remains, and so on. Keeping the first few is lossy compression.
 
-pca = PCA(n_components=2)
-coordinates = pca.fit_transform(scaled)
-print(pca.explained_variance_ratio_)
+```python
+import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(19)
+n = 1000
+
+# Twelve columns generated from three underlying factors.
+factors = rng.normal(0, 1, (n, 3))
+loadings = rng.normal(0, 1, (3, 12))
+X = factors @ loadings + rng.normal(0, 0.25, (n, 12))
+
+scaled = StandardScaler().fit_transform(X)
+pca = PCA().fit(scaled)
+
+explained = pd.DataFrame({
+    ''component'': range(1, 13),
+    ''variance'': pca.explained_variance_ratio_.round(3),
+    ''cumulative'': pca.explained_variance_ratio_.cumsum().round(3),
+})
+print(explained.head(6).to_string(index=False))
+print()
+print(f''three components carry ''
+      f''{pca.explained_variance_ratio_[:3].sum():.1%} of the variance'')
+print(''- which is right, because three factors generated the data'')
+print()
+
+for target in [0.80, 0.90, 0.95, 0.99]:
+    needed = int(np.searchsorted(pca.explained_variance_ratio_.cumsum(), target) + 1)
+    print(f''{target:.0%} of the variance needs {needed} of 12 components'')
 ```
 
-Principal component analysis finds the directions along which the data varies most and projects onto them. Two uses: plotting fifty dimensions in two, and compressing correlated columns before another model.
+Three rules for PCA:
 
-`explained_variance_ratio_` is the honest part - if two components capture 35% of the variance, your plot is showing a third of the picture, and clusters that appear in it may not exist in the full space.
+**Standardise first**, always. PCA maximises variance, so an unscaled feature with a large range becomes the first component by arithmetic rather than meaning.
+
+**Components are not features.** The first component is a weighted mixture of all the originals; it rarely has a name, and interpreting it as "customer value" is a story rather than a finding.
+
+**Fit on the training set only.** PCA is a transformation that is learned, so it belongs inside the pipeline.
+
+```python
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+rng = np.random.default_rng(23)
+n = 2000
+factors = rng.normal(0, 1, (n, 3))
+X = factors @ rng.normal(0, 1, (3, 40)) + rng.normal(0, 0.4, (n, 40))
+y = ((factors[:, 0] + 0.6 * factors[:, 1] + rng.normal(0, 0.6, n)) > 0).astype(int)
+
+folds = StratifiedKFold(5, shuffle=True, random_state=0)
+plain = cross_val_score(HistGradientBoostingClassifier(random_state=0), X, y,
+                        cv=folds, scoring=''roc_auc'').mean()
+reduced = cross_val_score(
+    Pipeline([(''scale'', StandardScaler()), (''pca'', PCA(n_components=4)),
+              (''model'', HistGradientBoostingClassifier(random_state=0))]),
+    X, y, cv=folds, scoring=''roc_auc'').mean()
+print(f''40 raw features:        AUC {plain:.3f}'')
+print(f''4 principal components: AUC {reduced:.3f}'')
+print()
+print(''Ten times fewer features, no loss - because the 40 columns only'')
+print(''ever carried three factors of information.'')
+```
 
 ## The warning
 
-An algorithm always returns clusters. Naming them - "these are our power users" - is an interpretation, and it is yours rather than the model''s. Validate it against something external before anybody builds a campaign on it.',
-   'Learning without labels: finding groups that were not defined in advance, and compressing many columns into a few. Both are useful and both are easy to over-interpret, because an algorithm will always return an answer.',
-   11, 378, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''temptation'': ''the algorithm found 5 segments'',
+     ''reality'': ''you asked for 5; it would have found 9 just as happily''},
+    {''temptation'': ''this cluster is our premium customers'',
+     ''reality'': ''name it only if a held-out variable agrees''},
+    {''temptation'': ''the segments are stable'',
+     ''reality'': ''measure it: re-cluster a random half and compare''},
+    {''temptation'': ''PC1 represents engagement'',
+     ''reality'': ''PC1 is a weighted sum of everything; it means nothing on its own''},
+    {''temptation'': ''we will act on these segments'',
+     ''reality'': ''decide the action first, then see whether the split supports it''},
+]).to_string(index=False))
+```
+
+The honest framing: **clustering is a hypothesis generator, not a result.** It suggests groups; something else has to confirm that the groups are real and that they matter.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| One feature dominates the clustering | Unstandardised; scale first |
+| Clusters found in random data | Expected; k-means always returns k groups |
+| The clusters change every run | No real structure; measure stability |
+| k-means missed an obvious shape | It assumes round clusters; try DBSCAN |
+| The elbow is ambiguous | Inertia always falls; use silhouette |
+| A segment nobody can describe | It will not be used; validate externally |
+| PCA components are uninterpretable | They are mixtures; that is normal |
+| PCA hurt the model | Fitted on all the data, or too few components |
+
+## A check you can run
+
+Cluster a random half of your data, cluster the whole of it, and compute `adjusted_rand_score` between the two labellings on the overlapping rows.
+
+Above about 0.7 the structure is real. Near zero it is not, and the segmentation deck built on it is describing noise. That is five lines, and it is the check that almost nobody runs.
+',
+   'Learning without labels: finding groups that were not defined in advance, and compressing many columns into a few. Both are useful and both are easy to over-interpret, because an algorithm will always return an answer.', 8, 1652,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000fd',
    'Pipelines, Tuning and Reproducibility',
    'markdown',
-   'A model is the last step of a sequence: impute, scale, encode, then fit. If any of those steps learns from the test data, the evaluation is wrong - and the only reliable way to prevent that is to make the whole sequence one object.
+   'A pipeline is the object that makes a model reproducible: one thing to fit, one thing to save, one thing to call. Tuning on top of it is how you choose hyperparameters without quietly spending the test set.
+
+## Everything in one object
 
 ```python
+import numpy as np
+import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.ensemble import HistGradientBoostingClassifier
 
-numeric = [''tenure_days'', ''logins_per_day'']
-categorical = [''plan'', ''country'']
+rng = np.random.default_rng(3)
+n = 3000
 
-prep = ColumnTransformer([
-    (''num'', Pipeline([(''impute'', SimpleImputer(strategy=''median'')),
-                      (''scale'', StandardScaler())]), numeric),
-    (''cat'', Pipeline([(''impute'', SimpleImputer(strategy=''most_frequent'')),
-                      (''encode'', OneHotEncoder(handle_unknown=''ignore''))]), categorical),
+frame = pd.DataFrame({
+    ''income'': rng.lognormal(10.2, 0.5, n).round(-2),
+    ''loan'': rng.lognormal(9.0, 0.6, n).round(-2),
+    ''years'': rng.gamma(2.2, 2.4, n).round(1),
+    ''purpose'': rng.choice([''car'', ''home'', ''business''], n),
+    ''region'': rng.choice([''North'', ''South'', ''East'', ''West''], n),
+})
+frame.loc[rng.choice(n, 140, replace=False), ''years''] = np.nan
+frame[''default''] = ((3.0 * frame[''loan''] / frame[''income'']
+                     - 0.08 * frame[''years''].fillna(4) + rng.normal(0, 0.8, n)) > 1.2).astype(int)
+
+NUMERIC = [''income'', ''loan'', ''years'']
+CATEGORICAL = [''purpose'', ''region'']
+
+model = Pipeline([
+    (''prepare'', ColumnTransformer([
+        (''num'', Pipeline([(''impute'', SimpleImputer(strategy=''median'')),
+                          (''scale'', StandardScaler())]), NUMERIC),
+        (''cat'', Pipeline([(''impute'', SimpleImputer(strategy=''most_frequent'')),
+                          (''encode'', OneHotEncoder(handle_unknown=''ignore''))]), CATEGORICAL),
+    ])),
+    (''model'', HistGradientBoostingClassifier(random_state=0)),
 ])
 
-model = Pipeline([(''prep'', prep), (''clf'', HistGradientBoostingClassifier(random_state=42))])
+model.fit(frame[NUMERIC + CATEGORICAL], frame[''default''])
+print(''fitted:'', type(model.named_steps[''model'']).__name__)
+print(''steps: '', [name for name, _ in model.steps])
+print(''features out of the preparer:'',
+      len(model.named_steps[''prepare''].get_feature_names_out()))
+
+# One call at inference, with the same preprocessing by construction.
+new_row = pd.DataFrame([{''income'': 42_000, ''loan'': 18_000, ''years'': np.nan,
+                         ''purpose'': ''car'', ''region'': ''Nowhere''}])
+print(''prediction for an unseen region and a missing value:'',
+      model.predict_proba(new_row)[0, 1].round(3))
 ```
 
-Now `model.fit(X_train, y_train)` fits every step on training data only, and `model.predict(X_new)` applies the same learned transformations. Inside cross-validation, it is refitted per fold, which is what makes those scores honest.
+The last two lines are the argument. A new region the encoder has never seen and a missing value both pass through without special handling, because the pipeline carries the imputer''s median and the encoder''s vocabulary with it.
 
-It is also one object to serialise, which means production runs exactly the transformations that were evaluated - the single most common source of a model that scored well and performs badly live.
+Three failures the pipeline prevents outright:
+
+**Preprocessing fitted on the test set**, which inflates every score.
+**Forgetting a step at inference**, which produces predictions that are quietly wrong.
+**Train and serve diverging**, because there is one object rather than two code paths.
 
 ## Tuning
 
-```python
-from sklearn.model_selection import RandomizedSearchCV
+Hyperparameters must be chosen on data the final score is not computed from. `GridSearchCV` and `RandomizedSearchCV` do that by cross-validating inside the training set.
 
-search = RandomizedSearchCV(
-    model,
-    {''clf__learning_rate'': [0.03, 0.05, 0.1, 0.2],
-     ''clf__max_leaf_nodes'': [15, 31, 63],
-     ''clf__min_samples_leaf'': [10, 20, 50]},
-    n_iter=20, cv=5, scoring=''average_precision'',
-    random_state=42, n_jobs=-1,
-)
-search.fit(X_train, y_train)
-print(search.best_params_, round(search.best_score_, 3))
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
+from sklearn.metrics import roc_auc_score
+
+rng = np.random.default_rng(7)
+n = 4000
+X = rng.normal(size=(n, 8))
+y = ((1.1 * X[:, 0] + 1.3 * (X[:, 1] > 0) * (X[:, 2] > 0)
+      + rng.normal(0, 1.1, n)) > 0.8).astype(int)
+X_rest, X_test, y_rest, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=0, stratify=y)
+
+grid = {
+    ''learning_rate'': [0.03, 0.1, 0.3],
+    ''max_leaf_nodes'': [7, 15, 31],
+    ''min_samples_leaf'': [5, 20],
+}
+search = GridSearchCV(
+    HistGradientBoostingClassifier(max_iter=200, early_stopping=False, random_state=0),
+    grid, cv=StratifiedKFold(4, shuffle=True, random_state=0),
+    scoring=''roc_auc'', n_jobs=1, refit=True).fit(X_rest, y_rest)
+
+print(f''{len(search.cv_results_["params"])} combinations x 4 folds = ''
+      f''{len(search.cv_results_["params"]) * 4} fits'')
+print(f''best parameters: {search.best_params_}'')
+print(f''best cross-validated AUC: {search.best_score_:.4f}'')
+print()
+
+results = pd.DataFrame(search.cv_results_)[
+    [''param_learning_rate'', ''param_max_leaf_nodes'', ''param_min_samples_leaf'',
+     ''mean_test_score'', ''std_test_score'']].sort_values(''mean_test_score'', ascending=False)
+print(results.head(5).round(4).to_string(index=False))
+print()
+print(f''TEST AUC with the chosen settings: ''
+      f''{roc_auc_score(y_test, search.predict_proba(X_test)[:, 1]):.4f}'')
 ```
 
-Randomised search beats exhaustive grid search for the same budget: most hyperparameters barely matter, and random sampling spends its evaluations across the ones that do. Note `scoring` - tune for the metric you chose in Level 2, not for accuracy by default.
+Note the gap between `best_score_` and the test score. The first is optimistic, because it is the maximum over eighteen combinations - the winner got there partly on luck. **The test set, used once, is the number to publish.**
+
+Random search beats grid search when there are many hyperparameters, because a grid spends most of its budget varying parameters that do not matter:
+
+```python
+import numpy as np
+import pandas as pd
+from scipy_free_uniform import _  # placeholder, replaced below
+```
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, train_test_split
+
+rng = np.random.default_rng(11)
+n = 4000
+X = rng.normal(size=(n, 8))
+y = ((1.1 * X[:, 0] + 1.3 * (X[:, 1] > 0) * (X[:, 2] > 0)
+      + rng.normal(0, 1.1, n)) > 0.8).astype(int)
+X_rest, X_test, y_rest, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=0, stratify=y)
+
+# Distributions, not lists: a random search can land between the
+# values a grid would have tried.
+distributions = {
+    ''learning_rate'': [0.02, 0.04, 0.06, 0.08, 0.1, 0.15, 0.2, 0.3],
+    ''max_leaf_nodes'': [5, 7, 10, 15, 20, 31, 45, 63],
+    ''min_samples_leaf'': [2, 5, 10, 20, 40, 80],
+    ''l2_regularisation'' if False else ''l2_regularization'': [0.0, 0.1, 1.0, 10.0],
+}
+search = RandomizedSearchCV(
+    HistGradientBoostingClassifier(max_iter=200, early_stopping=False, random_state=0),
+    distributions, n_iter=20, cv=StratifiedKFold(4, shuffle=True, random_state=0),
+    scoring=''roc_auc'', random_state=0).fit(X_rest, y_rest)
+
+print(f''grid would need {8 * 8 * 6 * 4} combinations; this tried 20'')
+print(f''best cross-validated AUC: {search.best_score_:.4f}'')
+print(f''best parameters: {search.best_params_}'')
+```
+
+Tuning the pipeline, not just the model, uses the double-underscore notation:
+
+```python
+import numpy as np
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+import pandas as pd
+
+rng = np.random.default_rng(13)
+n = 2000
+frame = pd.DataFrame(rng.normal(size=(n, 4)), columns=list(''abcd''))
+frame.loc[rng.choice(n, 150, replace=False), ''a''] = np.nan
+y = ((frame[''b''].fillna(0) + frame[''a''].fillna(0) + rng.normal(0, 1, n)) > 0).astype(int)
+
+pipeline = Pipeline([
+    (''prepare'', ColumnTransformer([
+        (''num'', Pipeline([(''impute'', SimpleImputer()), (''scale'', StandardScaler())]),
+         list(''abcd''))])),
+    (''model'', HistGradientBoostingClassifier(random_state=0)),
+])
+
+grid = {
+    ''prepare__num__impute__strategy'': [''mean'', ''median'', ''most_frequent''],
+    ''model__max_leaf_nodes'': [7, 31],
+}
+search = GridSearchCV(pipeline, grid, cv=StratifiedKFold(3, shuffle=True, random_state=0),
+                      scoring=''roc_auc'').fit(frame, y)
+print(f''best: {search.best_params_}'')
+print(f''AUC:  {search.best_score_:.4f}'')
+print()
+print(''The imputation strategy is now a tuned hyperparameter, chosen'')
+print(''per fold - which is the only way to choose it honestly.'')
+```
 
 ## The number you report
 
-`best_score_` is optimistic. It is the best of twenty attempts on the same folds, so some of it is luck. Report the test-set score, measured once, after the search is finished.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import (GridSearchCV, StratifiedKFold, cross_val_score,
+                                     train_test_split)
+from sklearn.metrics import roc_auc_score
+
+rng = np.random.default_rng(17)
+n = 2500
+X = rng.normal(size=(n, 6))
+y = ((X[:, 0] + 0.8 * X[:, 1] + rng.normal(0, 1.2, n)) > 0.4).astype(int)
+X_rest, X_test, y_rest, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=0, stratify=y)
+
+grid = {''max_leaf_nodes'': [5, 15, 31, 63], ''learning_rate'': [0.05, 0.1, 0.2]}
+inner = StratifiedKFold(4, shuffle=True, random_state=0)
+search = GridSearchCV(HistGradientBoostingClassifier(max_iter=150, early_stopping=False,
+                                                     random_state=0),
+                      grid, cv=inner, scoring=''roc_auc'').fit(X_rest, y_rest)
+
+# Nested cross-validation: the whole search is treated as the model.
+outer = StratifiedKFold(4, shuffle=True, random_state=1)
+nested = cross_val_score(
+    GridSearchCV(HistGradientBoostingClassifier(max_iter=150, early_stopping=False,
+                                                random_state=0),
+                 grid, cv=inner, scoring=''roc_auc''),
+    X_rest, y_rest, cv=outer, scoring=''roc_auc'')
+
+print(f''best_score_ (max over the grid):   {search.best_score_:.4f}  <- optimistic'')
+print(f''nested cross-validation:           {nested.mean():.4f} +/- {nested.std():.4f}'')
+print(f''held-out test set (used once):     ''
+      f''{roc_auc_score(y_test, search.predict_proba(X_test)[:, 1]):.4f}'')
+print()
+print(''best_score_ is the winner of a competition and is biased upwards.'')
+print(''Nested CV and the held-out test set agree, and either is the'')
+print(''number to publish.'')
+```
 
 ## Reproducibility
 
-- `random_state` on every component that has one.
-- Pin library versions. scikit-learn changes defaults between releases.
-- Record the training data: a row count and a hash, or a snapshot.
-- Save the fitted pipeline with `joblib`, alongside the version of scikit-learn that wrote it.
-
 ```python
-import joblib, sklearn
-joblib.dump({''model'': search.best_estimator_, ''sklearn'': sklearn.__version__}, ''model.joblib'')
+import numpy as np
+import pandas as pd
+import sklearn
+import sys
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+
+SEED = 20260407
+
+rng = np.random.default_rng(SEED)
+n = 2000
+X = rng.normal(size=(n, 5))
+y = ((X[:, 0] + rng.normal(0, 1, n)) > 0).astype(int)
+
+def run(seed):
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X, y, test_size=0.3, random_state=seed, stratify=y)
+    model = HistGradientBoostingClassifier(random_state=seed).fit(X_tr, y_tr)
+    return roc_auc_score(y_te, model.predict_proba(X_te)[:, 1])
+
+print(f''same seed twice: {run(SEED):.6f} and {run(SEED):.6f}'')
+print(f''identical: {run(SEED) == run(SEED)}'')
+print(f''different seed:  {run(SEED + 1):.6f}'')
+print()
+print(''MANIFEST'')
+for key, value in {
+    ''python'': sys.version.split()[0],
+    ''numpy'': np.__version__,
+    ''pandas'': pd.__version__,
+    ''scikit-learn'': sklearn.__version__,
+    ''seed'': SEED,
+    ''rows'': n,
+}.items():
+    print(f''  {key:<14} {value}'')
 ```
 
-A model file without its library version is a model you may not be able to load in a year.',
-   'Every preprocessing step must be fitted on training data only, every time, including inside each cross-validation fold. A pipeline makes that automatic, and it is also the only sane way to ship the same transformations to production.',
-   11, 354, '55555555-5555-4555-8555-555555555555', 'published',
+Every `random_state` must be set: in the splitter, in the model, in the search. Missing one makes the result irreproducible, and it is always the one you forgot.
+
+Four things to record with every trained model:
+
+- **The versions** of Python and the libraries.
+- **The seed**, in every place one is used.
+- **A hash of the training data**, so "the data changed" is a checkable claim.
+- **The chosen hyperparameters and the score**, with the split that produced it.
+
+## Saving and serving
+
+```python
+import numpy as np
+import pandas as pd
+import tempfile
+import os
+import pickle
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+
+rng = np.random.default_rng(19)
+n = 1500
+frame = pd.DataFrame({
+    ''amount'': rng.gamma(3, 40, n).round(2),
+    ''region'': rng.choice([''North'', ''South''], n),
+})
+y = ((frame[''amount''] > 120) ^ (rng.random(n) < 0.2)).astype(int)
+
+pipeline = Pipeline([
+    (''prepare'', ColumnTransformer([
+        (''num'', StandardScaler(), [''amount'']),
+        (''cat'', OneHotEncoder(handle_unknown=''ignore''), [''region''])])),
+    (''model'', HistGradientBoostingClassifier(random_state=0)),
+]).fit(frame, y)
+
+with tempfile.TemporaryDirectory() as directory:
+    path = os.path.join(directory, ''model.pkl'')
+    with open(path, ''wb'') as handle:
+        pickle.dump({''pipeline'': pipeline, ''features'': list(frame.columns),
+                     ''trained_rows'': len(frame), ''seed'': 0}, handle)
+    size = os.path.getsize(path)
+
+    with open(path, ''rb'') as handle:
+        loaded = pickle.load(handle)
+
+    before = pipeline.predict_proba(frame.head(5))[:, 1]
+    after = loaded[''pipeline''].predict_proba(frame.head(5))[:, 1]
+    print(f''saved {size:,} bytes'')
+    print(f''identical predictions after reload: {bool(np.allclose(before, after))}'')
+    print(f''metadata saved alongside: {[k for k in loaded if k != "pipeline"]}'')
+```
+
+Two warnings about pickle, and both have bitten real deployments. **A pickle is tied to the library version** - unpickling under a different scikit-learn may fail or, worse, behave differently. Record the version and check it on load. And **a pickle executes code on load**, so never load one from an untrusted source.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Cross-validation beats the test set badly | Preprocessing fitted outside the pipeline |
+| An unseen category crashed inference | `handle_unknown=''ignore''` |
+| `best_score_` did not hold up | It is the max over a grid; use nested CV |
+| Results differ between runs | A missing `random_state` somewhere |
+| A grid search takes hours | Use `RandomizedSearchCV`, or fewer parameters |
+| The loaded model predicts differently | A library version mismatch |
+| Serving code diverged from training | Two code paths; save the pipeline |
+| Tuning the preparer is awkward | Use `step__substep__param` in the grid |
+
+## A check you can run
+
+Take your training script and search it for `fit(` and `fit_transform(`.
+
+Every one of those calls must be inside a pipeline, or inside a fold. Any `fit_transform` on the full dataset before the split is leakage, and the score it produced is too high by an amount nobody can estimate afterwards.
+',
+   'Every preprocessing step must be fitted on training data only, every time, including inside each cross-validation fold. A pipeline makes that automatic, and it is also the only sane way to ship the same transformations to production.', 8, 1555,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000fe',
    'Drift, Monitoring and Knowing When to Retrain',
    'markdown',
-   'A model is a fitted description of a particular period. The world keeps moving, and the model does not.
+   'A model is fitted to a world that then moves. Nothing in the model notices, and nothing in its output says so - a drifted model returns confident predictions at the same rate as a healthy one. Monitoring is the only thing that catches it.
 
 ## The two kinds of drift
 
-**Data drift**: the inputs change distribution. A new marketing channel brings different users, a country launches, a competitor changes the mix. The relationship may still hold, but the model is now extrapolating.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
-**Concept drift**: the relationship itself changes. Behaviour that predicted churn before a pricing change no longer does. This is the serious one, and no amount of input monitoring detects it directly.
+rng = np.random.default_rng(3)
+n = 4000
+
+X_train = rng.normal(0, 1, (n, 3))
+y_train = ((1.2 * X_train[:, 0] - 0.8 * X_train[:, 1]
+            + rng.normal(0, 0.9, n)) > 0).astype(int)
+model = Pipeline([(''s'', StandardScaler()),
+                  (''m'', LogisticRegression(max_iter=1000))]).fit(X_train, y_train)
+
+def auc(X, y):
+    return roc_auc_score(y, model.predict_proba(X)[:, 1])
+
+# No drift.
+X_same = rng.normal(0, 1, (n, 3))
+y_same = ((1.2 * X_same[:, 0] - 0.8 * X_same[:, 1] + rng.normal(0, 0.9, n)) > 0).astype(int)
+
+# COVARIATE drift: the inputs moved, the rule did not.
+X_shifted = rng.normal(1.8, 1.4, (n, 3))
+y_shifted = ((1.2 * X_shifted[:, 0] - 0.8 * X_shifted[:, 1]
+              + rng.normal(0, 0.9, n)) > 0).astype(int)
+
+# CONCEPT drift: the inputs look the same, the rule changed.
+X_concept = rng.normal(0, 1, (n, 3))
+y_concept = ((-0.4 * X_concept[:, 0] + 1.3 * X_concept[:, 2]
+              + rng.normal(0, 0.9, n)) > 0).astype(int)
+
+print(f''{"no drift":<24} AUC {auc(X_same, y_same):.3f}'')
+print(f''{"covariate drift":<24} AUC {auc(X_shifted, y_shifted):.3f}'')
+print(f''{"concept drift":<24} AUC {auc(X_concept, y_concept):.3f}'')
+print()
+print(''Covariate drift is visible in the INPUTS without any labels.'')
+print(''Concept drift is not - the inputs look normal, and only the'')
+print(''outcomes reveal it.'')
+```
+
+- **Covariate drift**: the distribution of the inputs changes. A new marketing channel brings different customers; a new device becomes popular. Detectable without labels, by watching the features.
+- **Concept drift**: the relationship between inputs and label changes. A competitor launches, a regulation changes, a fraud ring adapts. **Not detectable from the inputs at all** - only outcomes reveal it.
+
+That asymmetry decides the monitoring strategy: input monitoring is cheap and immediate but blind to the worse failure; outcome monitoring catches everything and arrives late.
+
+## Detecting covariate drift
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(7)
+
+def psi(expected, actual, bins=10):
+    """Population Stability Index. Under 0.1 is stable, 0.1-0.25 needs
+    watching, above 0.25 is a real shift."""
+    edges = np.percentile(expected, np.linspace(0, 100, bins + 1))
+    edges[0], edges[-1] = -np.inf, np.inf
+    e = np.histogram(expected, bins=edges)[0] / len(expected)
+    a = np.histogram(actual, bins=edges)[0] / len(actual)
+    e, a = np.clip(e, 1e-6, None), np.clip(a, 1e-6, None)
+    return float(np.sum((a - e) * np.log(a / e)))
+
+reference = rng.normal(0, 1, 5000)
+cases = {
+    ''identical'': rng.normal(0, 1, 5000),
+    ''mean +0.2'': rng.normal(0.2, 1, 5000),
+    ''mean +0.5'': rng.normal(0.5, 1, 5000),
+    ''mean +1.0'': rng.normal(1.0, 1, 5000),
+    ''wider spread'': rng.normal(0, 1.8, 5000),
+}
+for name, sample in cases.items():
+    value = psi(reference, sample)
+    verdict = ''stable'' if value < 0.1 else (''watch'' if value < 0.25 else ''SHIFTED'')
+    print(f''{name:<14} PSI {value:.3f}  {verdict}'')
+```
+
+Three signals worth monitoring on the inputs, in order of usefulness:
+
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(11)
+
+reference = pd.DataFrame({
+    ''amount'': rng.gamma(3, 40, 4000),
+    ''country'': rng.choice([''GB'', ''US'', ''FR''], 4000, p=[.6, .3, .1]),
+    ''age_days'': rng.gamma(2, 120, 4000),
+})
+live = pd.DataFrame({
+    ''amount'': rng.gamma(3, 40, 4000),
+    ''country'': rng.choice([''GB'', ''US'', ''FR'', ''DE''], 4000, p=[.4, .3, .1, .2]),
+    ''age_days'': rng.gamma(2, 120, 4000),
+})
+live.loc[rng.choice(4000, 320, replace=False), ''amount''] = np.nan
+
+print(''1. missing rates'')
+for column in reference.columns:
+    before = reference[column].isna().mean()
+    after = live[column].isna().mean()
+    flag = '' <- CHANGED'' if abs(after - before) > 0.02 else ''''
+    print(f''   {column:<10} {before:.1%} -> {after:.1%}{flag}'')
+print()
+
+print(''2. new or vanished categories'')
+before_set = set(reference[''country''])
+after_set = set(live[''country''])
+print(f''   new:      {sorted(after_set - before_set)}'')
+print(f''   vanished: {sorted(before_set - after_set)}'')
+print()
+
+print(''3. the predicted-score distribution, which needs no labels'')
+print(''   (a shift here is the earliest warning you can get)'')
+```
+
+The third one is the most valuable: **the distribution of the model''s own output**. It needs no labels, it moves when either kind of drift begins, and a single number - the mean predicted probability - is often enough.
+
+## Detecting concept drift
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+rng = np.random.default_rng(13)
+
+X_train = rng.normal(0, 1, (4000, 3))
+y_train = ((1.2 * X_train[:, 0] - 0.8 * X_train[:, 1] + rng.normal(0, 0.9, 4000)) > 0).astype(int)
+model = Pipeline([(''s'', StandardScaler()),
+                  (''m'', LogisticRegression(max_iter=1000))]).fit(X_train, y_train)
+
+rows = []
+for week in range(1, 13):
+    X = rng.normal(0, 1, (900, 3))
+    # From week 6 the rule starts changing.
+    strength = 1.2 if week < 6 else 1.2 - 0.35 * (week - 5)
+    y = ((strength * X[:, 0] - 0.8 * X[:, 1] + rng.normal(0, 0.9, 900)) > 0).astype(int)
+    probabilities = model.predict_proba(X)[:, 1]
+    rows.append({
+        ''week'': week,
+        ''mean_input'': round(X.mean(), 3),
+        ''mean_score'': round(probabilities.mean(), 3),
+        ''auc'': round(roc_auc_score(y, probabilities), 3),
+    })
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+print(''mean_input never moves - the covariate monitor sees nothing.'')
+print(f''AUC falls from {table["auc"].iloc[0]:.3f} to {table["auc"].iloc[-1]:.3f}.'')
+print(''Only the labelled outcomes reveal it, and they arrive late.'')
+```
+
+Which means: **you must measure the live outcome**, and the delay before it arrives is the length of your blind spot. A churn model whose outcome is known 90 days later has a 90-day blind spot, and the only mitigation is to monitor a faster proxy alongside it.
 
 ## What to monitor, in order of usefulness
 
-1. **The prediction distribution.** The cheapest and most informative signal. If the share of positive predictions moves from 4% to 11% in a week, something changed, and you know before anybody complains.
-2. **Input distributions**, per feature. Mean, missing rate, and the set of categories seen. A new category arriving - a country code you never trained on - is a concrete, fixable event.
-3. **Actual outcomes, when they arrive.** The real measure, and usually delayed: churn is only known a month later. Log every prediction with its inputs so the comparison is possible when the label lands.
-4. **Latency and error rates.** A model that times out is also a model that is wrong.
-
 ```python
-# Log one row per prediction. Without this, nothing above is possible.
-record = {
-    ''ts'': now, ''model_version'': ''2026-03-01-a'', ''request_id'': rid,
-    ''features'': feature_dict, ''score'': float(score), ''threshold'': 0.3,
-    ''decision'': bool(score > 0.3),
-}
+import pandas as pd
+
+print(pd.DataFrame([
+    {''signal'': ''live outcome metric (AUC, precision at the threshold)'',
+     ''needs labels'': ''yes'', ''latency'': ''as long as labels take'',
+     ''catches'': ''everything''},
+    {''signal'': ''predicted score distribution'',
+     ''needs labels'': ''no'', ''latency'': ''immediate'',
+     ''catches'': ''both kinds, indirectly''},
+    {''signal'': ''input distributions (PSI per feature)'',
+     ''needs labels'': ''no'', ''latency'': ''immediate'',
+     ''catches'': ''covariate drift only''},
+    {''signal'': ''missing rates and new categories'',
+     ''needs labels'': ''no'', ''latency'': ''immediate'',
+     ''catches'': ''upstream breakage''},
+    {''signal'': ''volume and latency of the scoring service'',
+     ''needs labels'': ''no'', ''latency'': ''immediate'',
+     ''catches'': ''the pipeline being broken''},
+]).to_string(index=False))
 ```
+
+The last row matters more than it looks. Most "the model stopped working" incidents are not drift at all - they are a renamed upstream column, a feature pipeline that failed, or an encoder meeting a category it has never seen.
 
 ## Retraining is not always the answer
 
-If inputs have shifted but the relationship holds, retraining on fresh data helps. If the relationship has changed, retraining on data that spans both regimes gives you a model that fits neither - and the right move may be to retrain on the recent period only, or to rebuild the features.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
-If a product change caused it, no retraining fixes the fact that the old behaviour no longer exists. Say so.
+rng = np.random.default_rng(17)
+
+def make(n, strength, seed):
+    generator = np.random.default_rng(seed)
+    X = generator.normal(0, 1, (n, 3))
+    y = ((strength * X[:, 0] - 0.8 * X[:, 1] + generator.normal(0, 0.9, n)) > 0).astype(int)
+    return X, y
+
+def fit(X, y):
+    return Pipeline([(''s'', StandardScaler()),
+                     (''m'', LogisticRegression(max_iter=1000))]).fit(X, y)
+
+X_old, y_old = make(4000, 1.2, 1)
+old_model = fit(X_old, y_old)
+
+cases = {
+    ''nothing changed'': (1.2, ''noise - do not retrain''),
+    ''small real change'': (0.8, ''maybe - check it is worth the risk''),
+    ''large real change'': (-0.5, ''retrain, and investigate why''),
+}
+for label, (strength, advice) in cases.items():
+    X_new, y_new = make(4000, strength, 2)
+    old_auc = roc_auc_score(y_new, old_model.predict_proba(X_new)[:, 1])
+    new_model = fit(X_new, y_new)
+    new_auc = roc_auc_score(y_new, new_model.predict_proba(X_new)[:, 1])
+    print(f''{label:<20} old {old_auc:.3f}  retrained {new_auc:.3f}  ''
+          f''gain {new_auc - old_auc:+.3f}   {advice}'')
+print()
+print(''Retraining on the same amount of data has its own variance.'')
+print(''A gain inside the noise is not a reason to deploy.'')
+```
+
+Four cases where retraining is the wrong response:
+
+**It was noise.** A weekly metric moves by sampling variation; see the uncertainty lesson.
+
+**The pipeline broke.** Retraining on broken data bakes the breakage in.
+
+**The world changed in a way the features cannot capture.** A new competitor is not in your feature set, and retraining learns a worse version of the old relationship.
+
+**The labels are now wrong.** If the labelling process changed, retraining teaches the model the new mistake.
+
+The right first question is always: **has the data changed, or has the world changed, or has the pipeline changed?** They need three different responses.
 
 ## Retrain on a schedule, deploy on evidence
 
-Retraining automatically is fine. Deploying automatically is not: a retrained model should be compared against the live one on held-out recent data before replacing it, because a bad data week produces a bad model silently.
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
-Keep the previous version loadable. The fastest fix for a bad deployment is the old model, not a debugging session.
+rng = np.random.default_rng(19)
+
+def window(start_week, weeks, strength_at):
+    X, y = [], []
+    for week in range(start_week, start_week + weeks):
+        Xw = rng.normal(0, 1, (400, 3))
+        s = strength_at(week)
+        yw = ((s * Xw[:, 0] - 0.8 * Xw[:, 1] + rng.normal(0, 0.9, 400)) > 0).astype(int)
+        X.append(Xw)
+        y.append(yw)
+    return np.vstack(X), np.concatenate(y)
+
+strength_at = lambda week: 1.2 if week < 20 else max(1.2 - 0.09 * (week - 19), 0.1)
+
+X_train, y_train = window(0, 12, strength_at)
+production = Pipeline([(''s'', StandardScaler()),
+                       (''m'', LogisticRegression(max_iter=1000))]).fit(X_train, y_train)
+
+rows = []
+for week in range(12, 34, 2):
+    X_eval, y_eval = window(week, 2, strength_at)
+    live_auc = roc_auc_score(y_eval, production.predict_proba(X_eval)[:, 1])
+
+    # A candidate retrained on the most recent 12 weeks.
+    X_recent, y_recent = window(max(week - 12, 0), 12, strength_at)
+    candidate = Pipeline([(''s'', StandardScaler()),
+                          (''m'', LogisticRegression(max_iter=1000))]).fit(X_recent, y_recent)
+    candidate_auc = roc_auc_score(y_eval, candidate.predict_proba(X_eval)[:, 1])
+
+    deploy = candidate_auc - live_auc > 0.01
+    rows.append({''week'': week, ''live_auc'': round(live_auc, 3),
+                 ''candidate_auc'': round(candidate_auc, 3),
+                 ''gain'': round(candidate_auc - live_auc, 3),
+                 ''deploy'': deploy})
+    if deploy:
+        production = candidate
+
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''A candidate is retrained every fortnight regardless, and'')
+print(''deployed only when it beats the live model on the SAME recent'')
+print(''data by more than the noise. That separates "we always have a'')
+print(''fresh model ready" from "we change production".'')
+```
+
+The discipline in three lines:
+
+- **Retrain on a schedule**, so a candidate always exists and the pipeline is always exercised.
+- **Deploy on evidence**: the candidate must beat the live model on the same recent data, by more than the fold-to-fold noise.
+- **Keep the previous model**, and be able to roll back in minutes.
 
 ## The feedback loop
 
-A model that chooses who gets an intervention also shapes the data it will next be trained on. Fraud flagged and blocked never produces a confirmed fraud label; customers given a retention offer do not churn. Train on that naively and the model learns that its own interventions prevent the outcome - which they may, but you cannot tell from this data. Holding out a small random control group, permanently, is the standard answer and it is worth the cost.',
-   'A model is fitted to a moment. The world moves, the inputs change shape, and the model degrades without any error being raised. What to monitor, how to tell input drift from a genuine fall in performance, and when retraining is the wrong answer.',
-   11, 470, '55555555-5555-4555-8555-555555555555', 'published',
+```python
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(23)
+
+# A fraud model that BLOCKS what it flags. Blocked transactions never
+# produce an outcome, so the training data loses exactly the cases the
+# model is most confident about.
+n = 20_000
+latent = rng.normal(0, 1, n)
+fraud = (latent > 1.8).astype(int)
+score = latent + rng.normal(0, 0.4, n)
+
+rows = []
+for threshold in [np.inf, 2.5, 1.5, 0.8]:
+    blocked = score > threshold
+    observed = ~blocked
+    label = ''no blocking'' if threshold == np.inf else f''block above {threshold}''
+    rows.append({
+        ''policy'': label,
+        ''blocked'': f''{blocked.mean():.1%}'',
+        ''fraud rate in observed data'': f''{fraud[observed].mean():.2%}'',
+        ''true fraud rate'': f''{fraud.mean():.2%}'',
+    })
+print(pd.DataFrame(rows).to_string(index=False))
+print()
+print(''The more the model blocks, the cleaner the data it is retrained'')
+print(''on looks - and the less it learns about the fraud it is already'')
+print(''catching. Left alone, it forgets.'')
+```
+
+Three mitigations, and a system that acts on its own predictions needs at least one:
+
+- **Hold out a random control**: let a small random percentage through unblocked, so unbiased labels keep arriving. This costs money and is usually worth it.
+- **Record the score at decision time** with every outcome, so the bias is measurable rather than invisible.
+- **Watch the distribution of what you block**, not only what you let through.
+
+The same loop appears in recommendations (you only see clicks on what you showed), in hiring (you only see performance for who you hired), and in credit (you only see repayment for who you approved). It has a name - selection bias from the policy - and it is why a model that acts on the world needs a different monitoring design from one that only observes it.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Accuracy fell and the inputs look normal | Concept drift; only outcomes show it |
+| The model stopped working overnight | Usually a broken pipeline, not drift |
+| Retraining did not help | The world changed beyond the features |
+| A weekly dip triggered a retrain | Noise; compare with the interval |
+| The retrained model was worse | Retrained on data the policy had biased |
+| An unseen category crashed scoring | Monitor new categories; use `handle_unknown` |
+| Drift was found three months late | No outcome monitoring; add a proxy |
+| Blocked cases vanished from training | Feedback loop; hold out a random control |
+
+## A check you can run
+
+For the model you have in production, answer one question: **how long after a prediction does the true outcome arrive, and is anyone comparing the two?**
+
+That delay is the length of your blind spot. If nobody is comparing, the blind spot is infinite - the model could have been predicting at chance for a month, returning confident probabilities the whole time, and the first signal would be a business metric nobody connected to it.
+',
+   'A model is fitted to a moment. The world moves, the inputs change shape, and the model degrades without any error being raised. What to monitor, how to tell input drift from a genuine fall in performance, and when retraining is the wrong answer.', 10, 2082,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY)),
 
   ('e0000001-0000-4000-8000-0000000000ff',
    'Explaining a Decision, and Its Limits',
    'markdown',
-   'A model that affects people - who gets credit, an interview, a higher price, extra scrutiny - carries obligations that a sales forecast does not.
+   'A model trained on past decisions reproduces the pattern of those decisions. If the past was unfair, the model is unfair, and it will be unfair at scale, consistently, and with the appearance of objectivity. This lesson is what that looks like in numbers and what to do about it.
 
 ## Unfairness arrives through proxies
 
-Nobody puts ethnicity in a model. The model finds it anyway, through postcode, through device, through the name of a school. Removing the protected attribute does not remove the effect; it removes your ability to measure it.
-
-So measure it. Compute the model''s error rates per group and look at them:
-
 ```python
-for group, rows in test.groupby(''group''):
-    predictions = model.predict(rows[features])
-    print(group, len(rows),
-          recall_score(rows[''label''], predictions).round(3),
-          precision_score(rows[''label''], predictions).round(3))
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(3)
+n = 8000
+
+# A protected attribute, NOT given to the model.
+group = rng.choice([0, 1], n, p=[0.7, 0.3])
+
+# A feature strongly associated with it - a postcode, a school, a
+# device. This is the proxy.
+postcode_score = rng.normal(0, 1, n) + 1.5 * group
+
+# The true outcome depends only on the honest feature.
+ability = rng.normal(0, 1, n)
+repaid = ((1.4 * ability + rng.normal(0, 0.8, n)) > 0).astype(int)
+
+# But the HISTORICAL decisions were biased: group 1 was approved less
+# often for the same ability, so the training labels encode that.
+historical_approval = ((1.4 * ability - 0.9 * group + rng.normal(0, 0.7, n)) > 0).astype(int)
+
+frame = pd.DataFrame({''ability'': ability, ''postcode_score'': postcode_score})
+X_tr, X_te, y_tr, y_te, g_tr, g_te = train_test_split(
+    frame, historical_approval, group, test_size=0.3, random_state=0)
+
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+predictions = model.predict(X_te)
+
+print(''the model never saw the protected attribute. Its predictions:'')
+rates = pd.DataFrame({''group'': g_te, ''approved'': predictions}).groupby(''group'')[''approved''].agg(
+    [''mean'', ''size''])
+rates.columns = [''approval_rate'', ''n'']
+print(rates.round(3).to_string())
+print()
+print(f''approval rate gap: ''
+      f''{rates.loc[0, "approval_rate"] - rates.loc[1, "approval_rate"]:+.1%}'')
+print()
+print(f''correlation between postcode_score and group: ''
+      f''{np.corrcoef(postcode_score, group)[0, 1]:.2f}'')
+print()
+print(''Dropping the protected attribute does not remove the bias. The'')
+print(''proxy carries it, and the model finds the proxy.'')
 ```
 
-Equal accuracy across groups is not the same as equal false positive rates, which is not the same as equal selection rates. These are different definitions of fairness and - this is a mathematical result, not an opinion - they generally cannot all hold at once when base rates differ. Pick which one matters for this decision, state it, and defend it.
+**"We do not use that field" is not a defence.** Postcode encodes ethnicity; device type encodes income; first name encodes gender and origin; the school attended encodes several at once. A model with enough features will reconstruct a protected attribute whether or not you gave it to it.
+
+## Measuring it, with the definitions that conflict
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(7)
+n = 10_000
+
+group = rng.choice([0, 1], n, p=[.65, .35])
+ability = rng.normal(0, 1, n) - 0.35 * group        # a genuine difference in the data
+proxy = ability + 0.8 * group + rng.normal(0, 0.5, n)
+truth = ((1.5 * ability + rng.normal(0, 0.9, n)) > 0).astype(int)
+
+X = pd.DataFrame({''proxy'': proxy, ''noise'': rng.normal(0, 1, n)})
+X_tr, X_te, y_tr, y_te, g_tr, g_te = train_test_split(
+    X, truth, group, test_size=0.3, random_state=0, stratify=truth)
+
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+scores = model.predict_proba(X_te)[:, 1]
+predictions = (scores >= 0.5).astype(int)
+
+rows = []
+for g in [0, 1]:
+    mask = g_te == g
+    tp = int(((predictions == 1) & (y_te == 1) & mask).sum())
+    fp = int(((predictions == 1) & (y_te == 0) & mask).sum())
+    fn = int(((predictions == 0) & (y_te == 1) & mask).sum())
+    tn = int(((predictions == 0) & (y_te == 0) & mask).sum())
+    rows.append({
+        ''group'': g, ''n'': int(mask.sum()),
+        ''selection_rate'': round((tp + fp) / mask.sum(), 3),
+        ''true_positive_rate'': round(tp / max(tp + fn, 1), 3),
+        ''false_positive_rate'': round(fp / max(fp + tn, 1), 3),
+        ''precision'': round(tp / max(tp + fp, 1), 3),
+        ''base_rate'': round(float(y_te[mask].mean()), 3),
+    })
+table = pd.DataFrame(rows)
+print(table.to_string(index=False))
+print()
+print(f''demographic parity gap (selection rates): ''
+      f''{table["selection_rate"].iloc[0] - table["selection_rate"].iloc[1]:+.3f}'')
+print(f''equal opportunity gap (true positive rates): ''
+      f''{table["true_positive_rate"].iloc[0] - table["true_positive_rate"].iloc[1]:+.3f}'')
+print(f''predictive parity gap (precision): ''
+      f''{table["precision"].iloc[0] - table["precision"].iloc[1]:+.3f}'')
+```
+
+Three definitions, and they are **mathematically incompatible** when the base rates differ:
+
+- **Demographic parity** - the same selection rate for every group.
+- **Equal opportunity** - the same true positive rate: of those who would have succeeded, the same proportion are selected.
+- **Predictive parity** - the same precision: a prediction means the same thing whoever receives it.
+
+```python
+import numpy as np
+import pandas as pd
+
+# Two groups with genuinely different base rates. Satisfying any two
+# of the three definitions forces the third to be violated.
+print(pd.DataFrame([
+    {''base rates'': ''equal'', ''can satisfy all three'': ''yes''},
+    {''base rates'': ''different'', ''can satisfy all three'': ''no - proved impossible''},
+]).to_string(index=False))
+print()
+print(''This is a theorem, not an engineering limitation. You must'')
+print(''choose which definition matters for your decision, and say so.'')
+```
+
+The choice is not technical. For a loan, predictive parity means a score means the same thing to everyone; equal opportunity means creditworthy applicants are approved at the same rate. Those are different values, and the decision belongs to whoever owns the policy - but the measurement belongs to you.
 
 ## Explanation
 
 ```python
-from sklearn.inspection import permutation_importance, PartialDependenceDisplay
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.inspection import permutation_importance, partial_dependence
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(11)
+n = 4000
+frame = pd.DataFrame({
+    ''income'': rng.lognormal(10.2, 0.5, n).round(-2),
+    ''loan'': rng.lognormal(9.0, 0.6, n).round(-2),
+    ''years_employed'': rng.gamma(2.2, 2.4, n).round(1),
+    ''prior_defaults'': rng.poisson(0.25, n),
+})
+frame[''ratio''] = frame[''loan''] / frame[''income'']
+risk = (-1.0 + 3.0 * frame[''ratio''] + 0.8 * frame[''prior_defaults'']
+        - 0.08 * frame[''years_employed''] + rng.normal(0, 0.8, n))
+y = (risk > 0).astype(int)
+
+FEATURES = [''income'', ''loan'', ''years_employed'', ''prior_defaults'', ''ratio'']
+X_tr, X_te, y_tr, y_te = train_test_split(frame[FEATURES], y, test_size=0.3,
+                                          random_state=0, stratify=y)
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+
+# GLOBAL: which features the model relies on overall.
+importance = permutation_importance(model, X_te, y_te, n_repeats=10, random_state=0)
+print(''global importance:'')
+print(pd.DataFrame({''feature'': FEATURES,
+                    ''importance'': importance.importances_mean.round(4)}
+                   ).sort_values(''importance'', ascending=False).to_string(index=False))
+print()
+
+# GLOBAL: the shape of the relationship, averaged over everyone.
+result = partial_dependence(model, X_te, features=[''ratio''], grid_resolution=6)
+print(''partial dependence on the loan-to-income ratio:'')
+for value, average in zip(result[''grid_values''][0], result[''average''][0]):
+    print(f''  ratio {value:.2f} -> mean predicted risk {average:.3f}'')
+print()
+print(''Both of these describe the MODEL. Neither describes an'')
+print(''individual decision, which is what a person who was refused'')
+print(''actually wants to know.'')
 ```
 
-Global explanation says which features matter overall. Local explanation says why this person got this decision, which is what somebody affected actually wants. SHAP values are the common tool; a per-feature contribution for a single prediction.
+A per-decision explanation needs a different tool:
 
-Three things an explanation must be:
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
 
-- **True to the model.** A plausible story that is not what the model did is worse than no explanation.
-- **Actionable.** "Your application was declined because of your credit utilisation" tells someone what to change. "Because of 47 factors" does not.
-- **Stable.** If two near-identical cases get different explanations, the explanation is noise.
+rng = np.random.default_rng(13)
+n = 4000
+frame = pd.DataFrame({
+    ''income'': rng.lognormal(10.2, 0.5, n).round(-2),
+    ''loan'': rng.lognormal(9.0, 0.6, n).round(-2),
+    ''years_employed'': rng.gamma(2.2, 2.4, n).round(1),
+    ''prior_defaults'': rng.poisson(0.25, n),
+})
+frame[''ratio''] = (frame[''loan''] / frame[''income'']).round(3)
+risk = (-1.0 + 3.0 * frame[''ratio''] + 0.8 * frame[''prior_defaults'']
+        - 0.08 * frame[''years_employed''] + rng.normal(0, 0.8, n))
+y = (risk > 0).astype(int)
+
+FEATURES = [''income'', ''loan'', ''years_employed'', ''prior_defaults'', ''ratio'']
+X_tr, X_te, y_tr, y_te = train_test_split(frame[FEATURES], y, test_size=0.3, random_state=0)
+model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+
+# A BORDERLINE refused applicant - the case where a counterfactual
+# is actually useful. For someone at 0.99 the honest answer is "no
+# small change would help", which is also worth being able to say.
+scores_all = model.predict_proba(X_te)[:, 1]
+refused = X_te.iloc[[int(np.argmin(np.abs(scores_all - 0.62)))]]
+baseline = float(model.predict_proba(X_tr)[:, 1].mean())
+score = float(model.predict_proba(refused)[0, 1])
+
+print(f''this applicant scored {score:.3f}; the average is {baseline:.3f}'')
+print(''their values:'')
+for feature in FEATURES:
+    print(f''  {feature:<16} {float(refused[feature].iloc[0]):>12,.2f}'')
+print()
+
+# A counterfactual: what single change would flip the decision? This
+# is the explanation a person can act on.
+print(''counterfactual - the smallest change that moves the score below 0.5:'')
+found = False
+for feature, direction in [(''loan'', ''down''), (''income'', ''up''),
+                           (''prior_defaults'', ''down''), (''years_employed'', ''up'')]:
+    original = float(refused[feature].iloc[0])
+    factors = [0.9, 0.8, 0.7, 0.5, 0.3] if direction == ''down'' else [1.2, 1.5, 2.0, 3.0]
+    for factor in factors:
+        probe = refused.copy()
+        probe[feature] = original * factor
+        probe[''ratio''] = probe[''loan''] / probe[''income'']
+        new_score = float(model.predict_proba(probe)[0, 1])
+        if new_score < 0.5:
+            change = ''reduce'' if factor < 1 else ''increase''
+            print(f''  {change} {feature} from {original:,.2f} to ''
+                  f''{original * factor:,.2f}: score {score:.3f} -> {new_score:.3f}'')
+            found = True
+            break
+if not found:
+    print(''  no single-feature change of this size flips it - which is'')
+    print(''  itself the honest answer to give'')
+print()
+
+# And the applicant at the very top of the risk scale, for contrast.
+worst = X_te.iloc[[int(np.argmax(scores_all))]]
+print(f''for comparison, the highest-risk applicant scored ''
+      f''{float(model.predict_proba(worst)[0, 1]):.3f} with a ratio of ''
+      f''{float(worst["ratio"].iloc[0]):.2f} - no counterfactual of this'')
+print(''kind exists for them, and saying so is better than inventing one.'')
+print()
+print(''"Your loan-to-income ratio was too high; borrowing 20% less'')
+print(''would change the answer" is an explanation. "Feature importance'')
+print(''ranks ratio first" is not.'')
+```
+
+**A global explanation describes the model. A per-decision explanation describes one decision.** A person who was refused is entitled to the second, and in several jurisdictions is legally entitled to it.
+
+Three honest limits on explanation methods:
+
+- **They explain the model, not the world.** A feature''s importance says nothing about what would happen if it changed in reality.
+- **Correlated features share credit arbitrarily.** Two features carrying the same information will each look half as important.
+- **A plausible explanation is not a correct one.** SHAP and LIME produce a number for every feature whether or not the model''s behaviour is sensible.
 
 ## The practical obligations
 
-**Document the training data.** Where it came from, what period, who is in it and who is not. A model trained only on one country''s customers should say so.
+```python
+import pandas as pd
 
-**Keep a human path.** Anybody materially affected should be able to get a review by a person. This is law in several places and good practice everywhere.
+print(pd.DataFrame([
+    {''obligation'': ''measure disparities before deploying'',
+     ''concretely'': ''selection rate, TPR and precision by group, with intervals''},
+    {''obligation'': ''name the fairness definition you chose'',
+     ''concretely'': ''write it down; they conflict, so the choice is a decision''},
+    {''obligation'': ''record what the model was trained on'',
+     ''concretely'': ''period, population, exclusions, label source, version''},
+    {''obligation'': ''provide a per-decision explanation'',
+     ''concretely'': ''the factors, and what would change the answer''},
+    {''obligation'': ''provide a route to a human'',
+     ''concretely'': ''an appeal that a person actually reads''},
+    {''obligation'': ''monitor the disparities after deployment'',
+     ''concretely'': ''the same table, every month, with the same thresholds''},
+    {''obligation'': ''be able to turn it off'',
+     ''concretely'': ''a fallback rule, tested, that production can switch to''},
+]).to_string(index=False))
+```
 
-**Record the decision.** The inputs, the score, the threshold, the model version. Six months later somebody will ask why, and "we retrained since then" is not an answer.
+The last one is the one nobody builds until they need it. A model in a decision path with no fallback cannot be switched off, which means it cannot be fixed under pressure.
 
-**Know the failure mode.** Every model is wrong sometimes. Know which direction hurts most and set the threshold accordingly - and be able to say what happens to the people on the wrong side of it.
+## A worked example
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+
+rng = np.random.default_rng(seed=101)
+n = 12_000
+
+# A hiring screen trained on historical decisions.
+group = rng.choice([''A'', ''B''], n, p=[.72, .28])
+is_b = (group == ''B'').astype(int)
+
+# Genuine ability, equally distributed between the groups.
+ability = rng.normal(0, 1, n)
+
+# Two features. One is honest; one is a proxy that correlates with
+# the group for reasons unrelated to ability.
+test_score = ability + rng.normal(0, 0.6, n)
+years_at_large_firms = ability * 0.4 - 0.9 * is_b + rng.normal(0, 0.7, n)
+
+# The HISTORICAL label: past hiring decisions, which were biased.
+hired_historically = ((1.1 * ability - 0.75 * is_b + rng.normal(0, 0.7, n)) > 0).astype(int)
+# The outcome we actually care about, which is NOT biased.
+would_succeed = ((1.3 * ability + rng.normal(0, 0.8, n)) > 0).astype(int)
+
+frame = pd.DataFrame({''test_score'': test_score,
+                      ''years_at_large_firms'': years_at_large_firms})
+
+print(''the data'')
+print(f''  group B is {is_b.mean():.0%} of applicants'')
+print(f''  mean ability: A {ability[is_b == 0].mean():+.3f}, ''
+      f''B {ability[is_b == 1].mean():+.3f}  (equal by construction)'')
+print(f''  would succeed: A {would_succeed[is_b == 0].mean():.1%}, ''
+      f''B {would_succeed[is_b == 1].mean():.1%}'')
+print(f''  hired historically: A {hired_historically[is_b == 0].mean():.1%}, ''
+      f''B {hired_historically[is_b == 1].mean():.1%}  <- the bias'')
+print(f''  correlation of years_at_large_firms with group: ''
+      f''{np.corrcoef(years_at_large_firms, is_b)[0, 1]:.2f}'')
+print()
+
+def audit(name, features, label):
+    X_tr, X_te, y_tr, y_te, g_tr, g_te, s_tr, s_te = train_test_split(
+        frame[features], label, is_b, would_succeed, test_size=0.3, random_state=0)
+    model = HistGradientBoostingClassifier(random_state=0).fit(X_tr, y_tr)
+    selected = model.predict(X_te)
+
+    rows = []
+    for g, gname in [(0, ''A''), (1, ''B'')]:
+        mask = g_te == g
+        chosen = selected[mask].astype(bool)
+        succeed = s_te[mask].astype(bool)
+        rows.append({
+            ''group'': gname, ''n'': int(mask.sum()),
+            ''selection_rate'': round(float(chosen.mean()), 3),
+            ''tpr_vs_success'': round(float(chosen[succeed].mean()), 3),
+            ''precision_vs_success'': round(float(succeed[chosen].mean()), 3)
+                if chosen.sum() else float(''nan''),
+        })
+    table = pd.DataFrame(rows)
+    print(name)
+    print(table.to_string(index=False))
+    print(f''  selection gap {table["selection_rate"].iloc[0] - table["selection_rate"].iloc[1]:+.3f}   ''
+          f''opportunity gap {table["tpr_vs_success"].iloc[0] - table["tpr_vs_success"].iloc[1]:+.3f}'')
+    print()
+    return table
+
+# 1. Train on the biased historical label, with the proxy. The worst case.
+audit(''trained on historical hires, with the proxy feature:'',
+      [''test_score'', ''years_at_large_firms''], hired_historically)
+
+# 2. Drop the proxy. Some of the bias goes.
+audit(''trained on historical hires, proxy removed:'',
+      [''test_score''], hired_historically)
+
+# 3. Train on the OUTCOME rather than the past decision. Most of it goes.
+audit(''trained on who actually succeeded, with the proxy:'',
+      [''test_score'', ''years_at_large_firms''], would_succeed)
+
+# 4. Both fixes together.
+audit(''trained on who actually succeeded, proxy removed:'',
+      [''test_score''], would_succeed)
+
+print(''Both fixes work, and in this data the proxy is the larger'')
+print(''lever - because years_at_large_firms is correlated -0.44 with'')
+print(''the group and carries almost the whole disparity on its own.'')
+print()
+print(''Note what the biased LABEL does even with the proxy removed:'')
+print(''the model trained on historical hires selects fewer people'')
+print(''overall than the one trained on outcomes, because it learned'')
+print(''a decision rule that was stricter than the evidence warranted.'')
+print()
+print(''Which lever is larger depends on the data. What does not vary'')
+print(''is that you have to measure both: auditing the feature list'')
+print(''while training on a biased label leaves the bias in place.'')
+```
+
+That ordering is the practical finding, and it is the opposite of where most effort goes. Teams spend their time auditing feature lists for proxies; the larger lever is almost always **what the label actually measures**. "Who did we hire" and "who succeeded" are different questions, and only the second is the one anybody wants answered.
 
 ## The question worth asking first
 
-Not "can we predict this" but "should a prediction decide this". Sometimes the honest answer is that the model informs a person who decides, and that is a better system than either alone.',
-   'The moment a model affects a person, accuracy stops being the only requirement. Why a proxy for a protected attribute is the usual mechanism, why group metrics cannot all be equal at once, and what an explanation has to contain to be worth anything.',
-   11, 428, '55555555-5555-4555-8555-555555555555', 'published',
+Before any of this: **should this decision be automated at all?**
+
+```python
+import pandas as pd
+
+print(pd.DataFrame([
+    {''factor'': ''cost of a wrong decision to the person'',
+     ''automate if'': ''low and reversible'', ''do not if'': ''high or irreversible''},
+    {''factor'': ''volume'',
+     ''automate if'': ''thousands a day'', ''do not if'': ''a handful a week''},
+    {''factor'': ''quality of the labels'',
+     ''automate if'': ''the outcome is measured'', ''do not if'': ''the label is a past decision''},
+    {''factor'': ''explainability required'',
+     ''automate if'': ''none, or simple'', ''do not if'': ''a legal right to reasons''},
+    {''factor'': ''ability to appeal'',
+     ''automate if'': ''a human reviews on request'', ''do not if'': ''there is no route back''},
+]).to_string(index=False))
+```
+
+A model that ranks a queue for a human to work through is a very different thing from one that refuses an application, and the second needs every obligation in this lesson while the first needs few of them. The cheapest fix for most fairness problems is to move from the second design to the first.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Disparity despite not using the attribute | A proxy carries it; measure the outcome |
+| Two fairness metrics disagree | They are incompatible when base rates differ |
+| The model learned past discrimination | The label is a past decision, not an outcome |
+| An explanation nobody can act on | Global importance; give a counterfactual |
+| A disparity appeared after deployment | Monitoring stopped at launch |
+| The model cannot be switched off | No fallback rule was built |
+| An appeal goes to the same model | A human must be in the loop |
+| Small groups show wild disparities | Small samples; report intervals |
+
+## A check you can run
+
+Take any model that affects people and compute three rates for each group you can identify: **selection rate, true positive rate, and precision** - with confidence intervals, because small groups swing.
+
+Then ask the harder question: **is the label an outcome, or a past decision?** If it is a past decision, the model''s job is to reproduce that decision, and every disparity in it is now automated, consistent and much faster than it used to be.
+',
+   'The moment a model affects a person, accuracy stops being the only requirement. Why a proxy for a protected attribute is the usual mechanism, why group metrics cannot all be equal at once, and what an explanation has to contain to be worth anything.', 13, 2506,'55555555-5555-4555-8555-555555555555', 'published',
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),

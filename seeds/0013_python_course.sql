@@ -156,103 +156,249 @@ VALUES
    'markdown',
    '# Values, Names and Types
 
-Python has no variable declarations. A name starts existing the moment you
-assign something to it, and it refers to a value rather than containing one.
-That single idea explains most of what looks surprising later.
+Python has no variable declarations. A name is a label you tie to a value, and the value carries the type. Once you have that sentence straight, several behaviours that look like quirks turn out to be consequences.
+
+## A name is a label, not a box
 
 ```python
-# A name is a label tied to a value. Nothing declares it first.
-learner = "Aisha"
-score = 92
-passing = True
-missing = None
+x = 5
+print(x, type(x))              # 5 <class ''int''>
 
-# type() answers what a value is. Names have no type of their own - only the
-# value they currently point at does.
-for value in (learner, score, passing, missing):
-    print(f"{str(value):8} -> {type(value).__name__}")
+x = "now a string"
+print(x, type(x))              # now a string <class ''str''>
+```
 
-# Rebinding a name to a different kind of value is allowed, because the type
-# belonged to the value and not to the name.
-score = "ninety-two"
-print(type(score).__name__)
+Nothing declared `x`, and rebinding it to a different kind of value is allowed, because the type belonged to the value and not to the name. `int` did not change into `str`; the label moved.
+
+This is why the mental model matters. In C, `int x` reserves a box that can only ever hold an int. In Python, `x` is a sticky note you can move to any object at all.
+
+```python
+a = [1, 2, 3]
+b = a                          # a second sticky note on the SAME list
+b.append(4)
+print(a)                       # [1, 2, 3, 4]
+print(a is b)                  # True - one object, two names
+
+c = a.copy()                   # a new list with the same contents
+c.append(5)
+print(a)                       # [1, 2, 3, 4] - unaffected
+print(a == c, a is c)          # False False
+```
+
+`==` asks whether two values look the same. `is` asks whether they are the same object. They are different questions, and using `is` for the first one is the most common beginner bug in the language:
+
+```python
+x = 1000
+y = int("1000")                # built at run time, not folded by the compiler
+print(x == y)                  # True
+print(x is y)                  # False - two separate int objects
+
+s = 256
+t = int("256")
+print(s is t)                  # True - CPython caches small integers
+
+big = 1000
+also_big = 1000                # same literal, same code object
+print(big is also_big)         # True - and this is where people get misled
+```
+
+Small integers from -5 to 256 are cached by CPython, so `is` accidentally works for them and then stops working at 257. Worse, two identical literals written in the same function or module are folded into one constant by the compiler, so `is` appears to work for any value - right up until one side comes from a file, a calculation or a network response, at which point it quietly stops. Never rely on it. Use `is` only for `None`, `True` and `False`, which really are singletons:
+
+```python
+value = None
+print(value is None)           # the correct check
 ```
 
 ## The numeric types actually differ
 
-`int` and `float` are not two sizes of the same thing. An `int` is exact and
-unbounded; a `float` is a binary approximation with a fixed width.
-
 ```python
 # Integers are arbitrary precision. This is exact, not rounded.
 print(2 ** 200)
+# 1606938044258990275541962092341162602522202993782792835301376
 
 # Floats are binary approximations, and 0.1 has no exact binary form.
-print(0.1 + 0.2)
-print(0.1 + 0.2 == 0.3)
+print(0.1 + 0.2)               # 0.30000000000000004
+print(0.1 + 0.2 == 0.3)        # False
 
 # Which is why money is never a float. Decimal keeps decimal digits exactly.
 from decimal import Decimal
-print(Decimal("0.1") + Decimal("0.2") == Decimal("0.3"))
+print(Decimal("0.1") + Decimal("0.2"))             # 0.3
+print(Decimal("0.1") + Decimal("0.2") == Decimal("0.3"))   # True
 
-# Integer division floors; true division does not.
-print(7 / 2, 7 // 2, 7 % 2)
-print(-7 // 2)   # floors towards negative infinity, so -4 rather than -3
+# Note the strings. Decimal(0.1) would inherit the float''s error.
+print(Decimal(0.1))
+# 0.1000000000000000055511151231257827021181583404541015625
 ```
 
-## Assignment copies the reference, not the value
+That last line is worth staring at. `Decimal(0.1)` is given a float that is already wrong, and faithfully records how wrong it is. Always construct a `Decimal` from a string or an integer.
 
-This is the one that bites. Two names can refer to the same object, and
-mutating through one is visible through the other.
+Two division operators, for two different questions:
 
 ```python
-a = [1, 2, 3]
-b = a            # not a copy - another name for the same list
-b.append(4)
-print(a)         # [1, 2, 3, 4]
-print(a is b)    # True: the same object
-
-# A copy has to be asked for.
-c = a.copy()     # or list(a), or a[:]
-c.append(5)
-print(a, c)
-print(a is c)
-
-# == compares values; is compares identity. They are different questions.
-x = [1, 2]
-y = [1, 2]
-print(x == y, x is y)
+print(7 / 2)                   # 3.5   - true division, always a float
+print(7 // 2)                  # 3     - floor division
+print(-7 // 2)                 # -4    - floors towards negative infinity
+print(7 % 3, -7 % 3)           # 1 2   - the sign follows the divisor
+print(divmod(7, 2))            # (3, 1)
 ```
+
+`-7 // 2` being `-4` rather than `-3` surprises people coming from C or Java, where division truncates towards zero. Python floors, and the modulo follows so that `(a // b) * b + (a % b) == a` always holds. That invariant is why `-7 % 3` is `2` and not `-1`, and it makes `%` reliable for wrapping around a range.
+
+## Comparison for floats
+
+```python
+import math
+
+print(0.1 + 0.2 == 0.3)                        # False
+print(math.isclose(0.1 + 0.2, 0.3))            # True
+print(math.isclose(1e-10, 0.0))                # False - relative by default
+print(math.isclose(1e-10, 0.0, abs_tol=1e-9))  # True
+```
+
+`math.isclose` is relative by default, which is right for comparing two large numbers and wrong for comparing something to zero. When zero is one of the arguments, pass `abs_tol`.
 
 ## Truthiness
 
-Every value can be used in a condition. Empty things are false, and that is
-the idiom Python code actually uses.
+Every object is either truthy or falsy. The falsy ones are few enough to memorise:
 
 ```python
-for value in ([], [0], "", "0", 0, 0.0, None, {}, {"k": 1}):
-    print(f"{repr(value):10} -> {bool(value)}")
+falsy = [False, None, 0, 0.0, 0j, "", [], (), {}, set(), range(0)]
+print([bool(v) for v in falsy])
+# [False, False, False, False, False, False, False, False, False, False, False]
 
-# So this is how you check for an empty list:
-items = []
-if not items:
-    print("nothing to do")
-
-# Note "0" is a non-empty string and therefore true. A string from input() is
-# always a string, which is why int() exists.
+print(bool("0"), bool([0]), bool(" "))         # True True True
 ```
 
-## What to take away
+`"0"` is a non-empty string and therefore true. A string from `input()` is always a string, which is why `int()` exists. `[0]` is a list with one item in it, and its contents are irrelevant.
 
-- A name refers to a value; the value carries the type.
-- `int` is exact, `float` is an approximation, `Decimal` is for money.
-- `=` binds a name; it never copies.
-- `is` asks about identity, `==` asks about value.
-- Empty collections, `0`, `""` and `None` are falsy.
+So this is how you check for an empty list:
+
+```python
+items = []
+
+if not items:                  # Pythonic: reads as "if there are no items"
+    print("empty")
+
+if len(items) == 0:            # correct, but says less with more
+    print("also empty")
+
+if items == []:                # works for a list, fails for a tuple or set
+    print("fragile")
+```
+
+The first form works for any container and for `None`, which is usually what you want - but be careful when zero is a legitimate value:
+
+```python
+retries = 0
+print(retries or 3)            # 3  - wrong, 0 was a real setting
+print(3 if retries is None else retries)       # 0 - right
+```
+
+## A worked example
+
+```python
+from decimal import Decimal, ROUND_HALF_UP
+
+# An invoice total, done correctly, exercising every idea above.
+LINES = [
+    ("Consulting, 3 hours", "95.00", 3),
+    ("Hosting, annual", "119.99", 1),
+    ("Domain", "12.50", 2),
+]
+VAT_RATE = Decimal("0.20")
+
+
+def money(value):
+    """Round to pence, the way an accountant does rather than the way
+    Python''s round() does - round() uses banker''s rounding, so
+    round(2.675, 2) is 2.67 and an invoice would be a penny out."""
+    return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+net = Decimal("0")
+for description, unit_price, quantity in LINES:
+    line_total = money(unit_price) * quantity
+    net += line_total
+    print(f"{description:<22} {quantity} x {unit_price:>7} = {line_total:>8}")
+
+vat = money(net * VAT_RATE)
+gross = net + vat
+
+print("-" * 50)
+print(f"{''Net'':<34} {net:>8}")
+print(f"{''VAT at 20%'':<34} {vat:>8}")
+print(f"{''Total'':<34} {gross:>8}")
+
+# The same arithmetic in floats, for comparison.
+float_net = sum(float(p) * q for _, p, q in LINES)
+print()
+print("as a float:  ", float_net * 1.2)
+print("as a Decimal:", gross)
+print("equal?       ", float(gross) == float_net * 1.2)
+
+# Identity versus equality, on the values we just built.
+also_gross = net + vat
+print(gross == also_gross, gross is also_gross)   # True False
+
+# And the only three things `is` is for.
+print(vat is not None, isinstance(gross, Decimal))   # True True
+```
+
+The float line is the point. It is close, it is not equal, and on an invoice with a thousand lines the difference becomes a penny that nobody can account for. `Decimal` costs a little speed and removes an entire class of bug reports.
+
+## What type() and isinstance() are each for
+
+```python
+value = True
+
+print(type(value))                      # <class ''bool''>
+print(type(value) is bool)              # True  - exact type
+print(isinstance(value, bool))          # True
+print(isinstance(value, int))           # True! bool is a subclass of int
+print(True + True)                      # 2
+
+from collections.abc import Sequence
+print(isinstance([1, 2], Sequence))     # True  - list is a Sequence
+print(isinstance("ab", Sequence))       # True  - so is str
+print(isinstance({1, 2}, Sequence))     # False - a set is not ordered
+```
+
+Prefer `isinstance` - it respects inheritance, which is almost always what you mean. Prefer an abstract base class from `collections.abc` over a concrete one when you care about *behaviour* rather than identity, because then anything with the right shape passes.
+
+The `bool` being an `int` detail is not a trick question. It is why `sum([True, False, True])` is `2`, which is a genuinely handy way to count matches in a comprehension.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Changing one list changed another | Assignment copies the reference, not the value |
+| `is` worked in testing and failed in production | Small-integer caching; use `==` |
+| A total is out by a fraction of a penny | Floats; use `Decimal` built from strings |
+| `Decimal(0.1)` is not `0.1` | The float was already wrong before `Decimal` saw it |
+| `-7 // 2` is `-4`, not `-3` | Python floors; it does not truncate |
+| A zero setting was replaced by a default | `or` treats `0` as missing; test `is None` |
+| `"0"` passed a truthiness test | A non-empty string is true whatever is in it |
+| `round(2.675, 2)` gave `2.67` | Banker''s rounding; use `Decimal.quantize` |
+
+## A check you can run
+
+Type this into a REPL:
+
+```python
+a = [1, 2, 3]
+b = a
+c = a[:]
+
+b.append(4)
+print(a, b, c)
+print(a is b, a is c, a == c)
+```
+
+Before you run it, write down what each of the five printed values will be. The `a` and `b` outputs are the whole lesson: they are one list, and the slice made a second.
+
+Then change `a = [1, 2, 3]` to `a = (1, 2, 3)` and run it again. It fails on `append`, because a tuple has none - and that failure is the entire argument for immutability in one line.
 ',
-   'Names refer to values, values carry the type, and assignment never copies.',
-   3, 507,
-   '55555555-5555-4555-8555-555555555555',
+   'Names refer to values, values carry the type, and assignment never copies.', 8, 1574,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -271,104 +417,162 @@ VALUES
    'markdown',
    '# Making Decisions and Repeating Work
 
-Indentation is the block structure. There are no braces, and the colon at the
-end of a line is what announces that a block follows.
-
-```python
-scores = [92, 78, 85, 41, 67]
-
-for score in scores:
-    if score >= 90:
-        grade = "A"
-    elif score >= 80:
-        grade = "B"
-    elif score >= 60:
-        grade = "C"
-    else:
-        grade = "F"
-    print(f"{score:3} -> {grade}")
-```
+Python''s control flow is small: `if`, `for`, `while`, `match`, and three words that change where a loop goes. What makes it worth a chapter is that several of these do something slightly different from their equivalents in other languages, and the differences are where the bugs live.
 
 ## for iterates over things, not indices
 
-A Python `for` loop takes items directly. Reaching for an index is usually a
-sign that a different tool fits better.
-
 ```python
-names = ["Aisha", "Kenji", "Lena"]
+names = ["Aisha", "Noshad", "Sam"]
 
 # Not this:
 for i in range(len(names)):
-    print(i, names[i])
+    print(names[i])
 
-print("---")
-
-# This. enumerate gives you both, and start= sets where counting begins.
-for position, name in enumerate(names, start=1):
-    print(position, name)
-
-print("---")
-
-# Two lists at once: zip stops at the shorter one.
-scores = [92, 78, 85, 41]
-for name, score in zip(names, scores):
-    print(f"{name}: {score}")
-print("41 was dropped - zip stops when the shortest runs out")
+# This:
+for name in names:
+    print(name)
 ```
+
+The second is shorter, but that is not the argument. The argument is that it works for anything iterable - a file, a generator, a dictionary, a database cursor - while the first only works for things that have a length and support integer indexing.
+
+When you genuinely need the position, `enumerate` gives you both, and `start=` sets where counting begins:
+
+```python
+names = ["Aisha", "Noshad", "Sam"]
+
+for position, name in enumerate(names, start=1):
+    print(f"{position}. {name}")
+# 1. Aisha
+# 2. Noshad
+# 3. Sam
+```
+
+Two sequences at once: `zip` stops at the shorter one, silently, which is sometimes what you want and sometimes a lost row.
+
+```python
+names = ["Aisha", "Noshad", "Sam"]
+scores = [91, 78]
+
+print(list(zip(names, scores)))
+# [(''Aisha'', 91), (''Noshad'', 78)] - Sam vanished
+
+try:
+    print(list(zip(names, scores, strict=True)))
+except ValueError as error:
+    print(type(error).__name__)       # ValueError
+```
+
+`strict=True` turns that silent truncation into an error. Use it whenever the two sequences are supposed to be the same length - which is most of the time.
+
+```python
+from itertools import zip_longest
+
+names = ["Aisha", "Noshad", "Sam"]
+scores = [91, 78]
+
+print(list(zip_longest(names, scores, fillvalue=0)))
+# [(''Aisha'', 91), (''Noshad'', 78), (''Sam'', 0)]
+```
+
+## Iterating a dictionary
+
+```python
+scores = {"aisha": 91, "noshad": 78, "sam": 64}
+
+for key in scores:                      # keys, by default
+    pass
+for value in scores.values():
+    pass
+for key, value in scores.items():       # the one you usually want
+    print(f"{key}: {value}")
+```
+
+Since 3.7 a dict keeps insertion order, and that is a language guarantee rather than an implementation detail you may rely on by accident.
 
 ## break, continue, and the else nobody expects
 
-A loop can carry an `else`, which runs only if the loop finished without
-breaking. It is the clean way to express "searched everything and found
-nothing".
+```python
+numbers = [4, 9, 16, 23, 42]
+
+for n in numbers:
+    if n % 2 == 1:
+        print("found an odd number:", n)
+        break
+else:
+    print("all even")
+# found an odd number: 9
+```
+
+A loop''s `else` runs when the loop finished **without** hitting `break`. It is not "otherwise" - it is "no break". That makes it exactly right for search loops, where you need to distinguish "found it" from "ran out of items":
 
 ```python
-haystack = [4, 8, 15, 16, 23, 42]
-
-for value in haystack:
-    if value % 7 == 0:
-        print(f"found {value}")
-        break
-else:
-    print("nothing divisible by 7")
-
-print("---")
-
-for value in [4, 8, 15]:
-    if value % 7 == 0:
-        print(f"found {value}")
-        break
-else:
-    print("nothing divisible by 7")
+def find_first_odd(values):
+    for value in values:
+        if value % 2 == 1:
+            return value
+    return None                         # often clearer than for/else
 ```
+
+Honestly: a function with an early `return` is usually clearer than `for/else`, and most codebases prefer it. Learn `for/else` so you can read it; reach for it only when extracting a function would be artificial.
+
+`continue` skips to the next iteration, which flattens a nested `if`:
+
+```python
+rows = [{"id": 1, "status": "paid"}, {"id": 2}, {"id": 3, "status": "void"}]
+
+for row in rows:
+    if "status" not in row:
+        continue
+    if row["status"] != "paid":
+        continue
+    print("processing", row["id"])      # processing 1
+```
+
+Three guard clauses at one level of indentation, rather than a pyramid.
 
 ## while, and the walrus
 
-`while` repeats until a condition goes false. `:=` assigns inside the
-condition, which is what makes a read-until-done loop readable.
+Use `while` when the number of iterations is not known in advance - reading until a sentinel, retrying until success, converging on an answer.
 
 ```python
-countdown = 3
-while countdown > 0:
-    print(countdown)
-    countdown -= 1
-print("go")
+import random
+random.seed(7)
 
-print("---")
+attempts = 0
+while True:
+    attempts += 1
+    roll = random.randint(1, 6)
+    if roll == 6:
+        break
+    if attempts >= 20:
+        print("gave up")
+        break
+print(f"took {attempts} attempt(s)")
+```
 
-# The walrus operator assigns and tests in one step.
-lines = ["first", "second", "", "unreachable"]
-index = 0
-while (line := lines[index]) != "":
-    print(f"read: {line}")
-    index += 1
-print("stopped at the blank line")
+The walrus operator assigns and tests in one step, which is what makes read-until-empty loops read well:
+
+```python
+lines = iter(["first", "second", "", "third"])
+
+while (line := next(lines, None)) is not None:
+    if not line:
+        print("(blank)")
+        continue
+    print(line)
+```
+
+Without the walrus you would either read once before the loop and once at the end of it - duplicating the call - or use `while True` with a `break`. The walrus is also useful inside a comprehension, where it lets you compute something once and both test and use it:
+
+```python
+values = ["12", "x", "7"]
+numbers = [n for v in values if (n := v if v.isdigit() else None) is not None]
+print(numbers)                          # [''12'', ''7'']
 ```
 
 ## match, for shape rather than value
 
-`match` compares structure, not just equality. It is closer to destructuring
-than to a C switch.
+`match` is not a switch statement. A switch compares a value against constants; `match` destructures a *shape*.
 
 ```python
 def describe(event):
@@ -379,32 +583,155 @@ def describe(event):
             return f"letter {key}"
         case {"type": "key", "key": key}:
             return f"key {key}"
-        case [first, *rest]:
-            return f"a list starting {first}, {len(rest)} more"
+        case [first, *rest] if rest:
+            return f"a list starting with {first} and {len(rest)} more"
+        case []:
+            return "an empty list"
+        case str() as text:
+            return f"the string {text!r}"
         case _:
             return "something else"
 
-for event in [
-    {"type": "click", "x": 3, "y": 9},
-    {"type": "key", "key": "a"},
-    {"type": "key", "key": "F1"},
-    [1, 2, 3],
-    42,
-]:
-    print(describe(event))
+
+print(describe({"type": "click", "x": 10, "y": 20}))   # click at 10,20
+print(describe({"type": "key", "key": "a"}))           # letter a
+print(describe({"type": "key", "key": "1"}))           # key 1
+print(describe([1, 2, 3]))                             # a list starting with 1 and 2 more
+print(describe([]))                                    # an empty list
+print(describe("hello"))                               # the string ''hello''
+print(describe(3.5))                                   # something else
 ```
 
-## What to take away
+Four features are doing the work there. **Mapping patterns** match a dict that has at least those keys and bind the values. **Sequence patterns** destructure, with `*rest` absorbing the remainder. **Guards** (`if key.isalpha()`) add a condition that is not about shape. And **class patterns** like `str()` match by type.
 
-- Indentation is syntax, not style.
-- Iterate over items; use `enumerate` and `zip` when you need more.
-- `for ... else` runs when the loop was not broken out of.
-- `:=` assigns inside a condition.
-- `match` matches shape, and can bind names while it does.
+One trap, and it is a sharp one:
+
+```python
+LIMIT = 10
+value = 5
+
+match value:
+    case LIMIT:                 # does NOT compare to 10
+        print("at the limit")
+# This REBINDS LIMIT to 5 and always matches.
+print(LIMIT)                    # 5
+```
+
+A bare name in a `case` is a *capture pattern*: it binds, it does not compare. To compare against a constant it must be a dotted name - `case constants.LIMIT:` - or you must use a guard: `case n if n == LIMIT:`. This is the single most common `match` mistake, and because it always matches, it silently swallows every later case.
+
+## A worked example
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Transaction:
+    kind: str
+    amount_pence: int
+    account: str
+
+
+LEDGER = [
+    Transaction("deposit", 150000, "current"),
+    Transaction("withdraw", 2500, "current"),
+    Transaction("transfer", 50000, "savings"),
+    Transaction("withdraw", 999999, "current"),
+    Transaction("fee", 350, "current"),
+    Transaction("deposit", 7500, "savings"),
+]
+
+balances = {"current": 0, "savings": 0}
+rejected = []
+
+for index, tx in enumerate(LEDGER, start=1):
+    # A guard clause, rather than nesting everything that follows.
+    if tx.account not in balances:
+        rejected.append((index, "unknown account"))
+        continue
+
+    match tx:
+        case Transaction(kind="deposit", amount_pence=amount):
+            balances[tx.account] += amount
+        case Transaction(kind="withdraw", amount_pence=amount) if amount <= balances[tx.account]:
+            balances[tx.account] -= amount
+        case Transaction(kind="withdraw", amount_pence=amount):
+            rejected.append((index, f"insufficient funds for {amount}"))
+        case Transaction(kind="transfer", amount_pence=amount) if amount <= balances["current"]:
+            balances["current"] -= amount
+            balances[tx.account] += amount
+        case Transaction(kind="fee", amount_pence=amount):
+            balances[tx.account] -= amount
+        case _:
+            rejected.append((index, f"unhandled kind {tx.kind!r}"))
+
+for account, pence in balances.items():
+    print(f"{account:<10} {pence / 100:>10,.2f}")
+
+print()
+for index, reason in rejected:
+    print(f"line {index}: {reason}")
+
+# current      971.50
+# savings      575.00
+#
+# line 4: insufficient funds for 999999
+
+# The search loop, with the else that means "no break".
+for tx in LEDGER:
+    if tx.amount_pence > 1000000:
+        print("found a large transaction")
+        break
+else:
+    print("no transaction over 10,000.00")
+```
+
+Notice what `match` bought: the deposit, the successful withdrawal, the failed withdrawal and the transfer are four cases distinguished by a mixture of *kind* and *condition*, and each reads as one line. The `if/elif` version of that needs nested conditions and repeats `tx.amount_pence` in every branch.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A `zip` quietly dropped rows | The shorter sequence ends it; pass `strict=True` |
+| Every `match` took the first case | A bare name in `case` captures; it does not compare |
+| `else` on a loop ran when you did not expect | It means "no break", not "otherwise" |
+| Items were skipped while removing in a loop | Mutating a list while iterating it; build a new one |
+| A `while` never terminated | The condition''s variable is never updated inside |
+| `range(len(x))` broke on a generator | Generators have no length; iterate directly |
+| A counter started at 0 when you wanted 1 | `enumerate(x, start=1)` |
+| `continue` skipped the increment in a `while` | The increment belongs before the `continue` |
+
+That last one is worth a line of code, because it is a genuine infinite loop:
+
+```python
+i = 0
+while i < 5:
+    if i == 2:
+        i += 1        # without this, continue loops forever at 2
+        continue
+    print(i)
+    i += 1
+```
+
+A `for` loop cannot have that bug, which is one more reason to prefer it.
+
+## A check you can run
+
+```python
+LIMIT = 10
+for value in [5, 10, 15]:
+    match value:
+        case LIMIT:
+            print(value, "matched LIMIT")
+print("LIMIT is now", LIMIT)
+```
+
+Every value "matches LIMIT", and `LIMIT` ends up as 15.
+
+Then add `case _: print(value, "did not match")` underneath and run it again. It will not even compile: `SyntaxError: name capture ''LIMIT'' makes remaining patterns unreachable`. Python is telling you, in as many words, that your constant is a capture pattern - which is a good deal more help than the silent always-match you get when there is nothing after it.
+
+The fix is a guard, `case n if n == LIMIT:`, or a dotted name such as `case settings.LIMIT:`.
 ',
-   'Indentation as syntax, iterating over items, and the else that belongs to a loop.',
-   2, 483,
-   '55555555-5555-4555-8555-555555555555',
+   'Indentation as syntax, iterating over items, and the else that belongs to a loop.', 8, 1564,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -423,127 +750,340 @@ VALUES
    'markdown',
    '# Functions, Arguments and Return Values
 
-A function groups work behind a name. Python is generous about how arguments
-may be passed, which is worth understanding early because it shapes how the
-standard library reads.
+Python''s argument handling is unusually expressive: positional, keyword, defaults, variadic, keyword-only, positional-only. Each exists for a reason, and one of them - the mutable default - is the most famous gotcha in the language.
+
+## The basics, and the implicit return
 
 ```python
-def total(prices, tax_rate=0.2):
-    """Return the sum of prices with tax applied."""
-    subtotal = sum(prices)
-    return round(subtotal * (1 + tax_rate), 2)
+def area(width, height):
+    """Return the area of a rectangle."""
+    return width * height
 
-print(total([10.00, 4.50]))                 # uses the default
-print(total([10.00, 4.50], 0.05))           # positional
-print(total([10.00, 4.50], tax_rate=0.0))   # keyword, and clearer at the call
 
-# A function with no return statement returns None.
-def shout(text):
-    print(text.upper())
+print(area(3, 4))                  # 12
+print(area(height=4, width=3))     # 12 - keywords, any order
+print(area.__doc__)                # Return the area of a rectangle.
 
-result = shout("hello")
-print(result)
+
+def shout(message):
+    print(message.upper())
+    # no return statement
+
+
+result = shout("hello")            # HELLO
+print(result)                      # None
 ```
+
+A function with no `return` statement returns `None`. So does a bare `return`. That is why `print(xs.sort())` shows `None` - `sort` mutates and returns nothing, by deliberate convention.
 
 ## The mutable default argument
 
-Defaults are evaluated once, when the function is defined - not on each call.
-A mutable default is therefore shared by every call, which is almost never
-what was meant.
-
 ```python
-def broken(item, basket=[]):
+def add_item(item, basket=[]):          # evaluated ONCE, at definition
     basket.append(item)
     return basket
 
-print(broken("apple"))
-print(broken("pear"))     # the apple is still there
-print(broken("plum"))     # and the pear
 
-print("---")
+print(add_item("apple"))                # [''apple'']
+print(add_item("pear"))                 # [''apple'', ''pear'']  - the same list!
+print(add_item("plum"))                 # [''apple'', ''pear'', ''plum'']
+```
 
-# The fix is None, and building the real default inside.
-def fixed(item, basket=None):
+The default is evaluated once, when the `def` statement runs, and the resulting list is stored on the function object. Every call that does not pass a basket gets that same list.
+
+```python
+def add_item(item, basket=[]):
+    basket.append(item)
+    return basket
+
+
+add_item("apple")
+add_item("pear")
+add_item("plum")
+print(add_item.__defaults__)            # ([''apple'', ''pear'', ''plum''],)
+```
+
+The fix is `None`, and building the real default inside:
+
+```python
+def add_item(item, basket=None):
     if basket is None:
         basket = []
     basket.append(item)
     return basket
 
-print(fixed("apple"))
-print(fixed("pear"))
+
+print(add_item("apple"))                # [''apple'']
+print(add_item("pear"))                 # [''pear''] - a fresh list each time
 ```
+
+This applies to every mutable default: lists, dicts, sets, and anything whose constructor you call at definition time. `def f(when=datetime.now())` freezes the time the module was imported, which is the same bug wearing a different hat.
 
 ## *args and **kwargs
 
-`*` collects extra positional arguments into a tuple, `**` collects extra
-keyword arguments into a dict. The same symbols unpack at a call site.
+```python
+def report(label, *amounts, scale=1, **options):
+    total = sum(amounts) * scale
+    line = f"{label}: {total}"
+    if options:
+        line += " (" + ", ".join(f"{k}={v}" for k, v in options.items()) + ")"
+    return line
+
+
+print(report("total", 1, 2, 3))                        # total: 6
+print(report("total", 1, 2, 3, scale=10))              # total: 60
+print(report("total", 1, 2, currency="GBP", vat=0.2))  # total: 3 (currency=GBP, vat=0.2)
+```
+
+`*amounts` collects extra positional arguments into a **tuple**. `**options` collects extra keyword arguments into a **dict**. Anything after `*amounts` in the signature is keyword-only - which is why `scale` must be passed by name.
+
+The same symbols work in the other direction, unpacking:
 
 ```python
-def report(title, *values, **options):
-    print(f"{title}: {values}")
-    print(f"  options: {options}")
+def report(label, *amounts, scale=1, **options):
+    total = sum(amounts) * scale
+    line = f"{label}: {total}"
+    if options:
+        line += " (" + ", ".join(f"{k}={v}" for k, v in options.items()) + ")"
+    return line
 
-report("scores", 92, 78, 85, sort=True, limit=10)
 
-print("---")
+numbers = [1, 2, 3]
+settings = {"scale": 2, "currency": "GBP"}
 
-# The same symbols in the other direction: unpacking.
-numbers = [3, 1, 2]
-print(max(*numbers))          # max(3, 1, 2)
-
-settings = {"sep": " | ", "end": "!\\n"}
-print("a", "b", "c", **settings)
+print(report("unpacked", *numbers, **settings))
+# unpacked: 12 (currency=GBP)
 ```
 
 ## Keyword-only and positional-only
 
-A bare `*` in the signature means everything after it must be passed by
-keyword. A `/` means everything before it must be positional. Both exist to
-stop callers depending on things you did not promise.
-
 ```python
-def connect(host, port, /, *, timeout=30, retries=3):
+def connect(host, port, /, timeout=30, *, retries=3):
     return f"{host}:{port} timeout={timeout} retries={retries}"
 
-print(connect("db.example", 5432, timeout=5))
+
+print(connect("db.example", 5432))                     # fine
+print(connect("db.example", 5432, 60))                 # timeout positionally
+print(connect("db.example", 5432, retries=5))          # retries by name
 
 # Each of these is a TypeError - uncomment to see it:
-#   connect(host="db.example", port=5432)     # host and port are positional-only
-#   connect("db.example", 5432, 5)            # timeout is keyword-only
+#   connect(host="db.example", port=5432)   # host and port are positional-only
+#   connect("db.example", 5432, 60, 5)      # retries is keyword-only
 ```
+
+Everything **before** `/` is positional-only. Everything **after** `*` is keyword-only. The part between can be either.
+
+Why bother? Positional-only means you can rename a parameter later without breaking anyone - nobody could have been passing it by name. Keyword-only means a call site cannot say `f(data, True, False, True)`, which is unreadable and reorderable by accident. The rule of thumb: make boolean and configuration parameters keyword-only, always.
 
 ## Scope, and closures
 
-A function can read names from the scope around it. Assigning to a name makes
-it local unless you say otherwise.
-
 ```python
-def make_counter():
-    count = 0
-    def increment():
-        nonlocal count      # without this, count = count + 1 is a local
-        count += 1
-        return count
-    return increment
+counter = 0
 
-tick = make_counter()
-print(tick(), tick(), tick())
+def increment_broken():
+    # counter += 1              # UnboundLocalError: assigning makes it local
+    pass
 
-# Two counters do not share state: each call to make_counter made a new one.
-other = make_counter()
-print(other())
+
+def increment():
+    global counter              # explicit, and usually a smell
+    counter += 1
+
+
+increment()
+print(counter)                  # 1
 ```
 
-## What to take away
+Assigning to a name anywhere in a function makes it local for the *whole* function, including before the assignment. That is why reading it first raises `UnboundLocalError` rather than finding the global.
 
-- Defaults are evaluated once at definition time; never make them mutable.
-- `*args` and `**kwargs` collect; the same symbols unpack at a call.
-- `*` and `/` in a signature control how arguments may be passed.
-- A closure keeps the variable, and `nonlocal` is what lets it write to it.
+`nonlocal` does the same for an enclosing function''s scope, and is how a closure mutates captured state:
+
+```python
+def make_counter(start=0):
+    count = start
+
+    def increment(step=1):
+        nonlocal count
+        count += step
+        return count
+
+    def current():
+        return count
+
+    return increment, current
+
+
+bump, read = make_counter(10)
+print(bump(), bump(5), read())             # 11 16 16
+
+other_bump, other_read = make_counter(10)
+print(other_read())                        # 10 - a separate count
+```
+
+Two counters do not share state: each call to `make_counter` made a new `count`.
+
+The late-binding trap is the one to watch for:
+
+```python
+# All three functions capture the VARIABLE i, not its value.
+funcs = [lambda: i for i in range(3)]
+print([f() for f in funcs])                # [2, 2, 2]
+
+# A default argument is evaluated at definition, which binds the value.
+funcs = [lambda i=i: i for i in range(3)]
+print([f() for f in funcs])                # [0, 1, 2]
+```
+
+This bites most often when building callbacks in a loop - a list of button handlers that all do the same thing because they all closed over the same loop variable.
+
+## A worked example
+
+```python
+import time
+from functools import wraps
+
+
+def retry(attempts=3, delay=0.01, exceptions=(ValueError,)):
+    """A decorator factory: the arguments are keyword-friendly and the
+    exception tuple is a default that is immutable, so it is safe."""
+    def decorate(function):
+        @wraps(function)
+        def wrapper(*args, **kwargs):
+            last = None
+            for attempt in range(1, attempts + 1):
+                try:
+                    return function(*args, **kwargs)
+                except exceptions as error:
+                    last = error
+                    if attempt < attempts:
+                        time.sleep(delay * attempt)
+            raise last
+        return wrapper
+    return decorate
+
+
+calls = {"count": 0}
+
+
+@retry(attempts=4)
+def flaky(threshold, *, label="job"):
+    calls["count"] += 1
+    if calls["count"] < threshold:
+        raise ValueError(f"{label} failed on attempt {calls[''count'']}")
+    return f"{label} succeeded on attempt {calls[''count'']}"
+
+
+print(flaky(3))                            # job succeeded on attempt 3
+print(flaky.__name__)                      # flaky - thanks to @wraps
+
+
+# A function that takes anything and reports its own call, which is the
+# shape every logging wrapper and test double has.
+def describe_call(*args, **kwargs):
+    parts = [repr(a) for a in args]
+    parts += [f"{k}={v!r}" for k, v in kwargs.items()]
+    return "called with (" + ", ".join(parts) + ")"
+
+
+print(describe_call(1, "two", key=3))
+# called with (1, ''two'', key=3)
+
+
+# Forwarding: *args and **kwargs pass everything through untouched,
+# which is how a wrapper stays agnostic about what it wraps.
+def timed(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        try:
+            return function(*args, **kwargs)
+        finally:
+            elapsed = time.perf_counter() - start
+            print(f"{function.__name__} took {elapsed * 1000:.1f}ms")
+    return wrapper
+
+
+@timed
+def work(n, *, factor=2):
+    return sum(i * factor for i in range(n))
+
+
+print(work(10000, factor=3))
+
+# And the mutable-default bug, with the fix beside it.
+def append_wrong(item, into=[]):
+    into.append(item)
+    return into
+
+
+def append_right(item, into=None):
+    into = [] if into is None else into
+    into.append(item)
+    return into
+
+
+# Both arguments are evaluated before print runs, and both calls
+# returned THE SAME list - so it is printed twice, fully grown.
+print(append_wrong(1), append_wrong(2))    # [1, 2] [1, 2]
+print(append_right(1), append_right(2))    # [1] [2]
+```
+
+The `retry` decorator shows the whole argument system in one place: a factory taking keyword arguments with safe defaults, a wrapper that forwards everything with `*args, **kwargs`, and `@wraps` to keep the wrapped function''s name and docstring.
+
+## Type hints on functions
+
+```python
+from collections.abc import Callable, Sequence
+
+
+def summarise(
+    values: Sequence[float],
+    *,
+    key: Callable[[float], float] = abs,
+    limit: int | None = None,
+) -> dict[str, float]:
+    chosen = sorted(values, key=key, reverse=True)
+    if limit is not None:
+        chosen = chosen[:limit]
+    return {"count": len(chosen), "total": sum(chosen), "first": chosen[0]}
+
+
+print(summarise([3.0, -7.5, 1.2], limit=2))
+# {''count'': 2, ''total'': -4.5, ''first'': -7.5}
+# first is -7.5, not 3.0: the sort is by abs(), so -7.5 ranks highest.
+```
+
+Nothing checks these at run time. They are for the reader, for your editor''s autocomplete, and for a type checker you run separately. Prefer `Sequence` and `Callable` from `collections.abc` in parameter positions, because they accept more than `list` does.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A default list accumulated between calls | Mutable default; use `None` |
+| `UnboundLocalError` reading a global | Assigning anywhere makes the name local |
+| Every callback in a loop does the same thing | Late binding; use a default argument |
+| A decorated function lost its name | Missing `@wraps` |
+| `TypeError: got multiple values for argument` | The same parameter given positionally and by name |
+| A boolean argument''s meaning is unreadable | Make it keyword-only with `*` |
+| `f(*args)` passed a string character by character | A string is a sequence; wrap it in a list |
+| A timestamp default never changes | `datetime.now()` evaluated at definition time |
+
+## A check you can run
+
+```python
+def f(x, acc=[]):
+    acc.append(x)
+    return acc
+
+print(f(1))
+print(f(2))
+print(f(3))
+print(f.__defaults__)
+```
+
+The fourth line prints `([1, 2, 3],)` - the list is *stored on the function object*, visible from outside, shared by every caller. Once you have seen it sitting there in `__defaults__`, the rule stops being a thing you memorised and becomes a thing you understand.
 ',
-   'Defaults, *args and **kwargs, keyword-only arguments, and closures.',
-   2, 476,
-   '55555555-5555-4555-8555-555555555555',
+   'Defaults, *args and **kwargs, keyword-only arguments, and closures.', 7, 1471,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -562,108 +1102,320 @@ VALUES
    'markdown',
    '# Lists, Tuples and Slicing
 
-A list is an ordered, mutable sequence. A tuple is the same thing without the
-mutation. The choice between them is a statement about whether the contents
-are meant to change.
+A list is a mutable sequence. A tuple is an immutable one. That difference decides which operations exist, which can be dictionary keys, and which can be safely shared - and slicing is the syntax that makes working with both pleasant.
+
+## Lists: the operations, and the ones that return None
 
 ```python
-scores = [92, 78, 85, 41, 67]
+items = ["b", "a", "c"]
 
-scores.append(70)
-scores.insert(0, 100)
-removed = scores.pop()
-print(scores, "removed", removed)
+items.append("d")              # add one at the end
+items.extend(["e", "f"])       # add several
+items.insert(0, "start")       # insert at a position - O(n), so avoid in a loop
+print(items)
+# [''start'', ''b'', ''a'', ''c'', ''d'', ''e'', ''f'']
 
-# sort() rearranges in place and returns None. sorted() returns a new list and
-# leaves the original alone. Assigning the result of sort() is a common bug.
-scores.sort()
-print(scores)
-print(sorted(scores, reverse=True))
-print(sorted(["Kenji", "aisha", "Lena"], key=str.lower))
+print(items.pop())             # ''f'' - removes and returns the last
+print(items.pop(0))            # ''start'' - and from the front, also O(n)
+items.remove("a")              # removes the first match; ValueError if absent
+print(items)                   # [''b'', ''c'', ''d'', ''e'']
+
+print(items.index("d"))        # 2
+print(items.count("b"))        # 1
+print("c" in items)            # True - a linear scan
 ```
+
+The distinction that catches everyone:
+
+```python
+numbers = [3, 1, 2]
+
+result = numbers.sort()        # sorts IN PLACE and returns None
+print(result)                  # None
+print(numbers)                 # [1, 2, 3]
+
+numbers = [3, 1, 2]
+result = sorted(numbers)       # returns a NEW list
+print(result)                  # [1, 2, 3]
+print(numbers)                 # [3, 1, 2] - untouched
+```
+
+`sort()` rearranges in place and returns `None`. `sorted()` returns a new list and leaves the original alone. Assigning the result of `sort()` is a common bug, and it is silent until you use the `None`.
+
+The same applies to `reverse()` versus `reversed()`, and to `append`, `extend`, `insert`, `remove` and `clear` - all of which return `None` by convention, precisely so that chaining them looks wrong.
+
+Sorting by a computed key is the thing you will do most:
+
+```python
+people = [("Aisha", 29), ("Noshad", 35), ("Sam", 29)]
+
+print(sorted(people, key=lambda p: p[1]))
+# [(''Aisha'', 29), (''Sam'', 29), (''Noshad'', 35)]
+
+# Descending, and by two keys at once - age down, then name up.
+print(sorted(people, key=lambda p: (-p[1], p[0])))
+# [(''Noshad'', 35), (''Aisha'', 29), (''Sam'', 29)]
+
+from operator import itemgetter
+print(sorted(people, key=itemgetter(1, 0)))
+# [(''Aisha'', 29), (''Sam'', 29), (''Noshad'', 35)]
+```
+
+Python''s sort is **stable**: equal keys keep their original relative order. That is a guarantee, not an accident, and it means you can sort by a secondary key first and a primary key second to get a multi-level sort without writing a tuple key.
 
 ## Slicing
 
-`sequence[start:stop:step]`. The start is included, the stop is not - which is
-why `len` arithmetic works out without off-by-one corrections.
+```python
+letters = ["a", "b", "c", "d", "e", "f"]
+
+print(letters[1:4])            # [''b'', ''c'', ''d'']  - start inclusive, stop not
+print(letters[:3])             # [''a'', ''b'', ''c'']
+print(letters[3:])             # [''d'', ''e'', ''f'']
+print(letters[-2:])            # [''e'', ''f'']       - last two
+print(letters[::2])            # [''a'', ''c'', ''e'']  - every second
+print(letters[::-1])           # [''f'', ... ''a'']   - reversed
+print(letters[1:5:2])          # [''b'', ''d'']       - start, stop, step
+```
+
+Two properties make slicing safe in a way indexing is not:
 
 ```python
-letters = list("abcdefgh")
+letters = ["a", "b", "c", "d", "e", "f"]
 
-print(letters[2:5])      # c d e - stop is excluded
-print(letters[:3])       # from the beginning
-print(letters[5:])       # to the end
-print(letters[-2:])      # last two
-print(letters[::2])      # every second
-print(letters[::-1])     # reversed
+print(letters[10:20])          # [] - no IndexError, just empty
 
-# A slice of a list is a new list, so this is a shallow copy.
-copy = letters[:]
-copy.append("i")
-print(len(letters), len(copy))
+try:
+    print(letters[10])
+except IndexError as error:
+    print(type(error).__name__)            # IndexError
+```
 
-# Slices assign, too.
-numbers = [0, 1, 2, 3, 4, 5]
-numbers[1:3] = ["a", "b", "c"]
-print(numbers)
+A slice out of range gives you an empty list; an index out of range raises. That is why `line[:80]` is a safe truncation for a line of any length.
+
+A slice of a list is a **new list**, so this is a shallow copy:
+
+```python
+original = [[1, 2], [3, 4]]
+shallow = original[:]
+shallow.append([5, 6])
+print(len(original), len(shallow))      # 2 3 - the outer list is independent
+
+shallow[0].append(99)
+print(original[0])                      # [1, 2, 99] - the inner list is shared
+```
+
+Slices assign, too, and the slice does not have to be the same length as what replaces it:
+
+```python
+row = [1, 2, 3, 4, 5]
+row[1:3] = ["x", "y", "z"]
+print(row)                     # [1, ''x'', ''y'', ''z'', 4, 5]
+
+row[::2] = [0, 0, 0]           # extended slices DO need matching lengths
+print(row)                     # [0, ''x'', 0, ''z'', 0, 5] - indices 0, 2 and 4
+
+del row[1:3]
+print(row)                     # [0, ''z'', 0, 5]
 ```
 
 ## Tuples, and why immutability is useful
 
 ```python
 point = (3, 4)
-# point[0] = 5      # TypeError: tuples do not support item assignment
+print(point[0])                # 3
+# point[0] = 5                 # TypeError: tuples do not support item assignment
 
-# Unpacking works on any sequence, and * absorbs the middle.
-first, *middle, last = [10, 20, 30, 40, 50]
-print(first, middle, last)
-
-# Swapping needs no temporary, because the right side is built first.
-a, b = 1, 2
-a, b = b, a
-print(a, b)
-
-# Because a tuple cannot change, it can be a dict key. A list cannot.
-locations = {(0, 0): "origin", (3, 4): "corner"}
-print(locations[(3, 4)])
-
-# A named tuple gives the positions names without giving up immutability.
-from collections import namedtuple
-Point = namedtuple("Point", "x y")
-p = Point(3, 4)
-print(p, p.x, p.y)
+single = (3,)                  # the comma makes the tuple, not the brackets
+not_a_tuple = (3)
+print(type(single), type(not_a_tuple))     # <class ''tuple''> <class ''int''>
 ```
+
+Four things immutability buys you:
+
+**A tuple can be a dictionary key, a list cannot.**
+
+```python
+distances = {("London", "Leeds"): 196, ("Leeds", "York"): 25}
+print(distances[("London", "Leeds")])      # 196
+# {[1, 2]: "x"}                # TypeError: unhashable type: ''list''
+```
+
+**It can be shared without defensive copying.** If nobody can change it, nobody needs their own copy.
+
+**It signals intent.** A tuple says "these belong together and this is the shape", a list says "these are the same kind of thing and there may be any number". `(x, y)` and `[1, 2, 3, 4]` are different ideas.
+
+**It unpacks cleanly** - and unpacking works on any sequence:
+
+```python
+a, b, c = [1, 2, 3]
+first, *middle, last = [1, 2, 3, 4, 5]
+print(first, middle, last)     # 1 [2, 3, 4] 5
+
+x, y = 1, 2
+x, y = y, x                    # the right side is built first
+print(x, y)                    # 2 1
+
+for index, (name, age) in enumerate([("Aisha", 29), ("Sam", 29)]):
+    print(index, name, age)
+```
+
+A named tuple gives the positions names without giving up immutability:
+
+```python
+from typing import NamedTuple
+
+class Point(NamedTuple):
+    x: float
+    y: float
+    label: str = ""
+
+p = Point(3, 4, "origin-ish")
+print(p.x, p[0])               # 3 3 - works both ways
+print(p._replace(x=10))        # Point(x=10, y=4, label=''origin-ish'')
+print(tuple(p))                # (3, 4, ''origin-ish'')
+```
+
+`_replace` returns a new instance; the underscore means "not part of the field namespace", not "private".
 
 ## The copy that is not deep
 
-`copy()` and `[:]` duplicate the outer list only. Nested objects are still
-shared.
-
 ```python
-import copy as copy_module
+import copy
 
 grid = [[0, 0], [0, 0]]
-shallow = grid[:]
-shallow[0][0] = 9
-print("original after shallow copy:", grid)
 
-grid = [[0, 0], [0, 0]]
-deep = copy_module.deepcopy(grid)
-deep[0][0] = 9
-print("original after deep copy:  ", grid)
+wrong = grid * 2               # the SAME inner list, twice more
+print(wrong)                   # [[0, 0], [0, 0], [0, 0], [0, 0]]
+wrong[0][0] = 9
+print(wrong)                   # every row that shares that object changed
+# [[9, 0], [0, 0], [9, 0], [0, 0]]
+
+board = [[0, 0], [0, 0]]
+shallow = copy.copy(board)                 # new outer list, same inner lists
+deep = copy.deepcopy(board)                # new all the way down
+board[0][0] = 7
+print(shallow[0][0], deep[0][0])           # 7 0
 ```
 
-## What to take away
+The `* 2` trap has a famous cousin:
 
-- `sort()` mutates and returns `None`; `sorted()` returns a new list.
-- Slices exclude the stop index and produce a new sequence.
-- Unpacking with `*` collects the middle.
-- A tuple is hashable, so it can be a dict key.
-- Copying is shallow unless you ask for `deepcopy`.
+```python
+rows = [[0] * 3] * 2           # ONE row, referenced twice
+rows[0][0] = 1
+print(rows)                    # [[1, 0, 0], [1, 0, 0]]
+
+rows = [[0] * 3 for _ in range(2)]         # a new row each time
+rows[0][0] = 1
+print(rows)                    # [[1, 0, 0], [0, 0, 0]]
+```
+
+`[0] * 3` is fine, because integers are immutable and sharing them is harmless. `[row] * 2` is not, because the row is not.
+
+## A worked example
+
+```python
+from typing import NamedTuple
+
+class Reading(NamedTuple):
+    sensor: str
+    celsius: float
+    minute: int
+
+
+READINGS = [
+    Reading("kitchen", 21.5, 0), Reading("loft", 17.2, 0),
+    Reading("kitchen", 22.1, 5), Reading("loft", 16.9, 5),
+    Reading("kitchen", 23.8, 10), Reading("loft", 17.0, 10),
+    Reading("kitchen", 22.0, 15), Reading("loft", 18.4, 15),
+]
+
+# 1. Sorted copies, leaving READINGS alone - and a stable two-level sort.
+by_temperature = sorted(READINGS, key=lambda r: r.celsius, reverse=True)
+print(by_temperature[0])
+# Reading(sensor=''kitchen'', celsius=23.8, minute=10)
+
+by_sensor_then_time = sorted(READINGS, key=lambda r: (r.sensor, r.minute))
+print([r.minute for r in by_sensor_then_time[:4]])      # [0, 5, 10, 15]
+
+# 2. Slicing as a window: a three-reading moving average.
+kitchen = [r.celsius for r in READINGS if r.sensor == "kitchen"]
+print(kitchen)                                          # [21.5, 22.1, 23.8, 22.0]
+
+windows = [kitchen[i:i + 3] for i in range(len(kitchen) - 2)]
+print(windows)                                          # [[21.5, 22.1, 23.8], [22.1, 23.8, 22.0]]
+print([round(sum(w) / len(w), 2) for w in windows])      # [22.47, 22.63]
+
+# 3. Unpacking, where the shape is known.
+first, *rest = kitchen
+print(first, rest)                                      # 21.5 [22.1, 23.8, 22.0]
+
+coldest, *_, warmest = sorted(kitchen)
+print(coldest, warmest)                                 # 21.5 23.8
+
+# 4. A tuple as a dictionary key, which a list could not be.
+index = {(r.sensor, r.minute): r.celsius for r in READINGS}
+print(index[("loft", 10)])                              # 17.0
+
+# 5. The grid trap, avoided.
+hours, sensors = 3, 2
+grid = [[0.0] * hours for _ in range(sensors)]
+grid[0][0] = 21.5
+print(grid)                                             # [[21.5, 0.0, 0.0], [0.0, 0.0, 0.0]]
+
+# 6. And READINGS itself is untouched by any of it, because every
+#    operation above either sliced or built something new.
+print(len(READINGS), READINGS[0].sensor)                # 8 kitchen
+```
+
+Step two is the one to steal. `[xs[i:i + n] for i in range(len(xs) - n + 1)]` is the sliding window, and it works because a slice is a new list and a slice past the end is simply shorter rather than an error.
+
+## When to use which
+
+| Use | When |
+|---|---|
+| `list` | Any number of the same kind of thing, and it will change |
+| `tuple` | A fixed shape, a dict key, or a value that must not change |
+| `NamedTuple` | A tuple whose positions deserve names |
+| `deque` | Adding and removing at both ends - `O(1)` instead of `O(n)` |
+| `array` | Millions of numbers of one type, and memory matters |
+| `set` | Membership tests and deduplication |
+
+```python
+from collections import deque
+
+queue = deque([1, 2, 3])
+queue.appendleft(0)            # O(1); list.insert(0, x) is O(n)
+print(queue.popleft(), queue)  # 0 deque([1, 2, 3])
+```
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| A sorted list became `None` | `sort()` returns `None`; use `sorted()` |
+| Changing one row changed every row | `[[0] * n] * m` shares one inner list |
+| An inner list changed after copying | A slice copy is shallow; use `deepcopy` |
+| `TypeError: unhashable type: ''list''` | A list used as a dict key or set member |
+| `(3)` was not a tuple | The comma makes it: `(3,)` |
+| `IndexError` on the last element | `len(xs)` is one past the end; use `xs[-1]` |
+| Removing items in a loop skipped some | Build a new list instead of mutating while iterating |
+| Inserting at the front is slow | `list.insert(0, x)` is `O(n)`; use `deque` |
+
+## A check you can run
+
+```python
+rows = [[0] * 3] * 3
+rows[0][0] = 1
+print(rows)
+
+rows = [[0] * 3 for _ in range(3)]
+rows[0][0] = 1
+print(rows)
+```
+
+One of those prints three identical rows and the other prints one changed row. The characters differ by about ten. If you can explain which is which without running it, you understand references in Python - and if you cannot, this is the five seconds that will fix it permanently.
 ',
-   'Mutable against immutable, slicing, unpacking, and the copy that is not deep.',
-   2, 428,
-   '55555555-5555-4555-8555-555555555555',
+   'Mutable against immutable, slicing, unpacking, and the copy that is not deep.', 9, 1737,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -682,111 +1434,319 @@ VALUES
    'markdown',
    '# Dictionaries and Sets
 
-A dict maps keys to values with roughly constant-time lookup. A set is the
-same machinery without the values: membership and uniqueness.
+A dict maps keys to values; a set holds unique values. Both are hash tables, which is why membership is roughly constant time and why the keys must be hashable. Most Python that handles real data is mostly dict manipulation, so the methods are worth knowing properly.
+
+## Reading without raising
 
 ```python
-learner = {"name": "Aisha", "score": 92, "level": "advanced"}
+scores = {"aisha": 91, "noshad": 78}
 
-print(learner["name"])
-print(learner.get("email"))                    # None rather than KeyError
-print(learner.get("email", "not given"))       # a default of your choosing
+print(scores["aisha"])              # 91
+print(scores.get("sam"))            # None - no KeyError
+print(scores.get("sam", 0))         # 0 - with a default
 
-learner["email"] = "aisha@example.test"
-del learner["level"]
-print(learner)
+try:
+    scores["sam"]
+except KeyError as error:
+    print(type(error).__name__)     # KeyError
 
-# Since 3.7 a dict keeps insertion order, and that is a language guarantee.
-for key, value in learner.items():
-    print(f"  {key}: {value}")
+print("sam" in scores)              # False - membership tests keys
+print(scores.setdefault("sam", 0))  # 0 - and INSERTS it
+print(scores)                       # {''aisha'': 91, ''noshad'': 78, ''sam'': 0}
 ```
+
+`get` reads without inserting; `setdefault` reads and inserts if absent. Mixing them up produces a dict that quietly grows keys nobody asked for.
+
+Since 3.7 a dict keeps insertion order, and that is a language guarantee.
 
 ## The three views
 
-`keys()`, `values()` and `items()` are live views, not copies. They reflect
-later changes and they do not cost a duplicate of the data.
-
 ```python
-scores = {"Aisha": 92, "Kenji": 78, "Lena": 85}
+scores = {"aisha": 91, "noshad": 78, "sam": 64}
 
-view = scores.keys()
-scores["Sam"] = 67
-print(view)          # Sam is already there
-
-# Sorting a dict by its values: the key= function decides what to compare.
-ranked = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
-for name, score in ranked:
-    print(f"{name:6} {score}")
-
-# Merging. | makes a new dict; the right side wins on conflict.
-defaults = {"theme": "light", "font": "serif"}
-chosen = {"theme": "dark"}
-print(defaults | chosen)
+print(list(scores.keys()))          # [''aisha'', ''noshad'', ''sam'']
+print(list(scores.values()))        # [91, 78, 64]
+print(list(scores.items()))         # [(''aisha'', 91), ...]
 ```
 
-## setdefault and Counter
-
-Counting or grouping with a plain dict needs a "first time?" check every
-round. The standard library removes it.
+These are **views**, not copies - they reflect later changes, and they are cheap:
 
 ```python
-words = "the quick brown fox jumps over the lazy dog the end".split()
+scores = {"aisha": 91, "noshad": 78, "sam": 64}
+
+view = scores.keys()
+scores["leah"] = 55
+print(list(view))                   # [''aisha'', ''noshad'', ''sam'', ''leah'']
+```
+
+A `keys()` view also supports set operations, which is a genuinely useful and little-known trick:
+
+```python
+old = {"a": 1, "b": 2, "c": 3}
+new = {"b": 20, "c": 3, "d": 4}
+
+print(old.keys() - new.keys())      # {''a''}        - removed
+print(new.keys() - old.keys())      # {''d''}        - added
+print(old.keys() & new.keys())      # {''b'', ''c''}   - in both
+print({k for k in old.keys() & new.keys() if old[k] != new[k]})   # {''b''} - changed
+```
+
+Four lines, and you have a complete diff of two dictionaries.
+
+Sorting by value, where the `key=` function decides what to compare:
+
+```python
+scores = {"aisha": 91, "noshad": 78, "sam": 64}
+
+print(sorted(scores.items(), key=lambda kv: kv[1], reverse=True))
+# [(''aisha'', 91), (''noshad'', 78), (''sam'', 64)]
+
+from operator import itemgetter
+print(dict(sorted(scores.items(), key=itemgetter(1))))
+# {''sam'': 64, ''noshad'': 78, ''aisha'': 91}
+```
+
+Merging - `|` makes a new dict and the right side wins on conflict:
+
+```python
+defaults = {"host": "localhost", "port": 3306}
+overrides = {"port": 5432, "user": "app"}
+
+print(defaults | overrides)         # {''host'': ''localhost'', ''port'': 5432, ''user'': ''app''}
+print({**defaults, **overrides})    # the same, older syntax
+merged = dict(defaults)
+merged.update(overrides)            # in place, returns None
+print(merged == defaults | overrides)          # True
+```
+
+## setdefault, defaultdict and Counter
+
+Grouping is the single most common dict operation, and there are three ways to write it.
+
+```python
+from collections import defaultdict, Counter
+
+words = ["apple", "avocado", "banana", "blueberry", "apricot", "cherry"]
 
 # The manual way.
-counts = {}
+grouped = {}
 for word in words:
-    counts[word] = counts.get(word, 0) + 1
-print(counts["the"])
+    initial = word[0]
+    if initial not in grouped:
+        grouped[initial] = []
+    grouped[initial].append(word)
 
-# Grouping by a computed key.
-by_length = {}
+# setdefault: one line, and it returns the list it just ensured exists.
+grouped = {}
 for word in words:
-    by_length.setdefault(len(word), []).append(word)
-print(by_length)
+    grouped.setdefault(word[0], []).append(word)
 
-# Or let the library do it.
-from collections import Counter, defaultdict
-print(Counter(words).most_common(3))
-
+# defaultdict: the factory is called for any missing key.
 grouped = defaultdict(list)
 for word in words:
     grouped[word[0]].append(word)
+
 print(dict(grouped))
+# {''a'': [''apple'', ''avocado'', ''apricot''], ''b'': [''banana'', ''blueberry''], ''c'': [''cherry'']}
+```
+
+The `defaultdict` catch: *reading* a missing key creates it.
+
+```python
+from collections import defaultdict
+
+counts = defaultdict(int)
+print(counts["never-seen"])         # 0
+print(dict(counts))                 # {''never-seen'': 0} - it exists now
+```
+
+That is fine while building and a nuisance afterwards, so convert to a plain `dict` when you are done, as above.
+
+`Counter` is a dict subclass for the counting case:
+
+```python
+from collections import Counter
+
+text = "the quick brown fox jumps over the lazy dog the end"
+counts = Counter(text.split())
+
+print(counts["the"])                # 3
+print(counts["absent"])             # 0 - no KeyError, and no insertion
+print(counts.most_common(2))        # [(''the'', 3), (''quick'', 1)]
+print(sum(counts.values()))         # 11
+
+print(Counter("aabbc") + Counter("bcc"))       # Counter({''b'': 3, ''c'': 3, ''a'': 2})
+print(Counter("aabbc") - Counter("bcc"))       # Counter({''a'': 2, ''b'': 1})
 ```
 
 ## Sets
 
 ```python
 a = {1, 2, 3, 4}
-b = {3, 4, 5, 6}
+b = {3, 4, 5}
 
-print(a | b)   # union
-print(a & b)   # intersection
-print(a - b)   # difference
-print(a ^ b)   # in one or the other, not both
-
-# Membership in a set is roughly constant time; in a list it is a scan.
-print(3 in a)
-
-# Deduplicating while keeping order: dict keys are unique and ordered.
-items = ["b", "a", "b", "c", "a"]
-print(list(dict.fromkeys(items)))
-
-# An empty set needs set(), because {} is an empty dict.
-print(type({}).__name__, type(set()).__name__)
+print(a | b)                        # {1, 2, 3, 4, 5}  union
+print(a & b)                        # {3, 4}           intersection
+print(a - b)                        # {1, 2}           difference
+print(a ^ b)                        # {1, 2, 5}        symmetric difference
+print(a <= {1, 2, 3, 4, 5})         # True             subset
+print(a.isdisjoint({9, 10}))        # True
 ```
 
-## What to take away
+Membership in a set is roughly constant time; in a list it is a scan:
 
-- `get` avoids `KeyError`; `setdefault` avoids the "first time?" branch.
-- Views are live, not snapshots.
-- `Counter` and `defaultdict` exist so you do not hand-roll them.
-- Set operations are the readable way to express overlap and difference.
-- `{}` is a dict; the empty set is `set()`.
+```python
+import time
+
+values = list(range(200000))
+as_set = set(values)
+
+start = time.perf_counter()
+199999 in values
+list_time = time.perf_counter() - start
+
+start = time.perf_counter()
+199999 in as_set
+set_time = time.perf_counter() - start
+
+print("set is faster:", set_time < list_time)
+```
+
+Two details that trip people up:
+
+```python
+empty = set()                       # an empty set needs set()
+not_a_set = {}                      # this is an empty DICT
+print(type(empty), type(not_a_set))
+
+print({3, 1, 2})                    # {1, 2, 3} - sets have no order
+# {[1, 2]}                          # TypeError: unhashable type: ''list''
+print({(1, 2), (3, 4)})             # tuples are fine - they are hashable
+```
+
+Deduplicating while keeping order: dict keys are unique **and** ordered, so this is the idiom:
+
+```python
+items = ["b", "a", "b", "c", "a"]
+print(list(dict.fromkeys(items)))   # [''b'', ''a'', ''c'']
+print(sorted(set(items)))           # [''a'', ''b'', ''c''] - if order can change
+```
+
+## What can be a key
+
+A key must be **hashable**, which in practice means immutable all the way down.
+
+```python
+print(hash("abc") == hash("abc"))              # True
+print(hash((1, 2)) == hash((1, 2)))            # True
+
+try:
+    {[1, 2]: "x"}
+except TypeError as error:
+    print(type(error).__name__)                # TypeError
+
+print({(1, 2): "ok", frozenset({3, 4}): "also ok"})
+```
+
+Two keys that compare equal must hash equal, which has one surprising consequence:
+
+```python
+d = {1: "int", 1.0: "float", True: "bool"}
+print(d)                                       # {1: ''bool''}
+print(1 == 1.0 == True)                        # True
+```
+
+All three are equal, so they are one key - and the *last* value wins while the *first* key is kept. This matters when keys come from mixed-type data such as JSON.
+
+## A worked example
+
+```python
+from collections import Counter, defaultdict
+
+EVENTS = [
+    {"user": "aisha", "action": "view", "page": "/courses"},
+    {"user": "noshad", "action": "view", "page": "/courses"},
+    {"user": "aisha", "action": "enrol", "page": "/courses/css"},
+    {"user": "sam", "action": "view", "page": "/about"},
+    {"user": "aisha", "action": "view", "page": "/courses/css"},
+    {"user": "noshad", "action": "enrol", "page": "/courses/js"},
+    {"user": "sam", "action": "view", "page": "/courses"},
+]
+
+# 1. Count, the direct way.
+by_action = Counter(e["action"] for e in EVENTS)
+print(by_action)                    # Counter({''view'': 5, ''enrol'': 2})
+
+# 2. Group, with defaultdict.
+pages_by_user = defaultdict(set)
+for event in EVENTS:
+    pages_by_user[event["user"]].add(event["page"])
+
+for user, pages in sorted(pages_by_user.items()):
+    print(f"{user:<8} {len(pages)} page(s): {'', ''.join(sorted(pages))}")
+# aisha    2 page(s): /courses, /courses/css
+# noshad   2 page(s): /courses, /courses/js
+# sam      2 page(s): /about, /courses
+
+# 3. Set algebra answers questions a loop would need a flag for.
+viewers = {e["user"] for e in EVENTS if e["action"] == "view"}
+enrollers = {e["user"] for e in EVENTS if e["action"] == "enrol"}
+
+print("viewed but never enrolled:", sorted(viewers - enrollers))     # [''sam'']
+print("did both:", sorted(viewers & enrollers))                      # [''aisha'', ''noshad'']
+print("anyone at all:", sorted(viewers | enrollers))
+
+# 4. The most popular page, and a tie-break that is deterministic.
+page_counts = Counter(e["page"] for e in EVENTS)
+best = max(page_counts.items(), key=lambda kv: (kv[1], kv[0]))
+print("most visited:", best)                                         # (''/courses'', 3)
+
+# 5. A diff between two snapshots, using keys() as a set.
+before = {"aisha": 2, "noshad": 1, "sam": 1}
+after = {"aisha": 3, "sam": 1, "leah": 1}
+
+print("left:   ", sorted(before.keys() - after.keys()))              # [''noshad'']
+print("joined: ", sorted(after.keys() - before.keys()))              # [''leah'']
+print("changed:", sorted(k for k in before.keys() & after.keys() if before[k] != after[k]))
+# [''aisha'']
+
+# 6. Inverting a mapping - only safe when the values are unique.
+codes = {"gb": 44, "us": 1, "fr": 33}
+print({v: k for k, v in codes.items()})         # {44: ''gb'', 1: ''us'', 33: ''fr''}
+```
+
+Step five is the one worth keeping. A dictionary diff written with loops and flags takes fifteen lines and has an off-by-one in it; written with `keys()` set algebra it takes three and cannot.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `KeyError` on a key you expected | Use `get` with a default, or check with `in` |
+| A dict grew keys nobody set | `defaultdict` creates on read; or `setdefault` where `get` was meant |
+| `TypeError: unhashable type: ''list''` | A mutable value used as a key or set member |
+| `{}` was not an empty set | It is an empty dict; use `set()` |
+| `1` and `True` collided as keys | They compare equal, so they are one key |
+| Set order changed between runs | Sets are unordered; sort when you print |
+| `update()` returned `None` | It mutates in place; use `a | b` for a new dict |
+| Membership tests are slow | A list scan; build a set once and test against it |
+
+## A check you can run
+
+```python
+from collections import defaultdict
+
+counts = defaultdict(int)
+counts["a"] += 1
+
+if counts["b"] > 0:
+    print("b happened")
+
+print(dict(counts))
+```
+
+It prints `{''a'': 1, ''b'': 0}`. The `if` statement, which only *read* `b`, created it. In a long-running process that checks arbitrary user-supplied keys, that is an unbounded memory leak with no obvious cause - and the fix is to read with `counts.get("b", 0)` instead.
 ',
-   'Lookup without KeyError, live views, Counter and defaultdict, and set algebra.',
-   2, 425,
-   '55555555-5555-4555-8555-555555555555',
+   'Lookup without KeyError, live views, Counter and defaultdict, and set algebra.', 8, 1517,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -805,99 +1765,273 @@ VALUES
    'markdown',
    '# Strings and Formatting
 
-Strings are immutable sequences of characters. Every method that looks like it
-edits one actually returns a new string.
+A Python string is an immutable sequence of Unicode code points. Both halves of that sentence have consequences: immutability decides how you build strings efficiently, and Unicode decides what `len` means.
+
+## Immutable, and what that costs
 
 ```python
-title = "  the python course  "
-
-print(repr(title.strip()))
-print(title.strip().title())
-print(title.replace("python", "Python").strip())
-
-# The original is untouched, because it cannot be touched.
-print(repr(title))
-
-# Immutability is why building a string in a loop with += is wasteful:
-# every round allocates a whole new string. join does it in one pass.
-parts = ["a", "b", "c", "d"]
-print("-".join(parts))
+greeting = "hello"
+upper = greeting.upper()
+print(greeting, upper)         # hello HELLO - the original is untouched
+# greeting[0] = "H"            # TypeError: ''str'' object does not support
+                               # item assignment
 ```
+
+Every string method returns a new string. That is why building one in a loop with `+=` is wasteful - each round allocates a whole new string and copies everything so far:
+
+```python
+import time
+
+words = ["word"] * 20000
+
+start = time.perf_counter()
+out = ""
+for w in words:
+    out += w                   # quadratic: copies the accumulated string
+slow = time.perf_counter() - start
+
+start = time.perf_counter()
+out = "".join(words)           # one pass, one allocation
+fast = time.perf_counter() - start
+
+print(len(out))
+print("join is faster:", fast < slow)
+```
+
+CPython has an optimisation that sometimes makes `+=` on strings fast, but it only applies when the string has exactly one reference, so it disappears the moment the code changes slightly. `join` is always right.
 
 ## f-strings
 
-An f-string evaluates expressions inline. The mini-language after the colon
-handles width, alignment, precision and thousands separators.
+```python
+name = "Aisha"
+score = 0.8637
+count = 7
+
+print(f"{name} scored {score:.1%} over {count} attempts")
+# Aisha scored 86.4% over 7 attempts
+
+print(f"{score:.2f}")          # 0.86    - two decimal places
+print(f"{count:03d}")          # 007     - zero-padded
+print(f"{count:>6}|")          # ''     7|'' - right-aligned in 6
+print(f"{name:<10}|")          # ''Aisha     |'' - left-aligned
+print(f"{name:^11}|")          # ''   Aisha   |'' - centred
+print(f"{1234567:,}")          # 1,234,567 - thousands separators
+print(f"{1234567:_}")          # 1_234_567
+print(f"{255:#x} {255:#b}")    # 0xff 0b11111111
+print(f"{3.14159:>10.2f}|")    # ''      3.14|'' - align and precision together
+```
+
+The `=` suffix prints the expression as well as the value, which is a debugging shortcut worth knowing:
 
 ```python
-name, score, ratio = "Aisha", 92, 0.8567
-
-print(f"{name} scored {score}")
-print(f"{score / 100:.1%}")           # 92.0%
-print(f"{ratio:.2f}")                 # 0.86
-print(f"{1234567:,}")                 # 1,234,567
-print(f"{score:>8}|{score:<8}|{score:^8}|")
-print(f"{name:.<12}{score:>4}")       # dot leader
-
-# = prints the expression as well as the value, which is a debugging shortcut.
-print(f"{score * 2 = }")
-
-# Any expression is allowed, including a call.
-print(f"{name.upper()} has {len(name)} letters")
+total = 42
+print(f"{total=}")             # total=42
+print(f"{total * 2=}")         # total * 2=84
 ```
+
+Any expression is allowed, including a call, and the width can itself be a variable:
+
+```python
+name = "Aisha"
+width = 12
+print(f"{name.upper():>{width}}|")         # ''       AISHA|''
+print(f"{sum([1, 2, 3])}")                 # 6
+
+from datetime import date
+print(f"{date(2026, 10, 7):%d %B %Y}")     # 07 October 2026
+```
+
+Two gotchas. A literal brace is doubled: `f"{{literal}}"` prints `{literal}`. And in Python 3.11 an f-string cannot contain the same quote character as the one that delimits it, so `f"{d["key"]}"` is a syntax error - use different quotes, or pull the lookup out into a variable.
+
+## The three formatting styles, and which to use
+
+```python
+name, score = "Aisha", 0.8637
+
+print(f"{name}: {score:.1%}")                              # f-string
+print("{}: {:.1%}".format(name, score))                    # str.format
+print("%s: %.1f%%" % (name, score * 100))                  # percent, legacy
+```
+
+Use f-strings. The exceptions are a template that must be stored or translated - where `str.format` lets you keep the string separate from the values - and logging, where the percent style is genuinely better:
+
+```python
+import logging
+logging.getLogger(__name__).info("saved %s rows for %s", 12, "aisha")
+```
+
+The logging call defers formatting until the message is actually emitted, so a debug line in a hot loop costs almost nothing when debug logging is off. An f-string there would be formatted every time regardless.
 
 ## Splitting and joining
 
 ```python
-line = "aisha,92,advanced"
-name, score, level = line.split(",")
-print(name, int(score) + 1, level)
+line = "  aisha , noshad ,sam  "
 
-# split() with no argument splits on any run of whitespace and drops empties -
-# which is what you want for prose, and not what split(" ") does.
-messy = "  the   quick   brown  "
-print(messy.split())
-print(messy.split(" "))
+print(line.split(","))              # [''  aisha '', '' noshad '', ''sam  '']
+print([p.strip() for p in line.split(",")])    # [''aisha'', ''noshad'', ''sam'']
 
-# partition splits once and always returns three parts, so it never raises.
-key, sep, value = "timeout=30".partition("=")
-print(repr(key), repr(sep), repr(value))
-print("no-separator-here".partition("="))
+text = "one  two   three"
+print(text.split())                 # [''one'', ''two'', ''three'']
+print(text.split(" "))              # [''one'', '''', ''two'', '''', '''', ''three'']
 ```
+
+`split()` with no argument splits on any run of whitespace and drops empties - which is what you want for prose, and not what `split(" ")` does.
+
+```python
+header = "Content-Type: text/html; charset=utf-8"
+
+key, sep, value = header.partition(":")
+print(repr(key), repr(sep), repr(value))
+# ''Content-Type'' '':'' '' text/html; charset=utf-8''
+
+missing = "no colon here"
+print(missing.partition(":"))       # (''no colon here'', '''', '''')
+```
+
+`partition` splits once and always returns three parts, so it never raises and never needs a length check. `rpartition` does the same from the right, which is how you split a filename from its extension without a regular expression.
+
+```python
+print("a,b,c".split(",", 1))        # [''a'', ''b,c''] - at most one split
+print("a,b,c".rsplit(",", 1))       # [''a,b'', ''c''] - from the right
+```
+
+The other methods you will reach for:
+
+```python
+path = "  /var/log/app.log  "
+print(path.strip())                 # ''/var/log/app.log''
+print(path.strip().removeprefix("/var/"))      # ''log/app.log''
+print(path.strip().removesuffix(".log"))       # ''/var/log/app''
+print("Hello".startswith(("He", "Ho")))        # True - a tuple of options
+print("a-b-c".replace("-", "+", 1))            # ''a+b-c'' - count limits it
+print("Hello World".casefold())                # ''hello world'' - for comparing
+```
+
+Use `casefold()` rather than `lower()` when comparing strings for equality across languages; it handles cases like the German sharp s that `lower()` does not.
 
 ## Characters, bytes and encodings
 
-A `str` is text. A `bytes` is data. Converting between them requires an
-encoding, and Python refuses to guess.
+A string is code points. A file, a socket and a database column hold bytes. `encode` and `decode` are the border between them, and crossing it implicitly is where mojibake comes from.
 
 ```python
-text = "héllo 世界"
-print(len(text), "characters")
+text = "cafe" + chr(0x301) + " nai" + chr(0x308) + "ve"   # combining accents
+simple = "caf" + chr(0xe9)                                 # precomposed e-acute
 
-data = text.encode("utf-8")
-print(len(data), "bytes")
-print(data)
+print(len(simple))                       # 4 - one code point for the accent
+utf8 = simple.encode("utf-8")
+print(len(utf8))                         # 5 - the accent takes TWO bytes
+print(list(utf8))                        # [99, 97, 102, 195, 169]
 
-print(data.decode("utf-8"))
+print(utf8.decode("utf-8"))              # café - back to a string
+print(utf8.decode("latin-1"))            # cafÃ© - mojibake, silently
 
-# Decoding with the wrong codec is an error rather than a silent mess.
 try:
-    data.decode("ascii")
+    utf8.decode("ascii")
 except UnicodeDecodeError as error:
-    print("UnicodeDecodeError:", error.reason)
+    print(type(error).__name__)          # UnicodeDecodeError
 ```
 
-## What to take away
+Decoding with the wrong codec is sometimes an error and sometimes a silent mess - `latin-1` can decode any byte sequence, so it never complains and is never right for UTF-8 data. Always name the encoding explicitly when you open a file:
 
-- Strings are immutable; every method returns a new one.
-- Build with `join`, not with `+=` in a loop.
-- The f-string format spec covers alignment, precision and separators.
-- `split()` and `split(" ")` are not the same function call.
-- `str` is text, `bytes` is data, and the encoding must be stated.
+```python
+# open(path, encoding="utf-8")   - not the platform default
+```
+
+The platform default differs between Linux and Windows, which is how a program that works on one developer''s machine produces garbage on another''s.
+
+Normalisation matters when comparing text from different sources:
+
+```python
+import unicodedata
+
+composed = "caf" + chr(0xe9)                     # one code point
+decomposed = "cafe" + chr(0x301)                 # ''e'' plus combining accent
+
+print(composed == decomposed)                    # False - different code points
+print(len(composed), len(decomposed))            # 4 5
+print(unicodedata.normalize("NFC", decomposed) == composed)   # True
+```
+
+Two strings that render identically can compare unequal. Normalise to NFC before storing or comparing user-entered text.
+
+## A worked example
+
+```python
+import unicodedata
+
+RAW = """
+2026-10-01 | Aisha Khan   | aisha@example.com   | 1999
+2026-10-02 | Noshad Alam  | NOSHAD@EXAMPLE.COM  | 450
+2026-10-02 | Sam O''Neill  | sam@example.com     | 1299
+bad line with no pipes
+2026-10-03 | Leah Brown   | leah@example.com    | not-a-number
+"""
+
+
+def parse(line):
+    """Return a record, or None, without raising on malformed input."""
+    parts = [p.strip() for p in line.split("|")]
+    if len(parts) != 4:
+        return None
+    day, name, email, amount = parts
+    if not amount.isdigit():
+        return None
+    return {
+        "day": day,
+        "name": unicodedata.normalize("NFC", name),
+        "email": email.casefold(),
+        "pence": int(amount),
+    }
+
+
+records = [r for r in (parse(line) for line in RAW.strip().splitlines()) if r]
+
+for r in records:
+    print(f"{r[''day'']}  {r[''name'']:<14} {r[''email'']:<22} {r[''pence''] / 100:>8,.2f}")
+
+print("-" * 56)
+total = sum(r["pence"] for r in records)
+print(f"{''total'':<38} {total / 100:>8,.2f}")
+print(f"{len(records)} of {len(RAW.strip().splitlines())} lines parsed")
+
+# The two lines that did not parse are the point: partition and isdigit
+# let the parser reject them without a try block and without a regex.
+print()
+print("emails, deduplicated and sorted:")
+print(", ".join(sorted({r["email"] for r in records})))
+
+# And a report line built with join rather than +=.
+columns = ["day", "name", "email", "pence"]
+print(" | ".join(c.upper().center(10) for c in columns))
+```
+
+Three habits are on display. `isdigit()` validates before `int()` rather than catching the exception afterwards - cheaper, and the intent is clearer. `casefold()` normalises the email so two spellings of the same address deduplicate. And the final report line uses `join` over a generator rather than accumulating with `+=`.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Building a string in a loop is slow | `+=` is quadratic; use `join` |
+| `UnicodeDecodeError` reading a file | Wrong encoding, or no `encoding=` given |
+| Text came out as `Ã©` instead of an accent | UTF-8 bytes decoded as latin-1 |
+| Two identical-looking strings are unequal | Different normalisation; use NFC |
+| `len` disagrees with the visible characters | Code points are not grapheme clusters |
+| `split(" ")` produced empty strings | Use `split()` for runs of whitespace |
+| `f"{d["k"]}"` is a syntax error | Nested same quotes; use different ones |
+| A debug log line is slow when debug is off | An f-string formats eagerly; pass args to the logger |
+
+## A check you can run
+
+```python
+s1 = "caf" + chr(0xe9)
+s2 = "cafe" + chr(0x301)
+print(s1, s2)
+print(s1 == s2, len(s1), len(s2))
+```
+
+Both print the same word. They are not equal, and their lengths differ. Any time you compare, deduplicate or use as a dictionary key text that came from a user, a web form or a file, that difference is waiting - and `unicodedata.normalize("NFC", text)` at the boundary is the one line that removes it.
 ',
-   'Immutability, f-strings and their format spec, splitting, and encodings.',
-   2, 361,
-   '55555555-5555-4555-8555-555555555555',
+   'Immutability, f-strings and their format spec, splitting, and encodings.', 7, 1485,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -916,109 +2050,292 @@ VALUES
    'markdown',
    '# Comprehensions and the Iterator Protocol
 
-A comprehension builds a collection from an iterable in one expression. It is
-not merely shorter than the loop - it says "this produces a list" up front,
-where a loop only reveals that at the end.
+A comprehension builds a collection from an iterable in one expression. The iterator protocol is what makes `for` work on anything at all. They are the same subject, because a comprehension is a `for` loop with the bookkeeping removed.
+
+## Build, filter, and transform
 
 ```python
-scores = [92, 78, 85, 41, 67]
+numbers = [1, 2, 3, 4, 5, 6]
 
-# Build, filter, and transform.
-print([s for s in scores if s >= 80])
-print([s / 100 for s in scores])
-print([("pass" if s >= 60 else "fail") for s in scores])
-
-# The same syntax builds dicts and sets.
-names = ["Aisha", "Kenji", "Lena"]
-print({name: len(name) for name in names})
-print({len(name) for name in names})
-
-# Two fors nest, outer first - the same order you would write the loops in.
-pairs = [(x, y) for x in "AB" for y in (1, 2)]
-print(pairs)
+print([n * n for n in numbers])                     # [1, 4, 9, 16, 25, 36]
+print([n for n in numbers if n % 2 == 0])           # [2, 4, 6]
+print([n * n for n in numbers if n % 2 == 0])       # [4, 16, 36]
+print([n if n % 2 else 0 for n in numbers])         # [1, 0, 3, 0, 5, 0]
 ```
+
+Note where the conditions go. A filter (`if` with no `else`) goes at the **end**, after the `for`. A conditional expression (`if/else`) goes at the **front**, because it is part of the thing being built rather than a decision about whether to build it. Getting these the wrong way round is a syntax error, which is merciful.
+
+The same syntax builds dicts and sets:
+
+```python
+words = ["apple", "banana", "cherry"]
+
+print({w: len(w) for w in words})          # {''apple'': 5, ''banana'': 6, ''cherry'': 6}
+print({len(w) for w in words})             # {5, 6}
+print({w[0] for w in words})               # {''a'', ''b'', ''c''}, in some order
+```
+
+And a generator expression, which looks the same with round brackets and builds nothing until asked:
+
+```python
+squares = (n * n for n in range(1000000))
+print(type(squares))                       # <class ''generator''>
+print(sum(squares))                        # computed one at a time
+```
+
+When a generator expression is the only argument to a function, the brackets can be dropped: `sum(n * n for n in numbers)`.
+
+Two `for` clauses nest, outer first - the same order you would write the loops in:
+
+```python
+pairs = [(x, y) for x in "ab" for y in [1, 2]]
+print(pairs)                               # [(''a'', 1), (''a'', 2), (''b'', 1), (''b'', 2)]
+
+grid = [[0] * 3 for _ in range(2)]         # a new row each time
+print(grid)                                # [[0, 0, 0], [0, 0, 0]]
+
+matrix = [[1, 2], [3, 4], [5, 6]]
+print([n for row in matrix for n in row])  # [1, 2, 3, 4, 5, 6] - flattened
+print([list(r) for r in zip(*matrix)])     # [[1, 3, 5], [2, 4, 6]] - transposed
+```
+
+The flatten reads left to right exactly like the nested loop it replaces: `for row in matrix` then `for n in row`. The common mistake is writing the clauses the other way round, which raises `NameError` because `row` has not been bound yet.
+
+## When not to use one
+
+A comprehension is for *building a collection from an iterable*. It is not a general-purpose loop.
+
+```python
+numbers = [1, 2, 3]
+
+# No. A comprehension built purely for side effects, discarding the list.
+# [print(n) for n in numbers]
+
+# Yes.
+for n in numbers:
+    print(n)
+```
+
+And once it needs two conditions, a transformation and a nested loop, it has stopped being readable:
+
+```python
+# Hard to read.
+result = [transform(x) for row in data for x in row if x > 0 if x % 2 == 0]
+
+# Easier, and no slower in any way that matters.
+result = []
+for row in data:
+    for x in row:
+        if x > 0 and x % 2 == 0:
+            result.append(transform(x))
+```
+
+The rule of thumb: if it does not fit on one line at a comfortable width, or if you had to read it twice, write the loop.
 
 ## What iteration actually is
 
-`for` does not know about lists. It asks for an iterator, then calls `next` on
-it until `StopIteration`. Anything that answers those calls works in a `for`.
+`for x in thing` does three things: it calls `iter(thing)` to get an iterator, it calls `next()` on that iterator repeatedly, and it stops when `next()` raises `StopIteration`.
 
 ```python
 numbers = [10, 20, 30]
+iterator = iter(numbers)
 
-it = iter(numbers)
-print(next(it), next(it), next(it))
+print(next(iterator))               # 10
+print(next(iterator))               # 20
+print(next(iterator))               # 30
+
 try:
-    next(it)
+    next(iterator)
 except StopIteration:
-    print("StopIteration - that is how for knows to stop")
+    print("exhausted")
 
-print("---")
+print(next(iter(numbers), "default"))         # 10 - a default instead of raising
+print(next(iter([]), "default"))              # ''default''
+```
 
-# Implementing the protocol makes your own type work everywhere a list does.
+Implementing the protocol makes your own type work everywhere a list does:
+
+```python
 class Countdown:
     def __init__(self, start):
         self.start = start
 
     def __iter__(self):
+        # Returning a fresh generator each time means this object can be
+        # iterated more than once - which an iterator cannot be.
         current = self.start
         while current > 0:
             yield current
             current -= 1
 
-print(list(Countdown(4)))
-print(max(Countdown(4)))
-first, *rest = Countdown(4)
-print(first, rest)
+
+c = Countdown(4)
+print(list(c))                      # [4, 3, 2, 1]
+print(list(c))                      # [4, 3, 2, 1] - again, because __iter__
+                                    # returns a NEW generator
+print(max(c), sum(c))               # 4 10
+print(3 in c)                       # True - `in` falls back to iteration
+a, b, *rest = c
+print(a, b, rest)                   # 4 3 [2, 1]
 ```
+
+One `__iter__` method and the object works with `list`, `max`, `sum`, `in`, unpacking, `sorted`, `zip`, and every comprehension.
 
 ## An iterator is consumed once
 
-This surprises people who expect an iterator to behave like a list.
+```python
+numbers = [1, 2, 3]
+squares = (n * n for n in numbers)
+
+print(list(squares))                # [1, 4, 9]
+print(list(squares))                # [] - already exhausted
+print(sum(squares))                 # 0
+```
+
+That empty list on the second pass is silent, which is what makes it dangerous. `zip`, `map`, `filter`, `enumerate`, `reversed` and every generator behave the same way, for the same reason:
 
 ```python
-squares = (x * x for x in range(5))     # a generator expression
-
-print(list(squares))
-print(list(squares))    # empty: it was used up
-
-print("---")
-
-# zip, map and filter are iterators too, for the same reason.
-paired = zip([1, 2, 3], "abc")
-print(list(paired))
-print(list(paired))
+pairs = zip([1, 2], "ab")
+print(list(pairs))                  # [(1, ''a''), (2, ''b'')]
+print(list(pairs))                  # []
 ```
+
+If you need the values twice, materialise them once with `list()`.
 
 ## Iterating while mutating
 
-Changing a collection during iteration produces skipped elements, because the
-iterator is tracking a position that keeps moving underneath it.
-
 ```python
-items = [1, 2, 3, 4, 5, 6]
-for item in items:
-    if item % 2 == 0:
-        items.remove(item)
-print("mutated in place:", items, "- 4 and 6 survived")
+numbers = [1, 2, 3, 4, 5, 6]
 
-# Build a new one instead.
-items = [1, 2, 3, 4, 5, 6]
-items = [item for item in items if item % 2]
-print("rebuilt:        ", items)
+for n in numbers:
+    if n % 2 == 0:
+        numbers.remove(n)           # the iterator''s position does not shift back
+
+print(numbers)                      # [1, 3, 5] here, but it skipped elements
 ```
 
-## What to take away
+That one happens to come out right; with a different pattern it does not:
 
-- A comprehension declares its result type in its first character.
-- `for` works through `__iter__` and `__next__`, nothing more.
-- Implementing `__iter__` makes a type work with the whole language.
-- Generators and `zip`/`map`/`filter` are consumed once.
-- Never remove from a collection you are iterating.
+```python
+numbers = [1, 2, 2, 3]
+for n in numbers:
+    if n == 2:
+        numbers.remove(n)
+print(numbers)                      # [1, 2, 3] - one 2 survived
+```
+
+Build a new one instead:
+
+```python
+numbers = [1, 2, 2, 3]
+numbers = [n for n in numbers if n != 2]
+print(numbers)                      # [1, 3]
+
+scores = {"a": 1, "b": 0, "c": 2}
+scores = {k: v for k, v in scores.items() if v}
+print(scores)                       # {''a'': 1, ''c'': 2}
+```
+
+Mutating a dict or set during iteration is worse: it raises `RuntimeError: dictionary changed size during iteration` rather than silently skipping. That is an improvement.
+
+## A worked example
+
+```python
+LOG = """
+2026-10-01 12:00:01 GET /courses 200 0.031
+2026-10-01 12:00:02 GET /courses/css 200 0.112
+2026-10-01 12:00:04 POST /enrol 500 1.902
+2026-10-01 12:00:05 GET /about 200 0.019
+malformed line
+2026-10-01 12:00:09 GET /courses/js 404 0.008
+2026-10-01 12:00:11 POST /enrol 500 2.455
+2026-10-01 12:00:14 GET /courses 200 0.027
+"""
+
+
+def parse(line):
+    parts = line.split()
+    if len(parts) != 6:
+        return None
+    date, time, method, path, status, seconds = parts
+    return {
+        "at": date + " " + time,
+        "method": method,
+        "path": path,
+        "status": int(status),
+        "seconds": float(seconds),
+    }
+
+
+# One generator expression feeding another: nothing is materialised
+# until the list() at the end, and the malformed line is dropped once.
+parsed = (parse(line) for line in LOG.strip().splitlines())
+requests = [r for r in parsed if r is not None]
+
+print(f"{len(requests)} of {len(LOG.strip().splitlines())} lines parsed")   # 7 of 8
+
+# Filtering and transforming, each a single readable clause.
+errors = [r for r in requests if r["status"] >= 500]
+print(f"{len(errors)} server errors")                                      # 2
+
+slow = {r["path"] for r in requests if r["seconds"] > 0.1}
+print("slow paths:", sorted(slow))        # [''/courses/css'', ''/enrol'']
+
+# A dict comprehension, with the worst time per path.
+worst = {}
+for r in requests:
+    worst[r["path"]] = max(worst.get(r["path"], 0), r["seconds"])
+print({k: v for k, v in sorted(worst.items()) if v > 0.05})
+# {''/courses/css'': 0.112, ''/enrol'': 2.455}
+
+# Aggregates over a generator, which never builds an intermediate list.
+total = sum(r["seconds"] for r in requests)
+print(f"total {total:.3f}s, mean {total / len(requests):.3f}s")
+
+print("any 404s?", any(r["status"] == 404 for r in requests))      # True
+print("all under 3s?", all(r["seconds"] < 3 for r in requests))    # True
+
+# any() and all() short-circuit, so this stops at the first match
+# rather than testing all seven.
+first_error = next((r for r in requests if r["status"] >= 500), None)
+print("first error at", first_error["at"])        # 2026-10-01 12:00:04
+
+# And the trap: `parsed` was a generator, so it is now empty.
+print(list(parsed))                               # []
+```
+
+The last line is the lesson repeated as a punchline. `parsed` was consumed by the list comprehension on line two of the analysis, and every later use of it would silently see nothing.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The second loop over a generator saw nothing | Iterators are consumed once |
+| `NameError` in a nested comprehension | The `for` clauses are in the wrong order |
+| A comprehension returned a list of `None` | It was built for side effects; use a loop |
+| Items were skipped while removing in a loop | Mutating a list while iterating it |
+| `RuntimeError: dictionary changed size` | Mutating a dict while iterating it |
+| `SyntaxError` on `if/else` in a comprehension | Conditional expressions go at the front |
+| A huge comprehension exhausted memory | Use a generator expression and aggregate |
+| `len()` failed on a generator | Generators have no length; `sum(1 for _ in it)` |
+
+## A check you can run
+
+```python
+rows = [[1, 2], [3, 4]]
+
+doubled = ([n * 2 for n in row] for row in rows)
+print(list(doubled))
+print(list(doubled))
+
+doubled = [[n * 2 for n in row] for row in rows]
+print(list(doubled))
+print(list(doubled))
+```
+
+The only difference is round brackets versus square. The first pair prints the data and then an empty list; the second prints it twice. One character, and the difference between a pipeline that streams and a result you can use more than once - which is the whole trade that generators offer.
 ',
-   'Building collections in one expression, and what for actually does.',
-   2, 436,
-   '55555555-5555-4555-8555-555555555555',
+   'Building collections in one expression, and what for actually does.', 8, 1637,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1037,153 +2354,391 @@ VALUES
    'markdown',
    '# Classes, dataclasses and Dunder Methods
 
-A class defines behaviour and the shape of the state that behaviour works on.
-The dunder methods are how a class joins in with the language rather than
-sitting beside it.
+A Python class bundles data with the behaviour that belongs to it. What makes Python''s version distinctive is the dunder protocol: the language''s operators and built-in functions are defined in terms of methods you can implement, so your own types can behave exactly like the built-in ones.
+
+## The ordinary class, and what each piece is for
 
 ```python
 class Account:
-    # A class attribute: shared by every instance.
+    # A class attribute: shared by every instance, and a common source
+    # of surprise if it is mutable.
     currency = "GBP"
+    opened = 0
 
-    def __init__(self, owner, balance=0):
-        # Instance attributes: one set per object.
+    def __init__(self, owner, pence=0):
+        # Instance attributes: one per object.
         self.owner = owner
-        self.balance = balance
+        self.pence = pence
+        Account.opened += 1
 
     def deposit(self, amount):
         if amount <= 0:
             raise ValueError("deposit must be positive")
-        self.balance += amount
-        return self
+        self.pence += amount
+        return self                     # allows chaining
 
-    def __repr__(self):
-        return f"Account({self.owner!r}, {self.balance})"
+    @property
+    def balance(self):
+        """A computed attribute, read like data but run like a method."""
+        return self.pence / 100
 
-    def __str__(self):
-        return f"{self.owner}: {self.balance} {self.currency}"
+    @classmethod
+    def from_pounds(cls, owner, pounds):
+        """An alternative constructor. cls, not Account, so a subclass
+        gets an instance of itself."""
+        return cls(owner, round(pounds * 100))
 
-account = Account("Aisha", 100)
-account.deposit(50)
-print(repr(account))
-print(account)
+    @staticmethod
+    def is_valid(pence):
+        """No self, no cls - it just lives here because it belongs here."""
+        return isinstance(pence, int) and pence >= 0
+
+
+a = Account.from_pounds("aisha", 19.99)
+a.deposit(500).deposit(100)
+print(a.owner, a.balance, Account.opened)      # aisha 25.99 1
+print(Account.is_valid(-1))                    # False
 ```
 
-`__repr__` is for you, and should look like the code that would rebuild the
-object. `__str__` is for the person using the program. Define `__repr__` if
-you define only one - `str()` falls back to it.
+The mutable class attribute trap is worth seeing once:
+
+```python
+class Basket:
+    items = []                          # ONE list, shared by every basket
+
+    def add(self, item):
+        self.items.append(item)
+
+
+a, b = Basket(), Basket()
+a.add("apple")
+print(b.items)                          # [''apple''] - b never added anything
+```
+
+The fix is to create it in `__init__`, where it becomes per-instance. The same rule as a mutable default argument, for the same reason: the class body runs once.
 
 ## dataclasses
 
-Most classes are a set of fields plus equality. Writing that by hand is
-repetitive and easy to get subtly wrong.
+Most classes are a constructor, a `__repr__` and an `__eq__` written out by hand. `dataclass` writes them.
 
 ```python
 from dataclasses import dataclass, field
 
-@dataclass(frozen=True, order=True)
-class Learner:
-    score: int
-    name: str
-    tags: tuple[str, ...] = ()   # a tuple, not a list - see below
 
-a = Learner(92, "Aisha")
-b = Learner(92, "Aisha")
+@dataclass(frozen=True, slots=True)
+class Point:
+    x: float
+    y: float
+    label: str = ""
+    tags: tuple = ()
 
-print(a)                 # __repr__ for free
-print(a == b)            # __eq__ compares fields, not identity
-print(sorted([Learner(78, "Kenji"), a]))     # order=True gives comparisons
-print(hash(a))                               # frozen=True makes it hashable
 
-# The tuple is not decoration. frozen=True generates __hash__, and hashing a
-# field hashes its value - so one list field would make every instance
-# unhashable at the moment you tried to put it in a set.
-mutable_field = field(default_factory=list)   # what you would write for a list
+p = Point(3, 4, "origin-ish")
+print(p)                                # Point(x=3, y=4, label=''origin-ish'', tags=())
+print(p == Point(3, 4, "origin-ish"))   # True - field-by-field
+print({p})                              # frozen means hashable, so this works
+# p.x = 10                              # FrozenInstanceError
 ```
+
+The arguments are not decoration:
+
+- **`frozen=True`** makes instances immutable and generates `__hash__`, so they can be dict keys and set members. Hashing a field hashes its value - so one `list` field would make every instance unhashable at the moment you tried to put it in a set. That is why `tags` above is a tuple.
+- **`slots=True`** replaces the instance `__dict__` with a fixed set of slots: less memory, faster attribute access, and a typo in an attribute name becomes an `AttributeError` rather than a silently created attribute.
+- **`order=True`** generates the comparison operators, comparing fields in declaration order like a tuple.
+- **`kw_only=True`** makes every field keyword-only, which is the right default for anything with more than three fields.
+
+Mutable defaults need `field`:
+
+```python
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Order:
+    reference: str
+    lines: list = field(default_factory=list)       # not `= []`
+    total: int = field(default=0, compare=False)    # excluded from ==
+    internal: str = field(default="", repr=False)   # hidden from repr
+
+
+o = Order("ABC-1")
+o.lines.append("widget")
+print(o)                                # Order(reference=''ABC-1'', lines=[''widget''], total=0)
+print(Order("ABC-1") == Order("ABC-1"))         # True
+print(Order("ABC-1", total=5) == Order("ABC-1", total=9))   # True - total excluded
+```
+
+`= []` as a dataclass field is a `ValueError` at class-definition time rather than a silent shared list. Python learned from the function-argument version of this mistake.
 
 ## The dunder methods that matter
 
 ```python
 class Money:
-    def __init__(self, pence):
-        self.pence = pence
+    __slots__ = ("pence",)
 
+    def __init__(self, pence):
+        self.pence = int(pence)
+
+    # Display. __repr__ is for developers, __str__ for users.
+    # If you only write one, write __repr__: __str__ falls back to it.
     def __repr__(self):
         return f"Money({self.pence})"
 
-    def __add__(self, other):
-        return Money(self.pence + other.pence)
+    def __str__(self):
+        return f"GBP {self.pence / 100:.2f}"
 
+    # Equality and hashing go together: objects that compare equal
+    # MUST hash equal, or dicts and sets misbehave.
     def __eq__(self, other):
         return isinstance(other, Money) and self.pence == other.pence
 
+    def __hash__(self):
+        return hash(self.pence)
+
+    # Ordering. @total_ordering fills in the rest from these two.
     def __lt__(self, other):
         return self.pence < other.pence
 
-    def __len__(self):
-        return self.pence
+    # Arithmetic.
+    def __add__(self, other):
+        return Money(self.pence + other.pence)
 
+    def __mul__(self, n):
+        return Money(round(self.pence * n))
+
+    __rmul__ = __mul__                  # so 3 * money works too
+
+    # Truthiness, length-like behaviour, and formatting.
     def __bool__(self):
         return self.pence != 0
 
-print(Money(300) + Money(250))
-print(Money(300) == Money(300))
-print(sorted([Money(300), Money(120)]))
-print(bool(Money(0)), bool(Money(1)))
+    def __format__(self, spec):
+        return format(self.pence / 100, spec or ",.2f")
+
+
+price = Money(1999)
+vat = price * 0.2
+print(repr(price), str(price))          # Money(1999) GBP 19.99
+print(price + vat)                      # GBP 23.99
+print(3 * price)                        # GBP 59.97
+print(price == Money(1999))             # True
+print(sorted([Money(500), Money(100)]))  # [Money(100), Money(500)]
+print({Money(100), Money(100)})          # one element - equal, so equal hash
+print(bool(Money(0)), bool(price))       # False True
+print(f"{price:>10}")                    # ''     19.99''
+```
+
+The container protocol lets your type behave like a sequence or a mapping:
+
+```python
+class Playlist:
+    def __init__(self, tracks):
+        self._tracks = list(tracks)
+
+    def __len__(self):
+        return len(self._tracks)
+
+    def __getitem__(self, index):
+        # Handling a slice too means slicing just works.
+        if isinstance(index, slice):
+            return Playlist(self._tracks[index])
+        return self._tracks[index]
+
+    def __contains__(self, track):
+        return track in self._tracks
+
+    def __iter__(self):
+        return iter(self._tracks)
+
+    def __repr__(self):
+        return f"Playlist({self._tracks!r})"
+
+
+p = Playlist(["a", "b", "c", "d"])
+print(len(p), p[1], p[1:3], "c" in p)   # 4 b Playlist([''b'', ''c'']) True
+print([t.upper() for t in p])           # [''A'', ''B'', ''C'', ''D'']
+first, *rest = p
+print(first, rest)                      # a [''b'', ''c'', ''d'']
 ```
 
 ## Inheritance and properties
 
 ```python
-# Self-contained: the Try yourself button copies one block at a time, so this
-# repeats the base class rather than assuming the first example is still there.
-class Account:
-    def __init__(self, owner, balance=0):
-        self.owner = owner
-        self.balance = balance
+class Shape:
+    def __init__(self, name):
+        self.name = name
 
-class Savings(Account):
-    def __init__(self, owner, balance=0, rate=0.02):
-        super().__init__(owner, balance)
-        self._rate = rate
+    def area(self):
+        raise NotImplementedError("subclasses must implement area")
 
-    # A property is a computed attribute: read like data, run like a method.
+    def describe(self):
+        return f"{self.name} with area {self.area():.2f}"
+
+
+class Circle(Shape):
+    def __init__(self, radius):
+        super().__init__("circle")      # always call super().__init__
+        self._radius = radius
+
     @property
-    def annual_interest(self):
-        return round(self.balance * self._rate, 2)
+    def radius(self):
+        return self._radius
 
-    @property
-    def rate(self):
-        return self._rate
+    @radius.setter
+    def radius(self, value):
+        if value <= 0:
+            raise ValueError("radius must be positive")
+        self._radius = value
 
-    @rate.setter
-    def rate(self, value):
-        if not 0 <= value < 1:
-            raise ValueError("rate must be between 0 and 1")
-        self._rate = value
+    def area(self):
+        return 3.141592653589793 * self._radius ** 2
 
-savings = Savings("Lena", 2000)
-print(savings.annual_interest)
-savings.rate = 0.05
-print(savings.annual_interest)
+
+c = Circle(2)
+print(c.describe())                     # circle with area 12.57
+c.radius = 3
+print(c.radius, isinstance(c, Shape))   # 3 True
 
 try:
-    savings.rate = 2
+    c.radius = -1
 except ValueError as error:
-    print("ValueError:", error)
+    print(error)                        # radius must be positive
 ```
 
-## What to take away
+A property turns an attribute access into a method call, which means you can add validation to `obj.x = 1` *later* without changing a single caller. That is the reason Python has no culture of writing getters and setters up front: you can always add them.
 
-- `__repr__` is for the developer, `__str__` for the user.
-- A `dataclass` gives you `__init__`, `__repr__` and `__eq__`.
-- `field(default_factory=list)` is the mutable-default fix, again.
-- Dunder methods are how a type joins the language.
-- A property turns a method into an attribute without changing the callers.
+Prefer composition to inheritance when the relationship is "has a" rather than "is a". Inheritance couples you to the parent''s internals; a wrapped object does not.
+
+## A worked example
+
+```python
+from dataclasses import dataclass, field
+from functools import total_ordering
+
+
+@total_ordering
+@dataclass(frozen=True, slots=True)
+class Version:
+    major: int
+    minor: int = 0
+    patch: int = 0
+
+    @classmethod
+    def parse(cls, text):
+        parts = text.strip().lstrip("v").split(".")
+        numbers = [int(p) for p in parts] + [0, 0]
+        return cls(*numbers[:3])
+
+    def __str__(self):
+        return f"{self.major}.{self.minor}.{self.patch}"
+
+    def __lt__(self, other):
+        return (self.major, self.minor, self.patch) < (other.major, other.minor, other.patch)
+
+    def bump(self, part="patch"):
+        """Frozen, so this returns a new instance rather than mutating."""
+        values = {"major": self.major, "minor": self.minor, "patch": self.patch}
+        values[part] += 1
+        if part == "major":
+            values["minor"] = values["patch"] = 0
+        elif part == "minor":
+            values["patch"] = 0
+        return Version(**values)
+
+
+@dataclass
+class Release:
+    version: Version
+    notes: list = field(default_factory=list)
+    yanked: bool = field(default=False, compare=False)
+
+    def __str__(self):
+        mark = " (yanked)" if self.yanked else ""
+        return f"v{self.version}{mark}: {len(self.notes)} note(s)"
+
+
+releases = [
+    Release(Version.parse("v1.2.3"), ["first"]),
+    Release(Version.parse("1.10"), ["ten", "beats", "two"]),
+    Release(Version.parse("v1.2"), [], yanked=True),
+    Release(Version.parse("2"), ["major"]),
+]
+
+for release in sorted(releases, key=lambda r: r.version):
+    print(release)
+# v1.2.0 (yanked): 0 note(s)
+# v1.2.3: 1 note(s)
+# v1.10.0: 3 note(s)
+# v2.0.0: 1 note(s)
+
+print(max(r.version for r in releases))             # 2.0.0
+print(Version.parse("1.2.3") < Version.parse("1.10.0"))     # True
+print(Version.parse("1.9") < Version.parse("1.10"))         # True
+
+# Frozen and hashable, so a set and a dict key both work.
+print(len({Version(1, 2, 3), Version.parse("v1.2.3")}))     # 1
+
+# total_ordering filled in >, <=, >= from __lt__ and __eq__.
+print(Version(2) >= Version(1, 10))                 # True
+
+# bump returns a new object; the original is untouched.
+v = Version(1, 2, 3)
+print(v.bump("minor"), v)                           # 1.3.0 1.2.3
+
+# slots means a typo fails loudly instead of creating an attribute.
+loose = Release(Version(1))
+loose.verison = Version(2)                          # a plain dataclass allows it
+print(hasattr(loose, "verison"))                    # True - no slots on Release
+
+@dataclass(slots=True)
+class Tight:
+    value: int
+
+
+try:
+    Tight(1).valeu = 2                              # slots=True, so no new names
+except AttributeError:
+    print("AttributeError")                         # AttributeError
+```
+
+The last four lines are the honest footnote. `Release` is an ordinary dataclass, so `loose.verison = ...` silently creates an attribute that nothing will ever read - a typo that costs an afternoon. `Tight` has `slots=True`, and the identical typo raises immediately. That is the argument for `slots=True` on anything with a fixed shape, and it costs one keyword.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Every instance shares a list | A mutable class attribute; create it in `__init__` |
+| `ValueError: mutable default` on a dataclass | Use `field(default_factory=list)` |
+| A frozen dataclass is unhashable | A field holds a list or dict; use a tuple |
+| Two equal objects are two keys in a dict | `__eq__` without a matching `__hash__` |
+| Defining `__eq__` made the class unhashable | Python sets `__hash__` to None; define it |
+| A subclass''s attributes are missing | `super().__init__()` was not called |
+| A typo created a new attribute | No `__slots__`; add `slots=True` |
+| `print(obj)` showed a memory address | No `__repr__` |
+
+## A check you can run
+
+```python
+class Thing:
+    def __init__(self, n):
+        self.n = n
+
+    def __eq__(self, other):
+        return self.n == other.n
+
+
+a, b = Thing(1), Thing(1)
+print(a == b)
+
+try:
+    print({a, b})
+except TypeError as error:
+    print(error)
+```
+
+The comparison works and the set raises `TypeError: unhashable type: ''Thing''`. Defining `__eq__` sets `__hash__` to `None`, because an object whose equality you have redefined almost certainly needs its hash redefined too - and Python would rather stop you than let you put it in a dict and get wrong answers. Add `__hash__`, or use a frozen dataclass and get both for free.
 ',
-   'State and behaviour, dataclasses, and the methods that join the language.',
-   3, 521,
-   '55555555-5555-4555-8555-555555555555',
+   'State and behaviour, dataclasses, and the methods that join the language.', 8, 1636,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1202,142 +2757,381 @@ VALUES
    'markdown',
    '# Exceptions and Context Managers
 
-Python asks forgiveness rather than permission: attempt the operation, and
-handle the failure if it comes. Checking first is often both slower and
-racier.
+Python''s philosophy on failure is to try the thing and handle the failure, rather than to check first. Context managers are the same idea applied to cleanup: say what must be released, once, and let the language guarantee it.
+
+## Ask forgiveness, not permission
 
 ```python
-data = {"name": "Aisha"}
+config = {"port": "5432"}
 
 # Checking first - and there is a window between the check and the use.
-if "score" in data:
-    print(data["score"])
+if "port" in config and config["port"].isdigit():
+    port = int(config["port"])
 else:
-    print("no score")
+    port = 3306
 
 # Attempting, and handling the failure.
 try:
-    print(data["score"])
-except KeyError:
-    print("no score")
+    port = int(config["port"])
+except (KeyError, ValueError):
+    port = 3306
+
+print(port)                             # 5432
 ```
+
+The second form is preferred in Python, and not only for brevity. The check-first version has a race in any program where the dict can change between the check and the use, it duplicates the condition, and it gets longer with every new way the operation can fail. The try version names the failures and handles them in one place.
+
+This is not a licence to wrap everything in `try`. Use it where failure is genuinely expected and recoverable - parsing, I/O, network calls. Use a plain `if` where the condition is cheap, local and in your control.
 
 ## Catching precisely
 
-A bare `except` swallows everything, including the `KeyboardInterrupt` that
-was meant to stop the program. Name what you expect.
-
 ```python
-def parse_age(text):
+def parse(text):
     try:
-        age = int(text)
+        return int(text)
     except ValueError:
         return None
-    else:
-        # Runs only if nothing was raised - keeps the try block small.
-        return age
-    finally:
-        # Runs either way, exception or not.
-        pass
 
-for value in ["29", "twenty-nine", "  30  "]:
-    print(repr(value), "->", parse_age(value))
 
-print("---")
-
-# Several kinds at once, and the object itself.
-for value in ["10", "abc", None]:
-    try:
-        print(int(value))
-    except (ValueError, TypeError) as error:
-        print(f"{type(error).__name__}: {error}")
+print(parse("12"), parse("x"))          # 12 None
 ```
+
+Several kinds at once, and the object itself:
+
+```python
+import json
+
+for payload in [''{"a": 1}'', ''not json'', ''{"a": }'']:
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, TypeError) as error:
+        print(f"{type(error).__name__}: {error.args[0][:30]}")
+    else:
+        print("parsed", data)           # runs only if NO exception
+    finally:
+        pass                            # runs always
+```
+
+The four clauses do different jobs:
+
+- **`try`** - keep it as small as you can. A long `try` body catches failures from lines you did not mean to guard.
+- **`except`** - name the exception. A bare `except:` catches `KeyboardInterrupt` and `SystemExit` too, so your program cannot be stopped.
+- **`else`** - runs when nothing was raised. It is where the success path goes, so the `try` can stay short.
+- **`finally`** - runs whatever happens, including on `return` and on an exception you are not catching. It is for cleanup.
+
+```python
+def f():
+    try:
+        return "from try"
+    finally:
+        print("finally still runs")
+
+
+print(f())
+# finally still runs
+# from try
+```
+
+Catching too broadly is the most common mistake:
+
+```python
+# No: hides typos, interrupts, and every bug you have not found yet.
+# try:
+#     risky()
+# except Exception:
+#     pass
+
+# Yes: name what you expect, and let the rest propagate.
+try:
+    value = int("x")
+except ValueError:
+    value = 0
+print(value)                            # 0
+```
+
+An exception you did not expect is information. Swallowing it converts a loud failure into a silent wrong answer, which is strictly worse.
 
 ## Raising, and chaining
 
-Adding context should not throw away the original cause. `raise ... from` keeps
-both.
-
 ```python
 class ConfigError(Exception):
-    """Raised when configuration cannot be read."""
+    """Raised when configuration cannot be used."""
 
-def load_timeout(config):
+    def __init__(self, key, reason):
+        super().__init__(f"{key}: {reason}")
+        self.key = key
+        self.reason = reason
+
+
+def load_port(config):
     try:
-        return int(config["timeout"])
+        return int(config["port"])
     except KeyError as error:
-        raise ConfigError("timeout is required") from error
+        # `from error` keeps the original in __cause__, so the traceback
+        # shows both. Without it you get a confusing "During handling of
+        # the above exception, another exception occurred".
+        raise ConfigError("port", "missing") from error
     except ValueError as error:
-        raise ConfigError(f"timeout must be a whole number, got {config[''timeout'']!r}") from error
+        raise ConfigError("port", f"not a number: {config[''port'']!r}") from error
 
-for config in [{"timeout": "30"}, {}, {"timeout": "soon"}]:
+
+for config in [{"port": "5432"}, {}, {"port": "abc"}]:
     try:
-        print(load_timeout(config))
+        print(load_port(config))
     except ConfigError as error:
-        cause = type(error.__cause__).__name__
-        print(f"ConfigError: {error}  (caused by {cause})")
+        print(f"{error} (key={error.key}, caused by {type(error.__cause__).__name__})")
+# 5432
+# port: missing (key=port, caused by KeyError)
+# port: not a number: ''abc'' (key=port, caused by ValueError)
 ```
+
+`raise ... from None` suppresses the original entirely, which is right when the inner exception is an implementation detail the caller should not see.
+
+Re-raising after logging is a bare `raise`, which preserves the original traceback:
+
+```python
+try:
+    int("x")
+except ValueError:
+    # log.exception("could not parse")
+    raise                               # not `raise error` - that resets nothing
+                                        # but reads as if it might
+```
+
+## Exception groups
+
+When several things fail at once - parallel tasks, a batch of validations - one exception cannot carry them all.
+
+```python
+def validate(record):
+    problems = []
+    if not record.get("name"):
+        problems.append(ValueError("name is required"))
+    if record.get("age", 0) < 0:
+        problems.append(ValueError("age must not be negative"))
+    if "@" not in record.get("email", ""):
+        problems.append(ValueError("email looks wrong"))
+    if problems:
+        raise ExceptionGroup("invalid record", problems)
+    return record
+
+
+try:
+    validate({"name": "", "age": -1, "email": "nope"})
+except* ValueError as group:
+    for error in group.exceptions:
+        print("-", error)
+# - name is required
+# - age must not be negative
+# - email looks wrong
+```
+
+`except*` matches by type *within* the group and leaves the rest to propagate, so a handler can deal with the `ValueError`s and let an `OSError` in the same group carry on upward.
 
 ## Context managers
 
-`with` guarantees the cleanup runs, whatever happens inside - including a
-`return` or an exception.
+`with` guarantees cleanup. The classic case is a file, but the pattern applies to locks, transactions, timers, temporary settings and anything with a matched pair of operations.
 
 ```python
+# The long way.
+handle = open("/etc/hostname", encoding="utf-8")
+try:
+    first = handle.readline()
+finally:
+    handle.close()
+
+# The short way, with the same guarantee.
+with open("/etc/hostname", encoding="utf-8") as handle:
+    first = handle.readline()
+
+print(first.strip() != "")
+```
+
+Writing your own takes two methods:
+
+```python
+import time
+
+
 class Timer:
     def __init__(self, label):
         self.label = label
+        self.ms = 0.0
 
     def __enter__(self):
-        print(f"start {self.label}")
-        return self               # what "as" binds
+        self.start = time.perf_counter()
+        return self                     # whatever `as` binds
 
-    def __exit__(self, exc_type, exc, traceback):
-        print(f"end {self.label}" + (f" ({exc_type.__name__})" if exc_type else ""))
-        return False              # False lets the exception propagate
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.ms = (time.perf_counter() - self.start) * 1000
+        print(f"{self.label}: {self.ms:.1f}ms")
+        return False                    # False re-raises; True SWALLOWS
 
-with Timer("work") as timer:
-    print("  doing something")
 
-print("---")
-
-try:
-    with Timer("failing work"):
-        raise RuntimeError("boom")
-except RuntimeError as error:
-    print("caught outside:", error)
+with Timer("sum") as t:
+    total = sum(range(200000))
+print(total, t.ms > 0)
 ```
 
-`contextlib` writes the same thing as a generator: everything before the
-`yield` is entry, everything after is exit.
+The return value of `__exit__` is the part people get wrong. Returning a truthy value **suppresses** the exception, which is almost never what you want - a context manager that silently swallows errors is a very hard bug to find. Return `False`, or nothing at all, unless suppression is the manager''s whole purpose.
+
+`contextlib` writes the class for you:
 
 ```python
 from contextlib import contextmanager
 
-@contextmanager
-def tag(name):
-    print(f"<{name}>")
-    try:
-        yield
-    finally:
-        print(f"</{name}>")
 
-with tag("section"):
-    with tag("p"):
-        print("  text")
+@contextmanager
+def transaction(connection):
+    connection.append("BEGIN")
+    try:
+        yield connection
+    except Exception:
+        connection.append("ROLLBACK")
+        raise
+    else:
+        connection.append("COMMIT")
+
+
+log = []
+with transaction(log) as conn:
+    conn.append("INSERT 1")
+print(log)                              # [''BEGIN'', ''INSERT 1'', ''COMMIT'']
+
+log = []
+try:
+    with transaction(log) as conn:
+        conn.append("INSERT 2")
+        raise RuntimeError("boom")
+except RuntimeError:
+    pass
+print(log)                              # [''BEGIN'', ''INSERT 2'', ''ROLLBACK'']
 ```
 
-## What to take away
+Everything before the `yield` is `__enter__`; everything after is `__exit__`. The `try/except/else` around the `yield` is how you distinguish success from failure.
 
-- Attempt and handle; do not check and hope nothing changed.
-- Catch the exceptions you expect, never a bare `except`.
-- `else` runs on success, `finally` runs always.
-- `raise ... from` keeps the original cause.
-- `with` guarantees cleanup; `@contextmanager` is the short way to write one.
+Three more from `contextlib` worth knowing:
+
+```python
+from contextlib import suppress, ExitStack, redirect_stdout
+import io
+
+# suppress: the ONE legitimate way to ignore an exception, because it
+# names which one and covers exactly one block.
+with suppress(FileNotFoundError):
+    open("/no/such/file")
+print("still here")
+
+# ExitStack: a variable number of context managers.
+with ExitStack() as stack:
+    buffers = [stack.enter_context(io.StringIO()) for _ in range(3)]
+    print(len(buffers))                 # 3 - all closed on exit
+
+# redirect_stdout: capturing print output, mostly for tests.
+captured = io.StringIO()
+with redirect_stdout(captured):
+    print("hidden")
+print("captured:", captured.getvalue().strip())
+```
+
+## A worked example
+
+```python
+from contextlib import contextmanager
+
+
+class ValidationError(Exception):
+    def __init__(self, field, reason):
+        super().__init__(f"{field}: {reason}")
+        self.field = field
+
+
+@contextmanager
+def collecting(label):
+    """Gathers every failure in the block instead of stopping at the
+    first - and raises them together at the end."""
+    problems = []
+    try:
+        yield problems
+    finally:
+        if problems:
+            raise ExceptionGroup(label, problems)
+
+
+def check(record):
+    with collecting(f"record {record.get(''id'', ''?'')}") as problems:
+        for field in ("id", "email"):
+            if not record.get(field):
+                problems.append(ValidationError(field, "is required"))
+
+        email = record.get("email", "")
+        if email and "@" not in email:
+            problems.append(ValidationError("email", f"no @ in {email!r}"))
+
+        try:
+            age = int(record.get("age", ""))
+        except ValueError as error:
+            problems.append(ValidationError("age", "not a whole number"))
+        else:
+            if age < 0:
+                problems.append(ValidationError("age", "must not be negative"))
+
+
+RECORDS = [
+    {"id": 1, "email": "aisha@example.com", "age": "29"},
+    {"id": 2, "email": "broken", "age": "x"},
+    {"email": "sam@example.com", "age": "-1"},
+]
+
+for record in RECORDS:
+    try:
+        check(record)
+    except* ValidationError as group:
+        print(f"record {record.get(''id'', ''?'')}:")
+        for error in group.exceptions:
+            print("   -", error)
+    else:
+        print(f"record {record[''id'']}: ok")
+
+# record 1: ok
+# record 2:
+#    - email: no @ in ''broken''
+#    - age: not a whole number
+# record ?:
+#    - id: is required
+#    - age: must not be negative
+```
+
+Two design choices are worth naming. The validator collects rather than stopping at the first problem, because a form that reports one error at a time is a miserable form. And the `finally` in `collecting` means the group is raised even if the block itself raised something unrelated - the collected problems are not lost.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Ctrl-C would not stop the program | A bare `except:` caught `KeyboardInterrupt` |
+| A bug was silently swallowed | `except Exception: pass`; name the exception |
+| A traceback says "another exception occurred" | Missing `from error` when re-raising |
+| The traceback starts at the re-raise | `raise error` instead of a bare `raise` |
+| A file stayed open | No `with`, and the `finally` was forgotten |
+| An exception vanished inside `with` | `__exit__` returned a truthy value |
+| `finally` overrode a return value | A `return` in `finally` replaces everything |
+| `except*` did not catch | The exception was not in an `ExceptionGroup` |
+
+## A check you can run
+
+```python
+def f():
+    try:
+        return "A"
+    finally:
+        return "B"
+
+print(f())
+```
+
+It prints `B`. A `return` in a `finally` block discards the value the `try` was returning - and would equally discard an exception on its way out, silently. It is the one thing never to put in a `finally`, and seeing it swallow a return value is the fastest way to remember why.
 ',
-   'Asking forgiveness, catching precisely, and guaranteeing cleanup.',
-   2, 418,
-   '55555555-5555-4555-8555-555555555555',
+   'Asking forgiveness, catching precisely, and guaranteeing cleanup.', 8, 1560,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1356,135 +3150,384 @@ VALUES
    'markdown',
    '# Decorators and Closures
 
-A decorator is a function that takes a function and returns a replacement.
-`@name` above a definition is exactly that call, written where you can see it.
+A decorator is a function that takes a function and returns a replacement. That is the whole idea. The `@` syntax is sugar, and closures are the mechanism that makes the replacement able to remember anything.
+
+## The @ is only sugar
 
 ```python
-def announce(func):
-    def wrapper(*args, **kwargs):
-        print(f"-> {func.__name__}{args}")
-        result = func(*args, **kwargs)
-        print(f"<- {result}")
-        return result
+def shout(function):
+    def wrapper(name):
+        return function(name).upper()
     return wrapper
 
-@announce
-def add(a, b):
-    return a + b
 
-add(2, 3)
+@shout
+def greet(name):
+    return f"hello {name}"
 
-# The @ is only sugar. This is the same thing:
-def multiply(a, b):
-    return a * b
-multiply = announce(multiply)
-multiply(4, 5)
+
+print(greet("aisha"))              # HELLO AISHA
+```
+
+This is the same thing, written out:
+
+```python
+def shout(function):
+    def wrapper(name):
+        return function(name).upper()
+    return wrapper
+
+
+def greet(name):
+    return f"hello {name}"
+
+
+greet = shout(greet)               # exactly what @shout did
+print(greet("aisha"))              # HELLO AISHA
+```
+
+`@shout` above a `def` means "after defining this, pass it to `shout` and rebind the name to whatever comes back". Nothing more.
+
+Because the wrapper replaces the function, it must accept whatever the original accepted. `*args, **kwargs` is how a decorator stays agnostic:
+
+```python
+def shout(function):
+    def wrapper(*args, **kwargs):
+        return function(*args, **kwargs).upper()
+    return wrapper
+
+
+@shout
+def greet(name, greeting="hello"):
+    return f"{greeting} {name}"
+
+
+print(greet("aisha"))                          # HELLO AISHA
+print(greet("sam", greeting="hi"))             # HI SAM
 ```
 
 ## Keep the identity of what you wrapped
 
-Without help, the wrapper replaces the name, the docstring and the signature.
-`functools.wraps` copies them across.
+```python
+def plain(function):
+    def wrapper(*args, **kwargs):
+        return function(*args, **kwargs)
+    return wrapper
+
+
+@plain
+def area(width, height):
+    """Return the area of a rectangle."""
+    return width * height
+
+
+print(area.__name__)               # ''wrapper'' - the name is gone
+print(area.__doc__)                # None - and so is the docstring
+```
+
+`functools.wraps` copies the name, docstring, module, annotations and a reference to the original:
 
 ```python
-import functools
+from functools import wraps
 
-def naive(func):
+
+def better(function):
+    @wraps(function)
     def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
+        return function(*args, **kwargs)
     return wrapper
 
-def careful(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-    return wrapper
 
-@naive
-def one():
-    """The first function."""
+@better
+def area(width, height):
+    """Return the area of a rectangle."""
+    return width * height
 
-@careful
-def two():
-    """The second function."""
 
-print(one.__name__, repr(one.__doc__))
-print(two.__name__, repr(two.__doc__))
+print(area.__name__)               # ''area''
+print(area.__doc__)                # Return the area of a rectangle.
+print(area.__wrapped__)            # the original function, for testing
 ```
+
+Always use `@wraps`. Without it, `help()`, debuggers, tracebacks, documentation tools and anything that introspects your code all see `wrapper`, and a codebase with forty decorated functions looks like forty copies of the same one.
 
 ## Decorators that take arguments
 
-A decorator with arguments is one more layer: a function returning a
-decorator, which returns the wrapper.
+A decorator with arguments is a function returning a decorator - one extra layer:
 
 ```python
-import functools
+from functools import wraps
 
-def repeat(times):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            for index in range(times):
-                result = func(*args, **kwargs)
+
+def repeat(times):                      # takes the argument
+    def decorate(function):             # takes the function
+        @wraps(function)
+        def wrapper(*args, **kwargs):   # takes the call
+            result = None
+            for _ in range(times):
+                result = function(*args, **kwargs)
             return result
         return wrapper
-    return decorator
+    return decorate
 
-@repeat(3)
-def greet(name):
-    print(f"hello {name}")
-    return name
 
-greet("Aisha")
+@repeat(times=3)
+def log(message):
+    print(message)
+
+
+log("hello")
+# hello
+# hello
+# hello
+```
+
+`@repeat(times=3)` is evaluated first, producing `decorate`, which is then applied to `log`. Three layers, each with one job: arguments, function, call.
+
+A decorator that works both with and without arguments needs a check, and is usually not worth the complexity:
+
+```python
+from functools import wraps
+
+
+def optional(function=None, *, loud=False):
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            result = fn(*args, **kwargs)
+            return result.upper() if loud else result
+        return wrapper
+    return decorate(function) if function else decorate
+
+
+@optional
+def quiet(name):
+    return f"hello {name}"
+
+
+@optional(loud=True)
+def loud(name):
+    return f"hello {name}"
+
+
+print(quiet("aisha"), "|", loud("aisha"))      # hello aisha | HELLO AISHA
 ```
 
 ## A cache, which is where this pays off
 
 ```python
-import functools
+from functools import lru_cache, cache
 
-calls = 0
 
-@functools.cache
+@cache
 def fib(n):
-    global calls
-    calls += 1
     return n if n < 2 else fib(n - 1) + fib(n - 2)
 
-print(fib(30), "computed with", calls, "calls")
-print(fib.cache_info())
 
-# Without the cache this is exponential: fib(30) would be over a million calls.
+print(fib(50))                     # 12586269025, instantly
+print(fib.cache_info())            # CacheInfo(hits=48, misses=51, ...)
+```
+
+Without the cache this is exponential: `fib(30)` would be over a million calls, and `fib(50)` would take longer than you are willing to wait. With it, each `n` is computed once.
+
+`@cache` is unbounded; `@lru_cache(maxsize=128)` evicts the least recently used. Three rules for using either safely:
+
+- **The function must be pure.** Same arguments, same answer, no side effects. Caching a function that reads a file or the clock caches the first answer forever.
+- **The arguments must be hashable.** A list argument raises `TypeError`; pass a tuple.
+- **The cache holds references.** Caching a method keeps every `self` alive for the process''s lifetime, which is a memory leak with a respectable name. Use `functools.cached_property` for per-instance caching instead.
+
+```python
+from functools import cached_property
+
+
+class Report:
+    def __init__(self, rows):
+        self.rows = rows
+
+    @cached_property
+    def total(self):
+        print("computing")
+        return sum(self.rows)
+
+
+r = Report([1, 2, 3])
+print(r.total)                     # ''computing'' then 6
+print(r.total)                     # 6 - no recomputation
 ```
 
 ## Closures are what make it work
 
-The wrapper keeps a reference to the enclosing variable, not a copy of its
-value at the time.
+The wrapper refers to `function`, which was a parameter of the enclosing call. That binding outlives the call because the wrapper still refers to it.
 
 ```python
-def make_multipliers_wrong():
-    return [lambda x: x * i for i in range(3)]
+def multiplier(factor):
+    def multiply(n):
+        return n * factor          # `factor` is captured
+    return multiply
 
-def make_multipliers_right():
-    # The default argument is evaluated now, capturing this round is value.
-    return [lambda x, i=i: x * i for i in range(3)]
 
-print([f(10) for f in make_multipliers_wrong()])   # all use the final i
-print([f(10) for f in make_multipliers_right()])
+double = multiplier(2)
+triple = multiplier(3)
+print(double(5), triple(5))        # 10 15
+print(double.__closure__[0].cell_contents)     # 2 - visible, if you look
 ```
 
-## What to take away
+Each call to `multiplier` creates a new `factor`, which is why `double` and `triple` do not interfere.
 
-- `@decorator` is `func = decorator(func)`.
-- Always use `functools.wraps`, or the wrapped function loses its identity.
-- A decorator with arguments needs one extra layer.
-- `functools.cache` turns an exponential recursion into a linear one.
-- A closure captures the variable, which is why the loop above needs `i=i`.
+To *change* captured state, you need `nonlocal`:
+
+```python
+def make_counter():
+    count = 0
+
+    def increment():
+        nonlocal count             # without this: UnboundLocalError
+        count += 1
+        return count
+
+    return increment
+
+
+a = make_counter()
+b = make_counter()
+print(a(), a(), a())               # 1 2 3
+print(b())                         # 1 - its own count
+```
+
+## A worked example
+
+```python
+import time
+from functools import wraps
+
+
+def instrument(name=None, *, threshold_ms=0.0):
+    """Times a call, counts calls, and records the slowest - all in
+    state captured by the closure, so each decorated function has its
+    own and nothing is stored globally."""
+    def decorate(function):
+        label = name or function.__name__
+        stats = {"calls": 0, "total_ms": 0.0, "slowest_ms": 0.0, "errors": 0}
+
+        @wraps(function)
+        def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return function(*args, **kwargs)
+            except Exception:
+                stats["errors"] += 1
+                raise
+            finally:
+                elapsed = (time.perf_counter() - start) * 1000
+                stats["calls"] += 1
+                stats["total_ms"] += elapsed
+                stats["slowest_ms"] = max(stats["slowest_ms"], elapsed)
+                if elapsed > threshold_ms:
+                    print(f"  [{label}] {elapsed:.2f}ms")
+
+        wrapper.stats = stats              # attached, so the caller can read it
+        wrapper.reset = lambda: stats.update(calls=0, total_ms=0.0,
+                                             slowest_ms=0.0, errors=0)
+        return wrapper
+    return decorate
+
+
+@instrument("sum of squares", threshold_ms=0.5)
+def work(n):
+    return sum(i * i for i in range(n))
+
+
+@instrument()
+def risky(n):
+    if n < 0:
+        raise ValueError("negative")
+    return n
+
+
+print(work(50000))
+print(work(5))
+print(work.__name__)                       # work - thanks to @wraps
+print(work.stats)
+
+for value in (1, -1, 2):
+    try:
+        risky(value)
+    except ValueError:
+        pass
+
+print(risky.stats)                         # calls=3, errors=1
+print(work.stats is risky.stats)           # False - separate closures
+
+work.reset()
+print(work.stats["calls"])                 # 0
+
+
+# Stacking decorators: the one nearest the def is applied first.
+def tagged(tag):
+    def decorate(function):
+        @wraps(function)
+        def wrapper(*args, **kwargs):
+            return f"<{tag}>{function(*args, **kwargs)}</{tag}>"
+        return wrapper
+    return decorate
+
+
+@tagged("b")
+@tagged("i")
+def text():
+    return "hello"
+
+
+print(text())                              # <b><i>hello</i></b>
+```
+
+Two things are worth taking from that. The `stats` dict lives in the closure, so each decorated function has its own without any global registry - and attaching it to the wrapper as an attribute gives the caller a way in. And the `finally` records the timing even when the call raised, which a `try/except` without `finally` would not.
+
+The stacking order is the one people get backwards: `@tagged("b")` is written first and applied *last*, so it ends up outermost. Read decorators bottom-up to know what wraps what.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| Every function reports the name `wrapper` | Missing `@wraps` |
+| `TypeError: wrapper() takes 1 positional argument` | The wrapper does not accept `*args, **kwargs` |
+| `UnboundLocalError` on captured state | Assigning without `nonlocal` |
+| A cached function returns stale data | It is not pure; do not cache it |
+| `TypeError: unhashable type: ''list''` from a cache | `lru_cache` keys on the arguments |
+| Memory grows with every object | `lru_cache` on a method pins `self` forever |
+| The decorator ran once, not per call | The work was outside the inner `wrapper` |
+| Decorators applied in the wrong order | The one nearest the `def` is applied first |
+
+## A check you can run
+
+```python
+from functools import wraps
+
+
+def noisy(function):
+    print("decorating", function.__name__)
+
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        print("calling", function.__name__)
+        return function(*args, **kwargs)
+
+    return wrapper
+
+
+@noisy
+def f():
+    return 1
+
+
+print("--- defined ---")
+f()
+f()
+```
+
+"decorating f" prints **before** the `--- defined ---` line, and only once; "calling f" prints twice, after. That tells you exactly where each piece of a decorator runs: the outer body at import time, the wrapper body at call time. Anything expensive put in the wrong one is either done once when it should be done per call, or done per call when once would do.
 ',
-   'A function that replaces a function, and the closure underneath it.',
-   2, 397,
-   '55555555-5555-4555-8555-555555555555',
+   'A function that replaces a function, and the closure underneath it.', 7, 1359,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1503,131 +3546,369 @@ VALUES
    'markdown',
    '# Generators, Laziness and itertools
 
-A function with `yield` in it is a generator function. Calling it runs nothing:
-it hands back a generator, and each `next` runs until the following `yield`.
+A generator produces values one at a time, on demand, keeping its own place between calls. That buys two things that a list cannot: constant memory over an arbitrarily long sequence, and the ability to represent something infinite.
+
+## A function that pauses
 
 ```python
 def countdown(start):
-    print("  (generator starts running now)")
+    print("starting")
     while start > 0:
         yield start
         start -= 1
-    print("  (generator finished)")
+    print("finished")
+
 
 gen = countdown(3)
-print("nothing has run yet")
-print(next(gen))
-print(next(gen))
-print(list(gen))
+print(type(gen))               # <class ''generator''> - nothing has run yet
+
+print(next(gen))               # ''starting'' then 3
+print(next(gen))               # 2
+print(next(gen))               # 1
+try:
+    next(gen)                  # ''finished'' then StopIteration
+except StopIteration:
+    print("done")
 ```
+
+Calling the function does not run it. It builds a generator object. The body runs up to the first `yield`, hands out a value and freezes - local variables, the loop counter, the position in the code - until `next()` is called again.
+
+That frozen state is what makes a generator different from a function returning a list. There is no list.
 
 ## Laziness is the point
 
-A generator computes one value at a time, so a sequence can be longer than
-memory - or endless.
+```python
+import sys
+
+numbers = list(range(1000000))
+generator = (n for n in range(1000000))
+
+print(sys.getsizeof(numbers))              # about 8 megabytes
+print(sys.getsizeof(generator))            # about 200 bytes
+```
+
+A pipeline where nothing is materialised until the last step:
 
 ```python
-from itertools import islice
+def read_lines(text):
+    for line in text.splitlines():
+        yield line
 
-def naturals():
-    n = 1
-    while True:
-        yield n
-        n += 1
 
-print(list(islice(naturals(), 5)))
+def non_empty(lines):
+    for line in lines:
+        if line.strip():
+            yield line
 
-# A pipeline where nothing is materialised until the last step.
-squares = (n * n for n in naturals())
-even_squares = (n for n in squares if n % 2 == 0)
-print(list(islice(even_squares, 5)))
 
-# Memory: a list of ten million ints against a generator over the same range.
-import sys
-print(sys.getsizeof([n for n in range(1_000_00)]), "bytes for the list")
-print(sys.getsizeof((n for n in range(1_000_00))), "bytes for the generator")
+def parsed(lines):
+    for line in lines:
+        parts = line.split(",")
+        if len(parts) == 3:
+            yield {"name": parts[0], "team": parts[1], "score": int(parts[2])}
+
+
+TEXT = """
+aisha,red,91
+
+noshad,blue,78
+sam,red,64
+bad line
+leah,blue,55
+"""
+
+pipeline = parsed(non_empty(read_lines(TEXT)))
+print(type(pipeline))                      # a generator; no work done yet
+
+for record in pipeline:
+    print(record["name"], record["score"])
 ```
+
+Each stage holds one line at a time. The same pipeline works unchanged over a four-gigabyte file, because at no point does anything hold more than one record.
+
+## Infinite sequences, made safe by laziness
+
+```python
+from itertools import count, islice, takewhile
+
+
+def fibonacci():
+    a, b = 0, 1
+    while True:
+        yield a
+        a, b = b, a + b
+
+
+print(list(islice(fibonacci(), 10)))
+# [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+
+print(list(takewhile(lambda n: n < 100, fibonacci())))
+# [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89]
+
+print(next(n for n in fibonacci() if n > 1000))        # 1597
+```
+
+`fibonacci()` never ends and the program terminates, because the consumer decides when to stop. That inversion of control is the thing generators give you that a list cannot.
 
 ## Sending values in, and yield from
 
-A generator is a two-way channel: `send` supplies a value that `yield`
-evaluates to.
+`yield` is an expression, so a generator can receive as well as produce:
 
 ```python
 def running_total():
     total = 0
     while True:
         value = yield total
-        if value is not None:
-            total += value
+        if value is None:
+            break
+        total += value
+    return total
+
 
 acc = running_total()
-next(acc)                 # advance to the first yield
-print(acc.send(10))
-print(acc.send(5))
-print(acc.send(1))
-
-print("---")
-
-# yield from delegates to another iterable, flattening the plumbing away.
-def chain(*iterables):
-    for iterable in iterables:
-        yield from iterable
-
-print(list(chain([1, 2], "ab", (3, 4))))
+print(next(acc))               # 0 - advance to the first yield
+print(acc.send(10))            # 10
+print(acc.send(5))             # 15
+print(acc.send(100))           # 115
 ```
+
+The first `next()` is required: there is no suspended `yield` to receive a value until the generator has started.
+
+`yield from` delegates to another iterable, flattening the plumbing away:
+
+```python
+def chain_manually(*iterables):
+    for it in iterables:
+        for item in it:
+            yield item
+
+
+def chain(*iterables):
+    for it in iterables:
+        yield from it
+
+
+print(list(chain([1, 2], "ab", range(2))))     # [1, 2, ''a'', ''b'', 0, 1]
+
+
+def flatten(nested):
+    for item in nested:
+        if isinstance(item, list):
+            yield from flatten(item)           # recursion, readably
+        else:
+            yield item
+
+
+print(list(flatten([1, [2, [3, [4, 5]], 6], 7])))      # [1, 2, 3, 4, 5, 6, 7]
+```
+
+`yield from` also forwards `send`, `throw` and the return value, which the manual loop does not.
 
 ## itertools
 
-The building blocks for iterator pipelines. Each one is lazy.
+The standard library has the pieces you would otherwise write badly.
 
 ```python
-from itertools import count, cycle, islice, chain, groupby, pairwise, accumulate
+from itertools import (accumulate, chain, combinations, count, cycle,
+                       groupby, islice, pairwise, product, repeat, tee)
 
-print(list(islice(count(10, 5), 4)))          # 10, 15, 20, 25
-print(list(islice(cycle("abc"), 7)))
-print(list(chain([1, 2], [3, 4])))
-print(list(accumulate([1, 2, 3, 4])))          # running totals
-print(list(pairwise([1, 2, 3, 4])))            # overlapping pairs
+print(list(islice(count(10, 5), 4)))           # [10, 15, 20, 25]
+print(list(islice(cycle("abc"), 7)))           # [''a'',''b'',''c'',''a'',''b'',''c'',''a'']
+print(list(repeat("x", 3)))                    # [''x'', ''x'', ''x'']
 
-# groupby groups *consecutive* equal keys, so sort first if you want all of them.
-words = ["apple", "avocado", "banana", "blueberry", "cherry"]
-for letter, group in groupby(words, key=lambda w: w[0]):
-    print(letter, list(group))
+print(list(accumulate([1, 2, 3, 4])))          # [1, 3, 6, 10] - running sum
+print(list(accumulate([1, 2, 3, 4], max)))     # [1, 2, 3, 4]
+
+print(list(pairwise([1, 2, 3, 4])))            # [(1,2), (2,3), (3,4)]
+print(list(combinations("abc", 2)))            # [(''a'',''b''), (''a'',''c''), (''b'',''c'')]
+print(list(product([0, 1], repeat=2)))         # [(0,0), (0,1), (1,0), (1,1)]
 ```
+
+`pairwise` is the sliding window of two, which is how you compute differences between consecutive readings without an index:
+
+```python
+from itertools import pairwise
+
+readings = [21.5, 22.1, 23.8, 22.0]
+print([round(b - a, 2) for a, b in pairwise(readings)])    # [0.6, 1.7, -1.8]
+```
+
+`groupby` groups **consecutive** equal keys, so sort first if you want all of them:
+
+```python
+from itertools import groupby
+
+rows = [("red", 1), ("blue", 2), ("red", 3), ("red", 4)]
+
+print({k: [v for _, v in g] for k, g in groupby(rows, key=lambda r: r[0])})
+# {''red'': [3, 4], ''blue'': [2]} - WRONG: red appears twice, as two
+# separate consecutive runs, and the second overwrote the first
+
+ordered = sorted(rows, key=lambda r: r[0])
+print({k: [v for _, v in g] for k, g in groupby(ordered, key=lambda r: r[0])})
+# {''blue'': [2], ''red'': [1, 3, 4]} - right
+```
+
+That first result is the classic `groupby` bug. It is not a defect: `groupby` is designed to work over a stream it cannot sort, which is exactly why it only looks at neighbours.
+
+`tee` splits one iterator into several, at the cost of buffering:
+
+```python
+from itertools import tee
+
+source = (n * n for n in range(5))
+a, b = tee(source, 2)
+print(list(a), list(b))                        # [0,1,4,9,16] [0,1,4,9,16]
+```
+
+Do not use the original after `tee`-ing it; `tee` consumes it on demand and the buffer is its business.
 
 ## Cleaning up
 
-`try/finally` inside a generator still runs when the generator is closed, which
-is what makes a generator usable for resource handling.
+A generator''s `finally` runs when it is closed - whether by exhaustion, by `close()`, or by the consumer breaking out of the loop.
 
 ```python
-def lines_of(text):
-    print("  open")
+def tracked(items):
+    print("opening")
     try:
-        for line in text.splitlines():
-            yield line
+        for item in items:
+            yield item
     finally:
-        print("  close")
+        print("closing")
 
-for line in lines_of("a\\nb\\nc"):
-    print(line)
-    if line == "b":
+
+for n in tracked([1, 2, 3, 4]):
+    print(n)
+    if n == 2:
         break
-print("the finally ran when the loop was abandoned")
+# opening / 1 / 2 / closing
 ```
 
-## What to take away
+That is what makes a generator safe for resources: a `with open(...)` around the loop inside the generator is released even if the consumer stops early.
 
-- A generator function returns a generator; nothing runs until you iterate.
-- Laziness lets a sequence be endless, or larger than memory.
-- `yield from` delegates; `send` pushes a value in.
-- `itertools` is the lazy toolkit, and `groupby` needs sorted input.
-- `finally` in a generator runs on close, so cleanup is safe.
+The one case it does not cover is a generator that is never garbage collected - at interpreter shutdown, or held in a reference cycle. For anything holding a scarce resource, prefer a context manager and let the generator yield from inside it.
+
+## A worked example
+
+```python
+from itertools import groupby, islice
+
+RAW = """
+2026-10-01,kitchen,21.5
+2026-10-01,loft,17.2
+2026-10-01,kitchen,22.1
+2026-10-02,loft,16.9
+
+2026-10-02,kitchen,23.8
+bad,row
+2026-10-02,kitchen,22.0
+2026-10-03,loft,18.4
+"""
+
+
+def lines(text):
+    """Stage one: strip and drop blanks. One line in memory at a time."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            yield line
+
+
+def records(source):
+    """Stage two: parse, skipping anything malformed."""
+    for line in source:
+        parts = line.split(",")
+        if len(parts) != 3:
+            continue
+        try:
+            yield {"day": parts[0], "sensor": parts[1], "celsius": float(parts[2])}
+        except ValueError:
+            continue
+
+
+def warmer_than(source, threshold):
+    """Stage three: a filter, written as a generator so it composes."""
+    for record in source:
+        if record["celsius"] > threshold:
+            yield record
+
+
+# Three stages, composed, and still nothing has been read.
+pipeline = warmer_than(records(lines(RAW)), 17.0)
+
+for record in pipeline:
+    print(f"{record[''day'']}  {record[''sensor'']:<8} {record[''celsius'']:>5.1f}")
+
+# Grouping needs a sort first, because groupby only looks at neighbours.
+parsed = sorted(records(lines(RAW)), key=lambda r: (r["sensor"], r["day"]))
+
+for sensor, group in groupby(parsed, key=lambda r: r["sensor"]):
+    temperatures = [r["celsius"] for r in group]
+    print(f"{sensor:<8} n={len(temperatures)} "
+          f"min={min(temperatures):.1f} max={max(temperatures):.1f} "
+          f"mean={sum(temperatures) / len(temperatures):.1f}")
+# kitchen  n=4 min=21.5 max=23.8 mean=22.4
+# loft     n=3 min=16.9 max=18.4 mean=17.5
+
+
+def batched(source, size):
+    """Chunking a stream, which is how you write to a database in
+    batches without ever holding the whole stream."""
+    iterator = iter(source)
+    while True:
+        batch = list(islice(iterator, size))
+        if not batch:
+            return
+        yield batch
+
+
+for batch in batched(records(lines(RAW)), 2):
+    print([r["celsius"] for r in batch])
+# [21.5, 17.2]
+# [22.1, 16.9]
+# [23.8, 22.0]
+# [18.4]
+```
+
+`batched` is worth keeping. It takes any iterable, including an infinite one, and yields fixed-size lists without ever materialising the source - which is exactly the shape of "insert 1,000 rows at a time from a stream of unknown length".
+
+## When not to use a generator
+
+- **The collection is small and used more than once.** A list is simpler, and re-iterating works.
+- **You need `len()`, indexing or sorting.** None of those exist on a generator.
+- **The consumer is the same function.** If nothing else sees the sequence, a loop with an accumulator is clearer.
+
+## When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| The second pass over a generator was empty | Generators are consumed once |
+| `groupby` produced duplicate keys | It groups consecutive items; sort first |
+| `TypeError: object of type generator has no len()` | Materialise with `list()`, or count by summing |
+| `send()` raised `TypeError` on the first call | Advance with `next()` first |
+| Cleanup never ran | The generator was neither exhausted nor closed |
+| A pipeline did nothing | Nothing consumed it; a generator is inert until iterated |
+| Memory grew anyway | A `list()` somewhere in the middle of the pipeline |
+| `tee` used more memory than the list would have | The consumers are far apart; just build the list |
+
+## A check you can run
+
+```python
+def noisy(n):
+    for i in range(n):
+        print("producing", i)
+        yield i
+
+print("built")
+gen = noisy(3)
+print("about to loop")
+for value in gen:
+    print("got", value)
+```
+
+Nothing is produced between "built" and "about to loop" - and then production and consumption interleave, one at a time, rather than all the producing happening first. Watching that alternation once is what makes laziness stop being an abstract word.
 ',
-   'Producing one value at a time, and the itertools built on that idea.',
-   2, 460,
-   '55555555-5555-4555-8555-555555555555',
+   'Producing one value at a time, and the itertools built on that idea.', 8, 1565,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
@@ -1646,128 +3927,307 @@ VALUES
    'markdown',
    '# Type Hints and Modern Python
 
-Type hints are annotations. Python does not enforce them at runtime - they are
-for readers, editors and a checker like mypy. That is a feature: they cost
-nothing when the program runs.
+Type hints are annotations the interpreter stores and ignores. They exist for the reader, the editor and a type checker you run separately. Used well they are documentation that cannot go stale; used badly they are noise.
+
+## Nothing checks this
 
 ```python
-def greet(name: str, times: int = 1) -> str:
-    return f"hello {name} " * times
+def double(n: int) -> int:
+    return n * 2
 
-print(greet("Aisha", 2))
 
-# Nothing checks this. The annotation is a claim, not a guard.
-print(greet(42, 1))
-
-# The annotations are readable at runtime if you want them.
-print(greet.__annotations__)
+print(double("abc"))               # ''abcabc'' - no error, no warning
+print(double.__annotations__)      # {''n'': <class ''int''>, ''return'': <class ''int''>}
 ```
+
+The annotation is a claim, not a guard. `mypy` or `pyright` reads it and tells you `double("abc")` is wrong, before you run anything. Python itself does not.
+
+The annotations are readable at run time if you want them, which is how `dataclasses`, `pydantic` and `FastAPI` work - they inspect the annotations and generate behaviour from them.
 
 ## Writing the common shapes
 
-Modern syntax needs no imports for the everyday cases.
+```python
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+
+
+def first(values: Sequence[int]) -> int | None:
+    return values[0] if values else None
+
+
+def totals(rows: Iterable[Mapping[str, int]]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for row in rows:
+        for key, value in row.items():
+            out[key] = out.get(key, 0) + value
+    return out
+
+
+def apply(values: list[int], fn: Callable[[int], str]) -> list[str]:
+    return [fn(v) for v in values]
+
+
+print(first([1, 2]), first([]))
+print(totals([{"a": 1}, {"a": 2, "b": 3}]))        # {''a'': 3, ''b'': 3}
+print(apply([1, 2], str))                          # [''1'', ''2'']
+```
+
+`str | None` replaces `Optional[str]`; `list[int]` replaces `List[int]`. The `typing` module''s capitalised aliases are deprecated and you should not write new code with them.
+
+The important distinction is **what to accept and what to return**:
 
 ```python
-def summarise(
-    scores: list[int],
-    labels: dict[str, int],
-    pair: tuple[str, int],
-    maybe: str | None = None,
-) -> dict[str, float]:
-    return {"mean": sum(scores) / len(scores)}
-
-print(summarise([1, 2, 3], {"a": 1}, ("x", 1)))
-
-# str | None replaces Optional[str]; list[int] replaces List[int].
-from typing import Callable, Iterable, TypeAlias
-
-Handler: TypeAlias = Callable[[str, int], bool]
-
-def apply(handler: Handler, items: Iterable[str]) -> list[bool]:
-    return [handler(item, index) for index, item in enumerate(items)]
-
-print(apply(lambda text, index: len(text) > index, ["a", "bb", "ccc"]))
+def good(values: Iterable[int]) -> list[int]:
+    return sorted(values)
 ```
+
+Accept the most general thing you can use - `Iterable`, `Sequence`, `Mapping` - so a caller can pass a list, a tuple, a generator or a dict view. Return the most specific thing you actually produce - `list`, `dict` - so the caller knows what they can do with it. Accepting `list[int]` when you only iterate it needlessly rejects a generator.
 
 ## Generics, protocols and literals
 
+A generic function keeps the relationship between argument and result:
+
 ```python
-from typing import Protocol, Literal, TypedDict
+from typing import TypeVar
+from collections.abc import Sequence
 
-# A generic function keeps the relationship between argument and result.
-def first[T](items: list[T]) -> T | None:
-    return items[0] if items else None
+T = TypeVar("T")
 
-print(first([1, 2, 3]), first(["a"]), first([]))
 
-# A Protocol is structural: anything with the right shape satisfies it, with
-# no inheritance and no registration.
-class Sized(Protocol):
-    def __len__(self) -> int: ...
+def first_or(values: Sequence[T], default: T) -> T:
+    return values[0] if values else default
 
-def describe(thing: Sized) -> str:
-    return f"{len(thing)} items"
 
-print(describe([1, 2, 3]), describe("abcd"), describe({"a": 1}))
-
-# Literal narrows to specific values; TypedDict describes a dict shape.
-Level = Literal["basic", "intermediate", "advanced", "expert"]
-
-class Learner(TypedDict):
-    name: str
-    level: Level
-
-learner: Learner = {"name": "Aisha", "level": "advanced"}
-print(learner)
+print(first_or([1, 2], 0))              # a checker knows this is an int
+print(first_or(["a"], "z"))             # and this is a str
 ```
+
+Without the `TypeVar` you would have to annotate the return as `object`, and every caller would have to cast it back.
+
+A `Protocol` is **structural**: anything with the right shape satisfies it, with no inheritance and no registration.
+
+```python
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class Closeable(Protocol):
+    def close(self) -> None: ...
+
+
+class Connection:
+    def close(self) -> None:
+        print("closed")
+
+
+class Unrelated:
+    pass
+
+
+def shut(resource: Closeable) -> None:
+    resource.close()
+
+
+shut(Connection())                      # ''closed'' - it just fits
+print(isinstance(Connection(), Closeable))     # True
+print(isinstance(Unrelated(), Closeable))      # False
+```
+
+`Connection` never heard of `Closeable`. That is the point: protocols describe duck typing in a way a checker can verify, which is what Python needed rather than Java''s interfaces.
+
+`Literal` narrows to specific values; `TypedDict` describes a dict shape:
+
+```python
+from typing import Literal, TypedDict
+
+
+class User(TypedDict):
+    id: int
+    name: str
+    role: Literal["admin", "editor", "viewer"]
+
+
+def promote(user: User, to: Literal["admin", "editor"]) -> User:
+    return {**user, "role": to}
+
+
+u: User = {"id": 1, "name": "Aisha", "role": "viewer"}
+print(promote(u, "editor"))
+# {''id'': 1, ''name'': ''Aisha'', ''role'': ''editor''}
+# promote(u, "owner")   - a checker rejects this; Python would not
+```
+
+A `TypedDict` is a plain dict at run time. It costs nothing and describes the JSON you actually receive, which a `dataclass` cannot do without a conversion step.
+
+## Narrowing, and the checker''s view of control flow
+
+```python
+def describe(value: int | str | None) -> str:
+    if value is None:
+        return "nothing"                # here, value is None
+    if isinstance(value, int):
+        return f"the number {value + 1}"  # here, it is int - + 1 is allowed
+    return value.upper()                 # here, it must be str
+
+
+print(describe(None), describe(1), describe("hi"))     # nothing the number 2 HI
+```
+
+A checker follows `is None`, `isinstance`, `assert` and early returns, and narrows the type in each branch. That is why the `value.upper()` at the end needs no cast: there is nothing else it could be.
+
+When the checker cannot see what you know, `assert` is the honest tool - it narrows *and* it checks at run time:
+
+```python
+def load(mapping: dict[str, str], key: str) -> int:
+    raw = mapping.get(key)
+    assert raw is not None, f"{key} must be set"
+    return int(raw)
+
+
+print(load({"port": "5432"}, "port"))   # 5432
+```
+
+`typing.cast` also narrows, but it is a lie to the checker with no run-time effect. Use it only at a boundary where you genuinely know more than the checker can.
+
+## A worked example
+
+```python
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from typing import Literal, Protocol, TypedDict, TypeVar
+
+Status = Literal["draft", "published", "archived"]
+
+
+class LessonRow(TypedDict):
+    """The shape of a row as it arrives from the database driver."""
+    id: int
+    title: str
+    status: Status
+    minutes: int
+
+
+@dataclass(frozen=True, slots=True)
+class Lesson:
+    id: int
+    title: str
+    status: Status
+    minutes: int
+
+    @classmethod
+    def from_row(cls, row: LessonRow) -> "Lesson":
+        return cls(id=row["id"], title=row["title"],
+                   status=row["status"], minutes=row["minutes"])
+
+
+class HasMinutes(Protocol):
+    """Structural: anything with a minutes attribute will do, whether
+    or not it is a Lesson."""
+    minutes: int
+
+
+T = TypeVar("T")
+
+
+def total_minutes(items: Iterable[HasMinutes]) -> int:
+    return sum(item.minutes for item in items)
+
+
+def take(values: Sequence[T], count: int) -> list[T]:
+    """Generic, so the element type survives the call."""
+    return list(values[:count])
+
+
+def published(lessons: Iterable[Lesson]) -> list[Lesson]:
+    return [lesson for lesson in lessons if lesson.status == "published"]
+
+
+ROWS: list[LessonRow] = [
+    {"id": 1, "title": "Selectors", "status": "published", "minutes": 7},
+    {"id": 2, "title": "The box model", "status": "published", "minutes": 7},
+    {"id": 3, "title": "Container queries", "status": "draft", "minutes": 6},
+    {"id": 4, "title": "Old notes", "status": "archived", "minutes": 3},
+]
+
+lessons = [Lesson.from_row(row) for row in ROWS]
+
+live = published(lessons)
+print(len(live), total_minutes(live))              # 2 14
+print([lesson.title for lesson in take(live, 1)])  # [''Selectors'']
+
+
+# The protocol accepts something that is not a Lesson at all.
+@dataclass
+class Quiz:
+    minutes: int
+    questions: int
+
+
+print(total_minutes([Quiz(5, 10), Quiz(3, 6)]))    # 8
+print(total_minutes(lessons + []))                 # 23
+
+# Narrowing in practice.
+def summarise(item: Lesson | Quiz | None) -> str:
+    if item is None:
+        return "nothing"
+    if isinstance(item, Quiz):
+        return f"quiz, {item.questions} questions"
+    return f"lesson {item.id}: {item.title}"
+
+
+for item in (None, Quiz(5, 10), lessons[0]):
+    print(summarise(item))
+# nothing
+# quiz, 10 questions
+# lesson 1: Selectors
+
+# And the reminder that none of this is enforced at run time.
+bad: LessonRow = {"id": "not an int", "title": "x", "status": "nope", "minutes": 1}
+print(Lesson.from_row(bad))
+# Lesson(id=''not an int'', title=''x'', status=''nope'', minutes=1)
+# A checker rejects that line. Python builds it happily.
+```
+
+The final block is the honest ending. Two deliberate type errors, no complaint from the interpreter, an object built with a string where an integer belongs. Hints find that at the point you write it, in your editor, for free - but only if you actually run a checker.
 
 ## Where hints earn their place
 
-At the boundaries. Inside a five-line function the reader can see everything;
-across a module boundary they cannot.
+Not everywhere. The cost is real: annotations add noise, they go stale if nothing checks them, and a complex generic signature can be harder to read than the function it describes.
 
-```python
-from dataclasses import dataclass
-from enum import Enum
+Where they pay:
 
-class Status(Enum):
-    DRAFT = "draft"
-    PUBLISHED = "published"
+- **Function signatures at module boundaries.** Anything another file calls.
+- **Anything returning `None` sometimes.** `int | None` is the single most useful hint there is, because it forces the caller to think about the empty case.
+- **Data shapes.** `TypedDict` for JSON, `dataclass` for domain objects.
+- **Containers whose contents are not obvious.** `dict[str, list[int]]` saves a reader from scrolling.
 
-    def __str__(self) -> str:
-        return self.value
+Where they do not:
 
-@dataclass(frozen=True, slots=True)
-class Article:
-    title: str
-    status: Status = Status.DRAFT
-    tags: tuple[str, ...] = ()
+- **Short local variables.** `count = 0` needs no `: int`.
+- **Obvious `self`.** Never annotate it.
+- **Throwaway scripts** that nobody will maintain.
 
-    def publish(self) -> "Article":
-        # frozen means "return a changed copy" rather than mutating.
-        from dataclasses import replace
-        return replace(self, status=Status.PUBLISHED)
+Run the checker in CI. A hint nobody checks is a comment that is allowed to lie, which is worse than no comment at all.
 
-draft = Article("Type hints", tags=("python", "typing"))
-print(draft)
-print(draft.publish())
-print(f"status reads as {draft.status}")
-```
+## When it goes wrong
 
-`slots=True` stores the fields in a fixed layout instead of a per-instance
-dict: less memory, faster attribute access, and no accidental new attributes.
+| Symptom | Cause |
+|---|---|
+| A wrong type caused no error | Hints are not enforced; run a checker |
+| `TypeError: ''type'' object is not subscriptable` | `list[int]` on a very old Python |
+| `NameError` annotating a class inside itself | Quote it, or `from __future__ import annotations` |
+| A checker rejects a generator argument | Parameter says `list`; use `Iterable` |
+| `Optional[X]` still allows `None` after a check | The check is not one the checker narrows on |
+| `isinstance` with a Protocol raised | It needs `@runtime_checkable` |
+| Annotations slowed down imports | Heavy imports for types; put them under `TYPE_CHECKING` |
+| `cast` did not convert anything | It never does; it only tells the checker |
 
-## What to take away
+## A check you can run
 
-- Hints are not enforced at runtime; a checker enforces them before it.
-- `list[int]` and `str | None` need no imports.
-- A `Protocol` matches on shape, not on inheritance.
-- `Literal` and `TypedDict` describe values and dict shapes precisely.
-- Hints pay off at boundaries; inside a short function they are noise.
+Take any function in your codebase that sometimes returns `None` and annotate its return type as `-> X | None`. Then run `mypy` on the file.
+
+Every caller that uses the result without checking for `None` is now an error, listed with a line number. That list is not noise - it is the set of places your program will raise `AttributeError: ''NoneType'' object has no attribute ...` given the wrong input. One annotation, and the checker found all of them without running the code.
 ',
-   'Annotations that are not enforced, and where they earn their place.',
-   2, 468,
-   '55555555-5555-4555-8555-555555555555',
+   'Annotations that are not enforced, and where they earn their place.', 8, 1529,'55555555-5555-4555-8555-555555555555',
    'published', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY))
 ON DUPLICATE KEY UPDATE
   title = VALUES(title), body = VALUES(body), excerpt = VALUES(excerpt),
