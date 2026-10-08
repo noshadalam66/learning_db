@@ -84,17 +84,27 @@ writes nothing.
 `content.sql` now needs only the catalogue and content tables:
 
 ```sql
-SELECT table_name FROM information_schema.tables
- WHERE table_schema = DATABASE()
-   AND table_name IN ('catalog_courses', 'catalog_modules', 'catalog_lessons',
-                      'catalog_tags', 'catalog_course_tags',
-                      'content_articles', 'content_article_revisions',
-                      'assessment_quizzes', 'assessment_questions',
-                      'assessment_answer_options', 'search_documents');
+SELECT t.table_name
+  FROM information_schema.tables t
+ WHERE t.table_schema = DATABASE()
+   AND t.table_name IN ('catalog_categories', 'catalog_courses',
+                        'catalog_modules', 'catalog_lessons', 'catalog_tags',
+                        'catalog_course_tags', 'content_articles',
+                        'content_lesson_diagrams', 'assessment_quizzes',
+                        'assessment_questions', 'assessment_question_options');
 ```
 
-Anything that query does not list is missing, and the import will stop on it.
-Send me the list and I will tell you which migration creates it.
+That is the complete list, read out of the generated file rather than
+remembered — eleven tables. Anything the query does not return is missing, and
+the import will stop on it. It also calls two procedures,
+`catalog_refresh_course_rollup` and `search_reindex_all_quiet`, which write to
+`search_documents`:
+
+```sql
+SHOW PROCEDURE STATUS WHERE Db = DATABASE();
+```
+
+Send me whatever is absent and I will say which migration creates it.
 
 ## Why this is safe
 
