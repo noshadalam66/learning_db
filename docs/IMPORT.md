@@ -14,9 +14,13 @@ decompresses those itself, so use them if the upload box rejects the 3 MB file.
 ## The steps
 
 1. Sign in to cPanel and open **phpMyAdmin**.
-2. In the left-hand list, click the database **`gainglyi_learning`**.
+2. In the left-hand list, click **the database the site already uses**.
    Click the database name itself, not a table — the import has to run with
    the database selected or the statements have nowhere to go.
+
+   If you are not certain which one it is, open the **SQL** tab on a candidate
+   and run `SELECT COUNT(*) FROM catalog_courses;`. The right database answers
+   with a number; the wrong one says the table does not exist.
 3. Open the **Import** tab.
 4. **Choose File** → `0016_editorial_posts.sql` → leave the format as SQL →
    **Go**. It should report 3 queries.
@@ -70,6 +74,27 @@ SELECT COUNT(*) FROM content_editorial_posts;
 
 `0` is the right answer — the table is empty until the guides and the blog
 posts are written.
+
+## If it stops with "Table ... doesn't exist"
+
+A database installed by hand, or from an older `install.sql`, may be missing a
+table that a seed happens to mention. The import stops at that statement and
+writes nothing.
+
+`content.sql` now needs only the catalogue and content tables:
+
+```sql
+SELECT table_name FROM information_schema.tables
+ WHERE table_schema = DATABASE()
+   AND table_name IN ('catalog_courses', 'catalog_modules', 'catalog_lessons',
+                      'catalog_tags', 'catalog_course_tags',
+                      'content_articles', 'content_article_revisions',
+                      'assessment_quizzes', 'assessment_questions',
+                      'assessment_answer_options', 'search_documents');
+```
+
+Anything that query does not list is missing, and the import will stop on it.
+Send me the list and I will tell you which migration creates it.
 
 ## Why this is safe
 
