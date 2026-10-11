@@ -1,32 +1,43 @@
-# Importing the eleven deepened courses into the live cPanel database
+# Importing content into the live cPanel database
 
-Two files, in this order. Nothing else, and nothing to run afterwards.
-Paths below are from the repository root.
+`dist/content.sql` is the file to import whenever courses have been written or
+rewritten. It carries content and no schema: no `CREATE TABLE`, no migration,
+and nothing that drops, truncates or deletes. Every insert is
+`ON DUPLICATE KEY UPDATE`, so importing it twice changes nothing the second
+time.
 
-| # | File | Size | What it does |
-| --- | --- | --- | --- |
-| 1 | `dist/0016_editorial_posts.sql` | 7 KB | Adds one table, `content_editorial_posts`. Needed by the course-guide and blog work. |
-| 2 | `dist/content.sql` | 3.0 MB | Rewrites the lesson bodies for eleven courses. |
+Nothing needs running afterwards. Paths below are from the repository root.
 
-A gzipped copy of each sits beside it (`.sql.gz`). phpMyAdmin detects and
-decompresses those itself, so use them if the upload box rejects the 3 MB file.
+| File | Size | What it does |
+| --- | --- | --- |
+| `dist/content.sql` | 495 KB | The HTML course as thirty topics in five modules, plus its quizzes. |
+
+A gzipped copy sits beside it (`.sql.gz`) when one has been built. phpMyAdmin
+detects and decompresses those itself, so use one if the upload box rejects the
+plain file.
 
 ## The steps
 
 1. Sign in to cPanel and open **phpMyAdmin**.
 2. In the left-hand list, click **the database the site already uses**.
-   Click the database name itself, not a table — the import has to run with
-   the database selected or the statements have nowhere to go.
 
-   If you are not certain which one it is, open the **SQL** tab on a candidate
-   and run `SELECT COUNT(*) FROM catalog_courses;`. The right database answers
-   with a number; the wrong one says the table does not exist.
+   Click the **database name itself** — not a table inside it, and not
+   `information_schema`. You can tell which view you are in by the tab row: the
+   database view has **Structure · SQL · Search · Query · Export · Import**,
+   while a table view also has **Browse** and **Insert**. Importing from the
+   wrong one is the single commonest way this goes wrong, and the preflight
+   below is there to catch it.
+
+   If you are not certain which database it is, open the **SQL** tab on a
+   candidate and run `SELECT DATABASE(), COUNT(*) FROM catalog_courses;`. The
+   right one answers with its own name and a number; the wrong one says the
+   table does not exist.
 3. Open the **Import** tab.
-4. **Choose File** → `0016_editorial_posts.sql` → leave the format as SQL →
-   **Go**. It should report 3 queries.
-5. Open the **Import** tab again.
-6. **Choose File** → `content.sql` (or `content.sql.gz`) → **Go**.
-   It should report 322 queries and take a minute or two.
+4. **Choose File** → `content.sql` → leave the format as SQL → **Go**.
+   It reports 42 queries and takes a few seconds.
+
+There is no migration to import first. Every table this file writes to has
+existed since the first install.
 
 That is all. The catalogue counts and the search index update themselves: each
 course seed ends by calling `catalog_refresh_course_rollup` and
@@ -66,7 +77,23 @@ The top eleven rows should read:
 The eight below them are the courses still to be deepened (Go 11,247 down to
 Dynamic PHP Frontends 1,218).
 
-And one row to confirm the new table arrived:
+And one query that confirms the HTML course has its new shape:
+
+```sql
+SELECT m.title, COUNT(l.id) AS lessons
+FROM catalog_modules m
+JOIN catalog_courses c ON c.id = m.course_id
+LEFT JOIN catalog_lessons l ON l.module_id = m.id
+WHERE c.slug = 'html-from-basics-to-expert'
+GROUP BY m.id, m.title, m.`position`
+ORDER BY m.`position`;
+```
+
+Five rows: Foundations 9, Forms Semantics and Media 7, Graphics Metadata and
+Access 7, Advanced HTML 10, Project and Practice 3 — thirty-six in all, of
+which thirty-one are articles and five are quizzes.
+
+An older note, kept because the table it mentions is still checked this way:
 
 ```sql
 SELECT COUNT(*) FROM content_editorial_posts;
@@ -79,25 +106,54 @@ posts are written.
 
 `content.sql` begins by checking that the database it was given actually holds
 the learning schema. If it does not, the import stops on its sixth statement,
-before writing anything, with the instruction in the error text:
+**before writing anything**, with the diagnosis in the error text:
 
 ```
-#1146 - Table 'yourdb.STOP: no learning schema in this database
-         - see docs/IMPORT.md' doesn't exist
+#1146 - Table 'gainglyi_learning.STOP: gainglyi_learning has 0 of 11 tables'
+        doesn't exist
 ```
 
-There is no such table. The message is the table name, which is the only way a
-plain `.sql` file can say something useful to the person running it.
+There is no such table. The message *is* the table name, which is the only way
+a plain `.sql` file can say something useful to the person running it. Read the
+two numbers:
 
-It means the database selected in phpMyAdmin is not the one the site uses.
-Pick another from the left-hand list and check it:
+| It says | It means | Do this |
+| --- | --- | --- |
+| `has 0 of 11 tables` | The wrong database entirely. | Pick the right one from the left-hand list. |
+| `has 10 of 11 tables` | The right database, but a migration has not been applied. | Import the missing migration first, then this file again. |
+
+### The one that looks different
+
+```
+#1109 - Unknown table 'STOP: information_schema has 0 of 11 tables'
+        in information_schema
+```
+
+A different error number, and it has one cause: **`information_schema` was the
+selected database**. That is MySQL's own catalogue, it is read-only, and
+nothing can be written to it — so the import wrote nothing at all. phpMyAdmin
+may still say "Import has been successfully finished, N queries executed" above
+the error, because it counts the statements it sent rather than the ones that
+worked.
+
+It happens when phpMyAdmin is left on a table inside `information_schema` — the
+tab row reads **Browse · Structure · SQL · Search · Insert · Export · Import**,
+which is the *table* view, not the database view. Click your own database in
+the left-hand list first, then **Import**.
+
+### Checking which database is the right one
+
+Open the **SQL** tab on a candidate and run:
 
 ```sql
-SELECT COUNT(*) FROM catalog_courses;
+SELECT DATABASE(), COUNT(*) AS courses FROM catalog_courses;
 ```
 
-The right database answers with a number. **Do not** respond to this by running
-`install.sql` — see the last section.
+The right database answers with its own name and a number. The wrong one says
+the table does not exist.
+
+**Do not** respond to any of this by running `install.sql` — see the last
+section.
 
 ## If it stops with "Table ... doesn't exist"
 
