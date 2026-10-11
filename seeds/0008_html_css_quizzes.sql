@@ -20,23 +20,14 @@ INSERT INTO catalog_lessons
   (id, module_id, course_id, slug, title, summary, kind, status, `position`,
    duration_seconds, is_free_preview)
 VALUES
-  -- HTML course
-  ('e0000001-0000-4000-8000-000000000029', 'd0000001-0000-4000-8000-000000000008', 'c0000001-0000-4000-8000-000000000004',
-   'html-level-1-check', 'Level 1 Check: The Basics',
-   'Five questions on the document skeleton, the text elements that carry meaning rather than size, and the three attributes people leave off. Use the scratchpad under the questions to try anything you are unsure of.',
-   'quiz', 'published', 4, 420, 1),
-  ('e0000001-0000-4000-8000-00000000002a', 'd0000001-0000-4000-8000-000000000009', 'c0000001-0000-4000-8000-000000000004',
-   'html-level-2-check', 'Level 2 Check: Tables, Forms and Media',
-   'Five questions on scoped table headers, what native validation gives you before any script runs, and choosing between srcset, sizes and picture. Every answer here is something you can verify in the scratchpad.',
-   'quiz', 'published', 4, 480, 0),
-  ('e0000001-0000-4000-8000-00000000002b', 'd0000001-0000-4000-8000-00000000000a', 'c0000001-0000-4000-8000-000000000004',
-   'html-level-3-check', 'Level 3 Check: Semantics and Accessibility',
-   'Five questions on landmarks and what they give a screen reader, components built on native elements rather than on divs with ARIA bolted on, and the metadata that decides how a page is shared.',
-   'quiz', 'published', 4, 480, 0),
-  ('e0000001-0000-4000-8000-00000000002c', 'd0000001-0000-4000-8000-00000000000b', 'c0000001-0000-4000-8000-000000000004',
-   'html-expert-exam', 'Expert Exam: HTML',
-   'Twenty questions over the whole course: templates and custom elements, the loading attributes that decide how fast a page paints, landmarks, and building a feature that still works when the script never arrives.',
-   'quiz', 'published', 4, 900, 0),
+  -- The HTML course quiz LESSONS are not here any more.
+  --
+  -- They moved to seeds/0006_html_course.sql when that course was rebuilt
+  -- around thirty topics in five modules: the quiz lessons have to be
+  -- numbered in the same statement as the article lessons they sit after,
+  -- because uq_lessons_position is UNIQUE (module_id, position) and a
+  -- second statement renumbering half the module collides with the first.
+  -- The quizzes themselves are still below.
 
   -- CSS course
   ('e0000001-0000-4000-8000-00000000002d', 'd0000001-0000-4000-8000-00000000000c', 'c0000001-0000-4000-8000-000000000005',
@@ -69,27 +60,34 @@ INSERT INTO assessment_quizzes
 VALUES
   ('f0000001-0000-4000-8000-000000000004',
    'c0000001-0000-4000-8000-000000000004', 'e0000001-0000-4000-8000-000000000029',
-   'Level 1 Check: The Basics',
-   'Five questions on the document skeleton, the text elements and the three attributes people leave off. Use the scratchpad below the questions to try anything you are unsure of.',
-   60, 600, NULL, 0, 1, 1, 'published'),
+   'Module 1 Check: Foundations',
+   'Eight questions on the document skeleton, the text elements, attributes, links, images, lists and tables. Use the scratchpad below the questions to try anything you are unsure of.',
+   60, 720, NULL, 0, 1, 1, 'published'),
 
   ('f0000001-0000-4000-8000-000000000005',
    'c0000001-0000-4000-8000-000000000004', 'e0000001-0000-4000-8000-00000000002a',
-   'Level 2 Check: Tables, Forms and Media',
-   'Scoped table headers, native form validation, and picking the right image element. Every answer here is something you can verify in the scratchpad.',
-   60, 720, NULL, 0, 1, 1, 'published'),
+   'Module 2 Check: Forms, Semantics and Media',
+   'Eight questions on forms and the labels that make them usable, native validation, semantic structure, and media with its captions. Every answer here is something you can verify in the scratchpad.',
+   60, 840, NULL, 0, 1, 1, 'published'),
 
   ('f0000001-0000-4000-8000-000000000006',
    'c0000001-0000-4000-8000-000000000004', 'e0000001-0000-4000-8000-00000000002b',
-   'Level 3 Check: Semantics and Accessibility',
-   'Landmarks, accessible components built on native elements, and the metadata that decides how a page is shared.',
-   70, 720, NULL, 0, 1, 1, 'published'),
+   'Module 3 Check: Graphics, Metadata and Access',
+   'Eight questions on graphics in markup, embedded content, the metadata that decides how a page is shared, responsive images, accessibility and entities.',
+   70, 840, NULL, 0, 1, 1, 'published'),
 
   ('f0000001-0000-4000-8000-000000000007',
    'c0000001-0000-4000-8000-000000000004', 'e0000001-0000-4000-8000-00000000002c',
-   'Expert Exam: HTML',
-   'Templates and custom elements, loading attributes, and building a feature that still works when the script does not.',
-   70, 1500, 3, 1, 1, 1, 'published'),
+   'Module 4 Check: Advanced HTML',
+   'Eight questions on performance, security, how HTML meets CSS and JavaScript, SEO, the modern APIs, and building a feature that still works when the script does not.',
+   70, 900, NULL, 0, 1, 1, 'published'),
+
+  -- The final exam, new with the five-module curriculum.
+  ('f0000001-0000-4000-8000-000000000050',
+   'c0000001-0000-4000-8000-000000000004', 'e0000001-0000-4000-8000-000000000143',
+   'Final Exam: HTML',
+   'Twelve questions drawn from all thirty topics. Pass this and you can mark up a page properly: the right element every time, forms the browser validates, a structure a screen reader can navigate, and a loading order that does not block the first paint.',
+   75, 1500, 3, 1, 1, 1, 'published'),
 
   ('f0000001-0000-4000-8000-000000000008',
    'c0000001-0000-4000-8000-000000000005', 'e0000001-0000-4000-8000-00000000002d',
@@ -574,6 +572,225 @@ SELECT v.question_id, v.body, v.is_correct, v.pos
     -- CSS L4 Q5: will-change (true/false)
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000175', 'True', 0, 1
     UNION ALL SELECT 'a1000001-0000-4000-8000-000000000175', 'False', 1, 2
+  ) v
+ON DUPLICATE KEY UPDATE
+  body = VALUES(body), is_correct = VALUES(is_correct);
+
+
+
+-- ---------------------------------------------------------------------------
+-- The questions added when the HTML course was rebuilt around thirty topics.
+--
+-- The twenty questions above are kept and still belong to their quizzes: a
+-- content seed cannot delete a row, and these quizzes already have learner
+-- attempts against them. Three more are added to each module check and twelve
+-- make up the new final exam. Their ids start at 0401, not at 0201 next to the
+-- originals: 02xx already belongs to the Python course, and reusing it would
+-- have rewritten that course quizzes. A rehearsal import caught it.
+--
+-- Ten of them are the question bank from the course outline this curriculum
+-- was built from, each placed in the module that teaches its answer.
+-- ---------------------------------------------------------------------------
+INSERT INTO assessment_questions
+  (id, quiz_id, kind, prompt, explanation, points, `position`, correct_text)
+VALUES
+  ('a1000001-0000-4000-8000-000000000401', 'f0000001-0000-4000-8000-000000000004', 'single_choice',
+   'What does HTML stand for, and what follows from it?',
+   'HyperText Markup Language. The useful word is markup: you label content with what it is, rather than instructing a machine what to do. It has no variables, arithmetic or control flow, which is why it is not a programming language.',
+   2, 6, NULL),
+  ('a1000001-0000-4000-8000-000000000402', 'f0000001-0000-4000-8000-000000000004', 'single_choice',
+   'What is the difference between an element and an attribute?',
+   'An element is a piece of structure - usually a start tag, content and an end tag. An attribute lives inside the start tag as a name-value pair and configures that element: where a link goes, what an image shows, whether a field is required.',
+   2, 7, NULL),
+  ('a1000001-0000-4000-8000-000000000403', 'f0000001-0000-4000-8000-000000000004', 'single_choice',
+   'When should an image be given an empty alt attribute rather than descriptive alt text?',
+   'When the image is purely decorative and carries no information - a divider, or an icon beside text that already says the same thing. An empty alt tells assistive technology to skip it. Omitting the attribute entirely is different and worse: with nothing to go on, many screen readers read the filename out instead.',
+   2, 8, NULL),
+  ('a1000001-0000-4000-8000-000000000404', 'f0000001-0000-4000-8000-000000000005', 'single_choice',
+   'Why is a label with a matching for attribute better than a div of text above an input?',
+   'Three reasons, and only the first is about screen readers. The control is announced with its name when focus reaches it; clicking the label focuses the field, which turns a tiny checkbox into a target the width of its text; and it is the association autofill and automated testing both rely on. A div looks identical and gives none of them.',
+   2, 6, NULL),
+  ('a1000001-0000-4000-8000-000000000405', 'f0000001-0000-4000-8000-000000000005', 'single_choice',
+   'What is the difference between GET and POST on a form?',
+   'GET puts the values in the URL, which makes the request bookmarkable, cacheable and repeatable - right for retrieval, such as a search. POST puts them in the request body, has no practical length limit, and is right for anything that changes something. The test is whether running the same request twice should do the same thing twice.',
+   2, 7, NULL),
+  ('a1000001-0000-4000-8000-000000000406', 'f0000001-0000-4000-8000-000000000005', 'single_choice',
+   'Why are semantic elements preferable to a page built from div elements?',
+   'They state what the content is, so assistive technology, search engines and the next developer all reach the same answer about the structure. CSS can make a div look like anything, and nothing above the markup layer can put back the meaning the markup never carried.',
+   2, 8, NULL),
+  ('a1000001-0000-4000-8000-000000000407', 'f0000001-0000-4000-8000-000000000006', 'single_choice',
+   'You need an interactive diagram whose individual shapes can be styled and clicked. SVG or canvas?',
+   'SVG. Its shapes are elements in the document, so CSS can style them, scripts can attach handlers to each one, and each can carry a role and a label. A canvas is a bitmap: once a shape is painted there is nothing left to select, style or describe, and the only accessibility route is fallback text.',
+   2, 6, NULL),
+  ('a1000001-0000-4000-8000-000000000408', 'f0000001-0000-4000-8000-000000000006', 'single_choice',
+   'Which sandbox combination makes the attribute effectively useless on content you do not control?',
+   'allow-scripts together with allow-same-origin. Each alone is a limited grant; together they let the framed document run script with your origin privileges, which includes removing its own sandbox attribute from the parent document.',
+   2, 7, NULL),
+  ('a1000001-0000-4000-8000-000000000409', 'f0000001-0000-4000-8000-000000000006', 'single_choice',
+   'What is a non-breaking space actually for?',
+   'Keeping two things on the same line - 14 March, 2.5 kg, Figure 3. It does two things: it does not collapse, and it does not permit a line break, and the second is the point. Using a row of them to indent or to space elements apart is layout written into the content, where margin and padding belong.',
+   2, 8, NULL),
+  ('a1000001-0000-4000-8000-00000000040a', 'f0000001-0000-4000-8000-000000000007', 'single_choice',
+   'What does defer do to a script, and how does it differ from async?',
+   'Both download in parallel with parsing. defer executes after parsing has finished, in document order, so the script can rely on the whole document existing. async executes the moment it arrives, interrupting parsing at an unpredictable point, with no order guarantee between async scripts.',
+   2, 6, NULL),
+  ('a1000001-0000-4000-8000-00000000040b', 'f0000001-0000-4000-8000-000000000007', 'single_choice',
+   'Is client-side validation enough to keep submitted data safe?',
+   'No, and not nearly. The user controls the browser: developer tools can remove required, change max and edit a hidden value, and a request need not come from your form at all. Browser validation is a usability feature that saves a round trip. The server must validate and authorise everything.',
+   2, 7, NULL),
+  ('a1000001-0000-4000-8000-00000000040c', 'f0000001-0000-4000-8000-000000000007', 'single_choice',
+   'Does adding structured data guarantee a rich result in search?',
+   'No. It makes a page eligible, and the search engine decides. It must also describe what is actually on the page - marking up a rating or a price that does not appear is a policy violation, and the penalty is losing rich results altogether.',
+   2, 8, NULL),
+  ('a1000001-0000-4000-8000-000000000411', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'A page contains a div written inside a paragraph. What does the browser build?',
+   'Three elements, not two. A p cannot contain a div, so the parser closes the paragraph, creates the div, then meets a stray end tag and makes an empty paragraph out of it. The page renders either way, which is why the Elements panel is the only place the difference shows.',
+   2, 1, NULL),
+  ('a1000001-0000-4000-8000-000000000412', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'Which attribute pair stops the layout jumping as images load?',
+   'width and height on the img. They give the browser the aspect ratio before the file arrives, so the right space is reserved. Without them the space is zero until the image loads and everything below it moves - the main cause of a poor layout-shift score.',
+   2, 2, NULL),
+  ('a1000001-0000-4000-8000-000000000413', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'What does scope on a table header cell change?',
+   'It associates the header with its column or row, so a screen reader reading a data cell announces the headers with it - "HTML, Q2, 164" rather than "164". Without it the numbers are all present and none of them mean anything.',
+   2, 3, NULL),
+  ('a1000001-0000-4000-8000-000000000414', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'Which is the correct element for a control that submits a form?',
+   'A button. It is focusable, activated by both Enter and Space, exposes a disabled state and is announced as a button. A div with a click handler has none of that, and getting back to parity takes tabindex, a role, two key handlers and a focus style.',
+   2, 4, NULL),
+  ('a1000001-0000-4000-8000-000000000415', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'What is the difference between an empty alt attribute and a missing one?',
+   'An empty alt says the image is decorative, so assistive technology skips it. A missing alt leaves it with nothing to go on, and many screen readers then read the filename out character by character.',
+   2, 5, NULL),
+  ('a1000001-0000-4000-8000-000000000416', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'Why does a page need the viewport meta tag before any responsive CSS works on a phone?',
+   'Without it a mobile browser lays the page out at roughly 980 pixels and zooms out to fit, so every media query is answered against a viewport that does not exist. The CSS is correct and is being asked the wrong question.',
+   2, 6, NULL),
+  ('a1000001-0000-4000-8000-000000000417', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'Which approach prevents cross-site scripting when echoing something a user typed?',
+   'Escape on output, in the context it is landing in, and prefer textContent to innerHTML. Escaping at input is the wrong place: the same stored value may be rendered into HTML, an attribute, a URL and JSON, and each needs different treatment.',
+   2, 7, NULL),
+  ('a1000001-0000-4000-8000-000000000418', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'What does rel="noopener" on a link that opens a new tab prevent?',
+   'It stops the opened page holding a reference back to yours through window.opener, which it could otherwise use to navigate your tab somewhere else. Modern browsers imply it, and writing it covers the ones that do not. noreferrer additionally withholds the referring URL.',
+   2, 8, NULL),
+  ('a1000001-0000-4000-8000-000000000419', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'Where must a caption element appear inside a table?',
+   'Immediately after the opening table tag, before anything else. It is the table heading: a screen reader reads it first, so somebody skipping the page knows whether to stop. It is also the line most often left out.',
+   2, 9, NULL),
+  ('a1000001-0000-4000-8000-00000000041a', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'A button toggles a panel. Which attribute has to be kept in step with the visual state?',
+   'aria-expanded on the button. A toggle that animates perfectly and never updates it is announced as collapsed for ever, so a screen reader user is told the panel is shut while it is open.',
+   2, 10, NULL),
+  ('a1000001-0000-4000-8000-00000000041b', 'f0000001-0000-4000-8000-000000000050', 'single_choice',
+   'What is progressive enhancement, in one sentence?',
+   'Build the version that works with HTML alone, then add the version that feels better - in that order, because the first is what runs when the second fails to arrive. Scripts are blocked, dropped and error more often than anyone expects.',
+   2, 11, NULL),
+  ('a1000001-0000-4000-8000-00000000041c', 'f0000001-0000-4000-8000-000000000050', 'true_false',
+   'True or false: a validator reporting no errors means a page is accessible.',
+   'False. Validation checks syntax and the content model - unclosed elements, duplicate ids, invalid nesting. A page built entirely from div elements with no labels and no alt text validates perfectly. Validation is a floor, not a ceiling.',
+   2, 12, NULL)
+ON DUPLICATE KEY UPDATE
+  prompt = VALUES(prompt), explanation = VALUES(explanation),
+  points = VALUES(points), `position` = VALUES(`position`), kind = VALUES(kind);
+
+INSERT INTO assessment_question_options (question_id, body, is_correct, `position`)
+SELECT v.question_id, v.body, v.is_correct, v.pos
+  FROM (
+    SELECT 'a1000001-0000-4000-8000-000000000401' AS question_id, 'HyperText Markup Language - a language for describing the structure of content' AS body, 1 AS is_correct, 1 AS pos
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000401', 'HyperText Programming Language - a simple language for page logic', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000401', 'High Text Markup Language - a format for styling documents', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000401', 'HyperText Media Language - a container format for web media', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000402', 'An element defines a piece of structure; an attribute configures or describes it', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000402', 'An element is visible on the page; an attribute is always hidden', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000402', 'An element is HTML; an attribute is CSS applied inline', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000402', 'They are the same thing written two ways', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000403', 'When the image is decorative and conveys no information', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000403', 'When the image is large and the alt text would be long', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000403', 'When the image is inside a link, because the link text covers it', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000403', 'Never - every image should have descriptive alt text', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000404', 'It names the control, enlarges the click target, and is what autofill reads', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000404', 'It is the only way to style the text next to a field', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000404', 'It makes the field required', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000404', 'It submits the label text along with the value', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000405', 'GET places data in the URL and suits retrieval; POST sends it in the body and suits changes', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000405', 'GET is insecure and POST is encrypted', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000405', 'GET is for small forms and POST is for large ones, with no other difference', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000405', 'GET works without JavaScript and POST requires it', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000406', 'They communicate meaning, which improves accessibility, maintainability and machine understanding', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000406', 'They render faster than div elements', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000406', 'They are required by the HTML validator', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000406', 'They apply default styling that removes the need for CSS', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000407', 'SVG, because every shape stays an element that CSS and script can reach', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000407', 'Canvas, because it redraws faster for interactive content', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000407', 'Canvas, because SVG cannot handle click events', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000407', 'Either - the two are interchangeable once styled', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000408', 'allow-scripts together with allow-same-origin', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000408', 'allow-forms together with allow-popups', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000408', 'allow-downloads together with allow-modals', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000408', 'A bare sandbox attribute with no tokens at all', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000409', 'Keeping a pair of words or a value and its unit from being split across lines', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000409', 'Indenting the first line of a paragraph', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000409', 'Adding space between two buttons', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000409', 'Forcing a line break where the content requires one', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040a', 'Downloads in parallel and executes after parsing, preserving document order', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040a', 'Delays the download until the page has finished loading', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040a', 'Executes as soon as the file arrives, like async but faster', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040a', 'Prevents the script from running until the user interacts with the page', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040b', 'No - the server must validate and authorise every request', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040b', 'Yes, provided every field uses required and pattern', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040b', 'Yes, as long as the form is submitted over https', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040b', 'Yes for forms that use POST, no for forms that use GET', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040c', 'No - it makes a page eligible, but display is never guaranteed', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040c', 'Yes, provided the JSON-LD validates', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040c', 'Yes, for the types the search engine supports', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000040c', 'No, because structured data is ignored by every major search engine', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000411', 'An empty paragraph, a div, and a second empty paragraph', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000411', 'A paragraph containing a div, exactly as written', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000411', 'A parse error, and nothing after it renders', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000411', 'A div containing a paragraph, with the order swapped', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000412', 'width and height', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000412', 'loading and decoding', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000412', 'srcset and sizes', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000412', 'fetchpriority and preload', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000413', 'It lets a screen reader read each cell together with its row and column headers', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000413', 'It merges the header across several columns', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000413', 'It makes the header row stay visible when the table scrolls', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000413', 'It is a styling hook with no effect on behaviour', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000414', 'A button element', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000414', 'A div with a click handler and a button role', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000414', 'An anchor element with a fragment href', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000414', 'A span styled to look like a button', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000415', 'Empty means decorative and is skipped; missing leaves the screen reader to read the filename', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000415', 'They are equivalent; both cause the image to be skipped', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000415', 'Empty is invalid HTML; missing is valid', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000415', 'Empty hides the image; missing shows it', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000416', 'Without it the browser assumes a desktop-width viewport and answers media queries against it', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000416', 'It is what enables the CSS media query syntax', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000416', 'It sets the minimum font size on small screens', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000416', 'It is required for the page to validate', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000417', 'Escape on output in the right context, and use textContent rather than innerHTML', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000417', 'Strip angle brackets when the value is saved', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000417', 'Use POST rather than GET for the form', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000417', 'Add the required attribute to every input', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000418', 'The opened page from being able to navigate the tab it was opened from', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000418', 'The link from being followed by search engines', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000418', 'The browser from caching the destination', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000418', 'The new tab from inheriting the session cookie', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000419', 'First, immediately after the opening table tag', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000419', 'Last, after the closing tbody tag', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000419', 'Inside thead, as the first row', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-000000000419', 'Anywhere; the position does not matter', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041a', 'aria-expanded on the button', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041a', 'aria-hidden on the panel', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041a', 'tabindex on the button', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041a', 'A button role on the button', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041b', 'Build the version that works without JavaScript first, then enhance it', 1, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041b', 'Add features progressively as a user scrolls down the page', 0, 2
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041b', 'Ship the newest features first and provide polyfills for old browsers', 0, 3
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041b', 'Load the page in stages, with the most important content last', 0, 4
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041c', 'True', 0, 1
+    UNION ALL SELECT 'a1000001-0000-4000-8000-00000000041c', 'False', 1, 2
   ) v
 ON DUPLICATE KEY UPDATE
   body = VALUES(body), is_correct = VALUES(is_correct);

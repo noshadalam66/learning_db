@@ -52,6 +52,7 @@ The top eleven rows should read:
 | slug | words |
 | --- | --- |
 | generative-ai | 48,375 |
+| html-from-basics-to-expert | 36,989 |
 | deep-learning | 35,374 |
 | data-analytics | 23,718 |
 | machine-learning | 23,192 |
@@ -61,9 +62,8 @@ The top eleven rows should read:
 | python-for-data-science | 19,112 |
 | python-from-basics-to-expert | 18,634 |
 | css-from-basics-to-expert | 18,501 |
-| html-from-basics-to-expert | 14,247 |
 
-The nine below them are the courses still to be deepened (Go 11,247 down to
+The eight below them are the courses still to be deepened (Go 11,247 down to
 Dynamic PHP Frontends 1,218).
 
 And one row to confirm the new table arrived:
