@@ -233,6 +233,24 @@ SET sql_mode = 'STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUT
 -- the check fails, which is why it goes through PREPARE: a reference to a
 -- table that does not exist cannot sit in a statement that is parsed either
 -- way.
+--
+-- THE MESSAGE NAMES THE DATABASE AND COUNTS WHAT IT FOUND, because the first
+-- version did neither and that cost an evening. It said only "no learning
+-- schema in this database", which is true and useless: the person reading it
+-- already believes they are in the right database, so the message agrees with
+-- them and they go looking elsewhere. The report that produced this change was
+-- an import run with information_schema selected, and the message could not
+-- say so.
+--
+-- Naming the count as well separates the two ways this fails:
+--
+--   has 0 of 11 tables     the wrong database entirely
+--   has 10 of 11 tables    the right database, missing a migration
+--
+-- An identifier is capped at 64 characters, which is why the name is cut to 30
+-- - long enough for any cPanel-prefixed name - and why the pointer to
+-- docs/IMPORT.md had to go. Naming the database is worth more than naming a
+-- file the reader has to go and find.
 -- ---------------------------------------------------------------------------
 SELECT COUNT(*) INTO @learning_tables
   FROM information_schema.tables
@@ -245,7 +263,9 @@ SELECT COUNT(*) INTO @learning_tables
 
 SET @preflight = IF(@learning_tables = 11,
   'SELECT CONCAT(DATABASE(), '' has the learning schema'') AS preflight',
-  'SELECT 1 FROM \`STOP: no learning schema in this database - see docs/IMPORT.md\`');
+  CONCAT('SELECT 1 FROM \`STOP: ',
+         LEFT(COALESCE(DATABASE(), 'no database selected'), 30),
+         ' has ', @learning_tables, ' of 11 tables\`'));
 
 PREPARE preflight FROM @preflight;
 EXECUTE preflight;
