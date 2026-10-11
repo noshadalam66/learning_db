@@ -5,7 +5,8 @@
   "description": "Schema, migrations and seeds. The npm package exists only for the content tests, which drive a real browser.",
   "type": "module",
   "scripts": {
-    "test:fences": "node tests/run-code-fences.mjs"
+    "test:fences": "node tests/run-code-fences.mjs",
+    "test:html": "node tests/run-html-examples.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.0"

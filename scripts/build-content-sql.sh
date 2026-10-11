@@ -64,6 +64,60 @@ is_fixture() {
     | grep -qE "^[[:space:]]*(INSERT INTO|REPLACE INTO|UPDATE|DELETE FROM)[[:space:]]+($FIXTURE_TABLES)\b"
 }
 
+# Tables a content seed may touch that a live database is NOT guaranteed to
+# have. is_fixture() above drops a whole FILE; this drops a single STATEMENT,
+# which is what the one case below needs.
+#
+# WHY THIS EXISTS. Seed 0006 opens by granting the instructor role to the
+# author the HTML course is attributed to:
+#
+#   INSERT INTO identity_user_roles (user_id, role_id)
+#   SELECT u.id, r.id FROM identity_users u
+#     JOIN identity_roles r ON r.name = 'instructor'
+#    WHERE u.email = 'lena@learning.test' ...
+#
+# Lena is a demo person seeded in 0001, and 0001 is a fixture that content
+# builds leave out - so on a live database that SELECT matches nothing and the
+# statement inserts nothing. It was kept on the grounds that a statement which
+# does nothing can do no harm.
+#
+# It can. Doing nothing still requires the table to exist, and on a live
+# database that was not installed from this repository's install.sql it may
+# not. Then the first statement of the first seed is
+#
+#   #1146 - Table '....identity_user_roles' doesn't exist
+#
+# and the whole import stops before a single course is written. That is what
+# happened on the production database on 8 October.
+#
+# identity_user_roles cannot go in FIXTURE_TABLES, because that would drop the
+# entire HTML course along with it. So the statement is removed and a comment
+# is left in its place, so that anyone reading content.sql can see that
+# something was taken out and why.
+STATEMENT_TABLES='identity_user_roles'
+
+strip_demo_statements() {
+  awk -v tables="$STATEMENT_TABLES" '
+    BEGIN { skipping = 0 }
+    # A statement, not the word: the keyword opens the line in upper case,
+    # which is how every statement in these seeds is written and is not how
+    # prose inside a lesson reads.
+    !skipping && $0 ~ "^[[:space:]]*(INSERT INTO|REPLACE INTO|UPDATE|DELETE FROM)[[:space:]]+(" tables ")([[:space:]]|\\(|$)" {
+      skipping = 1
+      print "-- Removed by build-content-sql.sh: this statement writes to a"
+      print "-- table a live database is not guaranteed to have, and on a live"
+      print "-- database it would match no rows anyway. See the script."
+    }
+    skipping {
+      # The statement ends at the first line whose last non-blank character
+      # is a semicolon.
+      if ($0 ~ /;[[:space:]]*$/) { skipping = 0 }
+      next
+    }
+    { print }
+  ' "$1"
+}
+
 files=()
 skipped=""
 for file in seeds/*.sql; do
@@ -160,13 +214,49 @@ mkdir -p dist
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 SET sql_mode = 'STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
+-- ---------------------------------------------------------------------------
+-- PREFLIGHT: is this the right database?
+--
+-- This file carries content and no schema, so it can only be imported into a
+-- database that already has the tables. Imported into the wrong one - an easy
+-- thing to do in phpMyAdmin, where the database is chosen by clicking a name
+-- in a list - the first seed stops with
+--
+--   #1146 - Table 'something.catalog_tags' doesn't exist
+--
+-- which says what is missing and not what to do about it. The three statements
+-- below stop first, with the instruction in the error text.
+--
+-- The trick is that the message is a TABLE NAME. A missing-table error prints
+-- the name it looked for, so the name is the message. It is built only when
+-- the check fails, which is why it goes through PREPARE: a reference to a
+-- table that does not exist cannot sit in a statement that is parsed either
+-- way.
+-- ---------------------------------------------------------------------------
+SELECT COUNT(*) INTO @learning_tables
+  FROM information_schema.tables
+ WHERE table_schema = DATABASE()
+   AND table_name IN ('catalog_categories', 'catalog_courses',
+                      'catalog_modules', 'catalog_lessons', 'catalog_tags',
+                      'catalog_course_tags', 'content_articles',
+                      'content_lesson_diagrams', 'assessment_quizzes',
+                      'assessment_questions', 'assessment_question_options');
+
+SET @preflight = IF(@learning_tables = 11,
+  'SELECT CONCAT(DATABASE(), '' has the learning schema'') AS preflight',
+  'SELECT 1 FROM \`STOP: no learning schema in this database - see docs/IMPORT.md\`');
+
+PREPARE preflight FROM @preflight;
+EXECUTE preflight;
+DEALLOCATE PREPARE preflight;
 HEADER
 
   for file in "${files[@]}"; do
     printf '\n-- ###########################################################################\n'
     printf -- '-- seed: %s\n' "$(basename "$file")"
     printf -- '-- ###########################################################################\n\n'
-    cat "$file"
+    strip_demo_statements "$file"
   done
 } > "$OUT"
 
