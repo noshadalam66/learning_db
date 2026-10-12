@@ -40,6 +40,23 @@ cd "$ROOT"
 FROM="${1:-}"
 TO="${2:-}"
 
+# Optional. When set, the file opens with USE `<name>`, which pins the import
+# to that database instead of trusting whichever one the client has selected.
+#
+#   CONTENT_DB=gainglyi_learningdb ./scripts/build-content-sql.sh 0006 0008
+#
+# It exists because of a real import that could not be made to work without it.
+# phpMyAdmin said "Importing into the database gainglyi_learningdb" at the top
+# of the page, and DATABASE() evaluated to information_schema inside the same
+# import - so the preflight read an empty schema and stopped, and every INSERT
+# after it would have failed the same way. Whatever selects the database on
+# that host, it is not what the page title reports. USE does not depend on it:
+# it sets the default database from inside the file, where the file can see it.
+#
+# Left empty the file behaves as before and follows the client's selection,
+# which is right for anyone whose client selects what it displays.
+CONTENT_DB="${CONTENT_DB:-}"
+
 if [ -n "$FROM" ] && [ -z "$TO" ]; then
   echo "error: give two numbers or none - ./scripts/build-content-sql.sh 0020 0029" >&2
   exit 1
@@ -167,6 +184,15 @@ if [ -n "$destructive" ]; then
 fi
 
 OUT="dist/content.sql"
+
+# Emitted as the first statement when CONTENT_DB is set - see the note by the
+# variable. Backticks around the name, so a database called `order` or one with
+# a hyphen in it still parses.
+if [ -n "$CONTENT_DB" ]; then
+  use_line=$(printf '\n-- Pinned to one database, so the import does not depend on the client\n-- having selected it. Edit the name here if you import elsewhere.\nUSE `%s`;\n' "$CONTENT_DB")
+else
+  use_line=""
+fi
 mkdir -p dist
 
 {
@@ -210,7 +236,7 @@ mkdir -p dist
 --   statements of each seed, so the catalogue counts and search are correct
 --   as soon as the import finishes.
 -- ===========================================================================
-
+${use_line}
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 SET sql_mode = 'STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
