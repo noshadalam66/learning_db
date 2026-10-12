@@ -261,11 +261,23 @@ SELECT COUNT(*) INTO @learning_tables
                       'content_lesson_diagrams', 'assessment_quizzes',
                       'assessment_questions', 'assessment_question_options');
 
+-- The message has to arrive as a table name, because a table name is the only
+-- string MySQL will quote back in an error that phpMyAdmin then shows. That
+-- caps it at 64 characters, which is why it is this terse.
+--
+-- Two cases, because they need two different answers. None of the eleven
+-- tables present almost always means the wrong database is selected - most
+-- often information_schema, which phpMyAdmin selects on its own - and the
+-- useful thing to say then is which sidebar entry to click, not a count of
+-- what was missing. Some but not all present is a real schema that is behind
+-- on a migration, and there the count is the useful part.
 SET @preflight = IF(@learning_tables = 11,
   'SELECT CONCAT(DATABASE(), '' has the learning schema'') AS preflight',
-  CONCAT('SELECT 1 FROM \`STOP: ',
-         LEFT(COALESCE(DATABASE(), 'no database selected'), 30),
-         ' has ', @learning_tables, ' of 11 tables\`'));
+  IF(@learning_tables = 0,
+     'SELECT 1 FROM \`STOP: wrong database - click yours in the left sidebar\`',
+     CONCAT('SELECT 1 FROM \`STOP: ',
+            LEFT(COALESCE(DATABASE(), 'no database'), 22),
+            ' has ', @learning_tables, '/11 tables - run migrations\`')));
 
 PREPARE preflight FROM @preflight;
 EXECUTE preflight;
