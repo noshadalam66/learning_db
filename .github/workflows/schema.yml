@@ -110,8 +110,20 @@ jobs:
           # stale, same as one in a comment.
           expected=$(grep -hoE '^CREATE (PROCEDURE|FUNCTION) [a-z_]+' migrations/*.sql | awk '{print $3}' | sort -u | wc -l)
 
-          echo "courses=$courses routines=$routines (expected $expected)"
-          [ "$courses" -eq 15 ] || { echo "::error::expected 15 courses, got $courses"; exit 1; }
+          # Counted from the seeds, not written down. This said 15 for months
+          # after the Data Science track took the catalogue to 20, and CI had
+          # been red on it ever since - which is the same lesson the routine
+          # count above already learned the hard way, in a comment three lines
+          # from the number that went stale.
+          #
+          # A course row is the only VALUES row that opens with a course id, and
+          # the id prefixes are a convention this schema has kept since 0001.
+          seeded_courses=$(grep -hoE "^\s*\('c[0-9a-f]{7}-[0-9a-f-]+'," seeds/*.sql \
+            | grep -oE "c[0-9a-f-]+" | sort -u | wc -l)
+          [ "$seeded_courses" -gt 0 ] || { echo "::error::no course ids found in seeds/ - this derivation has stopped working"; exit 1; }
+
+          echo "courses=$courses routines=$routines (expected $expected) seeded=$seeded_courses"
+          [ "$courses" -eq "$seeded_courses" ] || { echo "::error::expected $seeded_courses courses, got $courses"; exit 1; }
           [ "$routines" -eq "$expected" ] || { echo "::error::expected $expected routines, got $routines"; exit 1; }
           ./scripts/verify.sh
 
@@ -119,7 +131,7 @@ jobs:
           my install_probe < dist/install.sql
           courses=$(count "SELECT COUNT(*) FROM catalog_courses")
           tables=$(count "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='install_probe' AND table_type='BASE TABLE'")
-          [ "$courses" -eq 15 ] || { echo "::error::re-import produced $courses courses"; exit 1; }
+          [ "$courses" -eq "$seeded_courses" ] || { echo "::error::re-import produced $courses courses"; exit 1; }
           echo "courses=$courses tables=$tables"
           ./scripts/verify.sh
 
@@ -137,7 +149,7 @@ jobs:
 
           my install_probe < dist/install.sql
           courses=$(count "SELECT COUNT(*) FROM catalog_courses")
-          [ "$courses" -eq 15 ] || { echo "::error::import over wreckage produced $courses courses"; exit 1; }
+          [ "$courses" -eq "$seeded_courses" ] || { echo "::error::import over wreckage produced $courses courses"; exit 1; }
           ./scripts/verify.sh
 
           echo "--- a database with a real account is refused, and keeps its data"
@@ -158,7 +170,7 @@ jobs:
           }
           still=$(count "SELECT COUNT(*) FROM catalog_courses")
           real=$(count "SELECT COUNT(*) FROM identity_users WHERE email='someone@example.com'")
-          [ "$still" -eq 15 ] || { echo "::error::the refusal destroyed data: $still courses left"; exit 1; }
+          [ "$still" -eq "$seeded_courses" ] || { echo "::error::the refusal destroyed data: $still courses left"; exit 1; }
           [ "$real" -eq 1 ] || { echo "::error::the refusal deleted the account it was protecting"; exit 1; }
 
       - name: install.sql into a latin1 database, the way cPanel makes one
@@ -201,8 +213,20 @@ jobs:
           emoji=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%F09F918D%'")
           doubled=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%C383C2%'")
 
-          echo "courses=$courses cjk=$cjk emoji=$emoji double-encoded=$doubled"
-          [ "$courses" -eq 15 ] || { echo "::error::latin1 install produced $courses courses"; exit 1; }
+          # Counted from the seeds, not written down. This said 15 for months
+          # after the Data Science track took the catalogue to 20, and CI had
+          # been red on it ever since - which is the same lesson the routine
+          # count above already learned the hard way, in a comment three lines
+          # from the number that went stale.
+          #
+          # A course row is the only VALUES row that opens with a course id, and
+          # the id prefixes are a convention this schema has kept since 0001.
+          seeded_courses=$(grep -hoE "^\s*\('c[0-9a-f]{7}-[0-9a-f-]+'," seeds/*.sql \
+            | grep -oE "c[0-9a-f-]+" | sort -u | wc -l)
+          [ "$seeded_courses" -gt 0 ] || { echo "::error::no course ids found in seeds/ - this derivation has stopped working"; exit 1; }
+
+          echo "courses=$courses cjk=$cjk emoji=$emoji double-encoded=$doubled seeded=$seeded_courses"
+          [ "$courses" -eq "$seeded_courses" ] || { echo "::error::latin1 install produced $courses courses"; exit 1; }
           [ "$cjk" -ge 1 ] || { echo "::error::the CJK lesson did not survive the import"; exit 1; }
           [ "$emoji" -ge 1 ] || { echo "::error::the emoji did not survive the import"; exit 1; }
           [ "$doubled" -eq 0 ] || { echo "::error::$doubled row(s) are double-encoded UTF-8"; exit 1; }
@@ -238,7 +262,20 @@ jobs:
           php tests/import-as-phpmyadmin.php dist/install.sql pma_probe
 
           courses=$(my -N -B pma_probe -e "SELECT COUNT(*) FROM catalog_courses")
-          [ "$courses" -eq 15 ] || { echo "::error::phpMyAdmin import produced $courses courses"; exit 1; }
+
+          # Counted from the seeds, not written down. This said 15 for months
+          # after the Data Science track took the catalogue to 20, and CI had
+          # been red on it ever since - which is the same lesson the routine
+          # count above already learned the hard way, in a comment three lines
+          # from the number that went stale.
+          #
+          # A course row is the only VALUES row that opens with a course id, and
+          # the id prefixes are a convention this schema has kept since 0001.
+          seeded_courses=$(grep -hoE "^\s*\('c[0-9a-f]{7}-[0-9a-f-]+'," seeds/*.sql \
+            | grep -oE "c[0-9a-f-]+" | sort -u | wc -l)
+          [ "$seeded_courses" -gt 0 ] || { echo "::error::no course ids found in seeds/ - this derivation has stopped working"; exit 1; }
+
+          [ "$courses" -eq "$seeded_courses" ] || { echo "::error::phpMyAdmin import produced $courses courses, expected $seeded_courses"; exit 1; }
 
           echo "--- content.sql, over the database that import just created"
           ./scripts/build-content-sql.sh
