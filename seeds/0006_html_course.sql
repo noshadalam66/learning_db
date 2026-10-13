@@ -502,6 +502,14 @@ This is the line whose absence produces the most recognisable symptom on the web
 
 Put it first in the head. The browser only reads the first kilobyte or so before it has to commit to a guess, and a charset declaration it has already passed is no use to it.
 
+Nothing about this is specific to accented letters. In UTF-8 `é` is two bytes, `世界` is six and `👍` is four, and a page read as the wrong encoding mangles all three the same way. That makes a line like
+
+```
+Hello, 世界 👍
+```
+
+a better test of a page than a word like `café`: it exercises one, three and four-byte characters at once, and if all of it arrives intact the declaration is doing its job.
+
 ## The viewport
 
 `<meta name="viewport" content="width=device-width, initial-scale=1">` tells a phone to lay the page out at the phone''s own width.

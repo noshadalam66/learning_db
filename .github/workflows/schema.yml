@@ -211,7 +211,23 @@ jobs:
           courses=$(count "SELECT COUNT(*) FROM catalog_courses")
           cjk=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%E4B896E7958C%'")
           emoji=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%F09F918D%'")
-          doubled=$(count "SELECT COUNT(*) FROM content_articles WHERE HEX(body) LIKE '%C383C2%'")
+          # Double-encoding, counted rather than forbidden.
+          #
+          # This asked for zero rows containing the byte pair that opens a
+          # double-encoded character, which was right until a lesson taught
+          # mojibake by printing some: the Python course prints "cafÃ©" to show
+          # what decoding UTF-8 as latin-1 does to a word, and the check read
+          # that deliberate example as a corrupted import.
+          #
+          # So it now compares what is in the database with what the seeds
+          # wrote. Equal means every mangled character was authored as one. A
+          # real double-encoding mangles EVERY non-ASCII character in every
+          # row, so the stored count would be in the thousands against a
+          # handful in the source - this catches that far more clearly than a
+          # zero ever did, and it does not go stale the next time a lesson
+          # needs to show what broken text looks like.
+          authored=$(grep -o 'Ã' seeds/*.sql | wc -l)
+          doubled=$(count "SELECT COALESCE(SUM(CHAR_LENGTH(body) - CHAR_LENGTH(REPLACE(body, 'Ã', ''))), 0) FROM content_articles")
 
           # Counted from the seeds, not written down. This said 15 for months
           # after the Data Science track took the catalogue to 20, and CI had
@@ -225,11 +241,18 @@ jobs:
             | grep -oE "c[0-9a-f-]+" | sort -u | wc -l)
           [ "$seeded_courses" -gt 0 ] || { echo "::error::no course ids found in seeds/ - this derivation has stopped working"; exit 1; }
 
-          echo "courses=$courses cjk=$cjk emoji=$emoji double-encoded=$doubled seeded=$seeded_courses"
+          echo "courses=$courses cjk=$cjk emoji=$emoji mangled=$doubled (authored $authored) seeded=$seeded_courses"
           [ "$courses" -eq "$seeded_courses" ] || { echo "::error::latin1 install produced $courses courses"; exit 1; }
-          [ "$cjk" -ge 1 ] || { echo "::error::the CJK lesson did not survive the import"; exit 1; }
-          [ "$emoji" -ge 1 ] || { echo "::error::the emoji did not survive the import"; exit 1; }
-          [ "$doubled" -eq 0 ] || { echo "::error::$doubled row(s) are double-encoded UTF-8"; exit 1; }
+          # These two look for specific characters in specific seeds, so a
+          # course rewrite can delete the thing being tested and leave the test
+          # looking like a charset regression. It has happened once: the Python
+          # course carried 世界 until it was rewritten, and this step went red
+          # for weeks on a bug that did not exist. The messages name where the
+          # characters live, so the next person reads "put it back" rather than
+          # "the charset is broken".
+          [ "$cjk" -ge 1 ] || { echo "::error::no CJK found in any article body - the charset canary is 世界 in the HTML course's charset lesson (seeds/0006). If a rewrite removed it, put it back; this is the only thing proving a cPanel-style latin1 database stores UTF-8 rather than mangling it"; exit 1; }
+          [ "$emoji" -ge 1 ] || { echo "::error::no 4-byte emoji found in any article body - the canary is 👍 in seeds/0020_dart_course.sql. Four-byte characters are what utf8 (3-byte) silently truncates and utf8mb4 does not, so this is a different test from the one above"; exit 1; }
+          [ "$doubled" -eq "$authored" ] || { echo "::error::the database holds $doubled mangled character(s) and the seeds authored $authored - the import double-encoded UTF-8"; exit 1; }
 
           # verify.sh includes the column-charset check, which is what fails
           # when this regresses: it names every column that cannot hold utf8mb4.
