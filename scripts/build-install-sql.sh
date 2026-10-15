@@ -19,6 +19,27 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 OUT="dist/install.sql"
+
+# Optional. When set, the file opens with USE `<name>`, pinning the import to
+# that database instead of trusting whichever one the client has selected.
+#
+#   INSTALL_DB=gainglyi_learningdb ./scripts/build-install-sql.sh
+#
+# The same escape hatch content.sql has, and for the same host. phpMyAdmin
+# there said "Importing into the database gainglyi_learningdb" at the top of
+# the page while DATABASE() evaluated to information_schema inside the import -
+# so the file's own statements ran against a database nobody chose, and
+# information_schema is read-only. For content.sql that showed up as a
+# preflight reading an empty schema; here it would be the first CREATE TABLE
+# failing, with the whole install behind it.
+#
+# USE does not depend on whatever selects the database on that host: it sets
+# the default from inside the file, where the file can see it.
+#
+# Left empty the file behaves as before and follows the client's selection,
+# which is right for anyone whose client selects what it displays.
+INSTALL_DB="${INSTALL_DB:-}"
+
 mkdir -p dist
 
 {
@@ -91,6 +112,14 @@ SET time_zone = '+00:00';
 SET sql_mode = 'STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
 
 HEADER
+
+  # Before anything that touches a table, including the precheck. Backticked,
+  # so a database called `order` or one with a hyphen still parses.
+  if [ -n "$INSTALL_DB" ]; then
+    printf -- '-- Pinned to one database, so the import does not depend on the client\n'
+    printf -- '-- having selected it. Edit the name here if you import elsewhere.\n'
+    printf -- 'USE `%s`;\n\n' "$INSTALL_DB"
+  fi
 
   # Stop, in words, if a real person has an account in this database.
   #

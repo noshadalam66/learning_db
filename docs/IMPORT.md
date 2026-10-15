@@ -230,5 +230,29 @@ moment a seed changes. After pulling the branch:
 ./scripts/build-content-sql.sh 0037 0039  # or just a range
 ```
 
-The migration is already in the repository at
-`migrations/0016_editorial_posts.sql`.
+## Migrations, which content.sql does not carry
+
+`content.sql` is seeds only - it never creates or alters a table. Anything that
+changes the shape of the database is a file in `migrations/`, imported the same
+way and **before** the content.
+
+These are the ones the live database has not had. Import them in this order,
+each one on its own, through the same Import tab:
+
+| File | What it adds |
+| --- | --- |
+| `migrations/0014_diagrams_and_overview.sql` | A course overview, and the concept diagrams that replaced video. |
+| `migrations/0016_editorial_posts.sql` | `content_editorial_posts`: course guides and blog posts. |
+| `migrations/0017_authoring_in_the_admin_panel.sql` | What the panel needs to write a course: a topic's compiler, image and comment switch, and the comments themselves. |
+| `migrations/0018_editorial_presentation.sql` | A picture at the top of a post, and the two typographic choices the panel offers. |
+| `migrations/0019_blog_post_may_name_a_course.sql` | Lets a blog post name the course it is about, so it can be listed at the end of that course. |
+
+A file that was already imported says so rather than doing damage: a repeated
+`ALTER TABLE ... ADD COLUMN` fails with **#1060 Duplicate column name**, and a
+repeated `CREATE TABLE` is skipped by `IF NOT EXISTS`. Either means "already
+applied" - move to the next file.
+
+0019 is the one exception worth knowing about: it drops a constraint by name,
+so importing it twice fails with a message about
+`ck_editorial_course_matches_kind` not existing. That too means it is already
+applied.

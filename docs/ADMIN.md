@@ -121,9 +121,21 @@ until it expires, which is fifteen minutes.
 
 ## What the role actually opens
 
-Today, one read-only page. `/ap/admin_panel/dashboard` counts registrations,
-courses, enrolments, completions and quiz attempts, and `admin` is also what
-the API requires for:
+The panel writes the site. It began as one read-only page and is now where a
+course is made:
+
+| Page | What it does |
+|---|---|
+| `/ap/admin_panel/dashboard` | registrations, courses, enrolments, completions and quiz attempts |
+| `/ap/admin_panel/groups` | course groups — Backend Development, Databases and the rest |
+| `/ap/admin_panel/courses` | every course, drafts included; create, edit, publish, delete |
+| `/ap/admin_panel/course_structure` | the sections of a course and the topics in each |
+| `/ap/admin_panel/topic_form` | one topic: its text, example code, compiler, image and whether it takes comments |
+| `/ap/admin_panel/exercise_form` | the questions after a topic, each taking one answer or several |
+| `/ap/admin_panel/comments` | what learners wrote, and hiding any of it |
+| `/ap/admin_panel/posts` | blog posts and course guides, with the face and weight each is set in |
+
+`admin` is also what the API requires for:
 
 | Endpoint | What it does |
 |---|---|
@@ -134,11 +146,13 @@ the API requires for:
 | `GET /api/users` | list accounts |
 | `GET /api/users/roles` | list the roles |
 | `POST /api/users/{id}/roles` | grant a role to somebody else |
+| `POST`, `PATCH`, `DELETE` on `/api/courses`, `/api/structure`, `/api/quizzes` | writing a course |
+| `POST`, `PATCH`, `DELETE` on `/api/content/posts` | writing a guide or a blog post |
 
-That last one means an administrator can make another administrator through the
-API without touching the database again. Nothing in the dashboard does it —
-the panel reports and does not edit — but the role carries the permission, so
-grant it deliberately.
+`POST /api/users/{id}/roles` means an administrator can make another
+administrator through the API without touching the database again. Nothing in
+the panel does it, but the role carries the permission, so grant it
+deliberately.
 
 ## Why the address of the panel is not the point
 
